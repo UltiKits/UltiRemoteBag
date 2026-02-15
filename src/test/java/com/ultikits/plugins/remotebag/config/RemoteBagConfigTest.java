@@ -228,6 +228,182 @@ class RemoteBagConfigTest {
         }
     }
 
+    @Nested
+    @DisplayName("Message Defaults")
+    class MessageDefaults {
+
+        @Test
+        @DisplayName("Should have default no permission message")
+        void noPermissionMessage() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getNoPermissionMessage()).contains("没有权限");
+        }
+
+        @Test
+        @DisplayName("Should have default page locked message")
+        void pageLockedMessage() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getPageLockedMessage()).contains("{PAGE}");
+        }
+
+        @Test
+        @DisplayName("Should have default bag saved message")
+        void bagSavedMessage() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getBagSavedMessage()).contains("保存");
+        }
+    }
+
+    @Nested
+    @DisplayName("Sound Defaults")
+    class SoundDefaults {
+
+        @Test
+        @DisplayName("Should have default open sound")
+        void openSound() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getOpenSound()).isEqualTo("BLOCK_CHEST_OPEN");
+        }
+
+        @Test
+        @DisplayName("Should have default close sound")
+        void closeSound() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getCloseSound()).isEqualTo("BLOCK_CHEST_CLOSE");
+        }
+
+        @Test
+        @DisplayName("Should have default purchase sound")
+        void purchaseSound() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getPurchaseSound()).isEqualTo("ENTITY_PLAYER_LEVELUP");
+        }
+
+        @Test
+        @DisplayName("Should have default error sound")
+        void errorSound() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getErrorSound()).isEqualTo("ENTITY_VILLAGER_NO");
+        }
+
+        @Test
+        @DisplayName("Should have default sound volume")
+        void soundVolume() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getSoundVolume()).isEqualTo(1.0);
+        }
+
+        @Test
+        @DisplayName("Should have default sound pitch")
+        void soundPitch() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getSoundPitch()).isEqualTo(1.0);
+        }
+    }
+
+    @Nested
+    @DisplayName("Message Setters")
+    class MessageSetters {
+
+        @Test
+        @DisplayName("Should update no permission message")
+        void setNoPermissionMessage() {
+            RemoteBagConfig config = createRealConfig();
+            config.setNoPermissionMessage("&cNo Permission!");
+            assertThat(config.getNoPermissionMessage()).isEqualTo("&cNo Permission!");
+        }
+
+        @Test
+        @DisplayName("Should update page locked message")
+        void setPageLockedMessage() {
+            RemoteBagConfig config = createRealConfig();
+            config.setPageLockedMessage("&cLocked!");
+            assertThat(config.getPageLockedMessage()).isEqualTo("&cLocked!");
+        }
+
+        @Test
+        @DisplayName("Should update bag saved message")
+        void setBagSavedMessage() {
+            RemoteBagConfig config = createRealConfig();
+            config.setBagSavedMessage("&aSaved!");
+            assertThat(config.getBagSavedMessage()).isEqualTo("&aSaved!");
+        }
+    }
+
+    @Nested
+    @DisplayName("Sound Setters")
+    class SoundSetters {
+
+        @Test
+        @DisplayName("Should update open sound")
+        void setOpenSound() {
+            RemoteBagConfig config = createRealConfig();
+            config.setOpenSound("CUSTOM_SOUND");
+            assertThat(config.getOpenSound()).isEqualTo("CUSTOM_SOUND");
+        }
+
+        @Test
+        @DisplayName("Should update close sound")
+        void setCloseSound() {
+            RemoteBagConfig config = createRealConfig();
+            config.setCloseSound("CUSTOM_CLOSE");
+            assertThat(config.getCloseSound()).isEqualTo("CUSTOM_CLOSE");
+        }
+
+        @Test
+        @DisplayName("Should update purchase sound")
+        void setPurchaseSound() {
+            RemoteBagConfig config = createRealConfig();
+            config.setPurchaseSound("CUSTOM_PURCHASE");
+            assertThat(config.getPurchaseSound()).isEqualTo("CUSTOM_PURCHASE");
+        }
+
+        @Test
+        @DisplayName("Should update error sound")
+        void setErrorSound() {
+            RemoteBagConfig config = createRealConfig();
+            config.setErrorSound("CUSTOM_ERROR");
+            assertThat(config.getErrorSound()).isEqualTo("CUSTOM_ERROR");
+        }
+
+        @Test
+        @DisplayName("Should update sound volume")
+        void setSoundVolume() {
+            RemoteBagConfig config = createRealConfig();
+            config.setSoundVolume(0.5);
+            assertThat(config.getSoundVolume()).isEqualTo(0.5);
+        }
+
+        @Test
+        @DisplayName("Should update sound pitch")
+        void setSoundPitch() {
+            RemoteBagConfig config = createRealConfig();
+            config.setSoundPitch(1.5);
+            assertThat(config.getSoundPitch()).isEqualTo(1.5);
+        }
+    }
+
+    @Nested
+    @DisplayName("GUI Title")
+    class GuiTitleTests {
+
+        @Test
+        @DisplayName("Should have default GUI title with placeholders")
+        void defaultGuiTitle() {
+            RemoteBagConfig config = createRealConfig();
+            assertThat(config.getGuiTitle()).contains("{PAGE}");
+            assertThat(config.getGuiTitle()).contains("{MAX}");
+        }
+
+        @Test
+        @DisplayName("Should update GUI title")
+        void setGuiTitle() {
+            RemoteBagConfig config = createRealConfig();
+            config.setGuiTitle("&bCustom Title");
+            assertThat(config.getGuiTitle()).isEqualTo("&bCustom Title");
+        }
+    }
+
     /**
      * Create a real RemoteBagConfig using a mock path to avoid AbstractConfigEntity I/O.
      * We use Mockito spy to bypass the superclass constructor's file loading.

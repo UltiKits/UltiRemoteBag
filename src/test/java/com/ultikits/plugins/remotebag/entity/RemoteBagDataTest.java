@@ -198,5 +198,216 @@ class RemoteBagDataTest {
             assertThat(str).contains("uuid-123");
             assertThat(str).contains("5");
         }
+
+        @Test
+        @DisplayName("Builder should have toString")
+        void builderToString() {
+            String str = RemoteBagData.builder()
+                    .playerUuid("uuid-builder")
+                    .toString();
+            assertThat(str).isNotNull();
+            assertThat(str).contains("uuid-builder");
+        }
+    }
+
+    @Nested
+    @DisplayName("Equals Edge Cases")
+    class EqualsEdgeCases {
+
+        @Test
+        @DisplayName("Should equal itself")
+        void equalsItself() {
+            RemoteBagData data = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents("test")
+                    .lastUpdated(1000L)
+                    .build();
+
+            assertThat(data).isEqualTo(data);
+        }
+
+        @Test
+        @DisplayName("Should not equal null")
+        void notEqualToNull() {
+            RemoteBagData data = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .build();
+
+            assertThat(data).isNotEqualTo(null);
+        }
+
+        @Test
+        @DisplayName("Should not equal different type")
+        void notEqualToDifferentType() {
+            RemoteBagData data = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .build();
+
+            assertThat(data).isNotEqualTo("not a data object");
+        }
+
+        @Test
+        @DisplayName("Should not equal when different contents")
+        void notEqualDifferentContents() {
+            RemoteBagData a = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents("content-a")
+                    .lastUpdated(1000L)
+                    .build();
+            RemoteBagData b = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents("content-b")
+                    .lastUpdated(1000L)
+                    .build();
+
+            assertThat(a).isNotEqualTo(b);
+        }
+
+        @Test
+        @DisplayName("Should not equal when different lastUpdated")
+        void notEqualDifferentTimestamp() {
+            RemoteBagData a = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents("same")
+                    .lastUpdated(1000L)
+                    .build();
+            RemoteBagData b = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents("same")
+                    .lastUpdated(2000L)
+                    .build();
+
+            assertThat(a).isNotEqualTo(b);
+        }
+
+        @Test
+        @DisplayName("HashCode should be same for equal objects")
+        void hashCodeConsistent() {
+            RemoteBagData a = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents("content")
+                    .lastUpdated(1000L)
+                    .build();
+            RemoteBagData b = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents("content")
+                    .lastUpdated(1000L)
+                    .build();
+
+            assertThat(a.hashCode()).isEqualTo(b.hashCode());
+        }
+
+        @Test
+        @DisplayName("Should handle null contents equality")
+        void handlesNullContents() {
+            RemoteBagData a = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents(null)
+                    .build();
+            RemoteBagData b = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents(null)
+                    .build();
+
+            assertThat(a).isEqualTo(b);
+        }
+
+        @Test
+        @DisplayName("Should not equal when one has null contents and other does not")
+        void notEqualNullVsNonNull() {
+            RemoteBagData a = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents(null)
+                    .build();
+            RemoteBagData b = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .contents("non-null")
+                    .build();
+
+            assertThat(a).isNotEqualTo(b);
+        }
+
+        @Test
+        @DisplayName("Should handle null playerUuid equality")
+        void handlesNullPlayerUuid() {
+            RemoteBagData a = RemoteBagData.builder()
+                    .playerUuid(null)
+                    .pageNumber(1)
+                    .build();
+            RemoteBagData b = RemoteBagData.builder()
+                    .playerUuid(null)
+                    .pageNumber(1)
+                    .build();
+
+            assertThat(a).isEqualTo(b);
+            assertThat(a.hashCode()).isEqualTo(b.hashCode());
+        }
+
+        @Test
+        @DisplayName("Should not equal when one has null playerUuid and other does not")
+        void notEqualNullVsNonNullPlayerUuid() {
+            RemoteBagData a = RemoteBagData.builder()
+                    .playerUuid(null)
+                    .pageNumber(1)
+                    .build();
+            RemoteBagData b = RemoteBagData.builder()
+                    .playerUuid("uuid-1")
+                    .pageNumber(1)
+                    .build();
+
+            assertThat(a).isNotEqualTo(b);
+        }
+
+        @Test
+        @DisplayName("HashCode should be consistent for objects with all null fields")
+        void hashCodeWithAllNullFields() {
+            RemoteBagData a = RemoteBagData.builder()
+                    .playerUuid(null)
+                    .contents(null)
+                    .pageNumber(0)
+                    .lastUpdated(0L)
+                    .build();
+            RemoteBagData b = RemoteBagData.builder()
+                    .playerUuid(null)
+                    .contents(null)
+                    .pageNumber(0)
+                    .lastUpdated(0L)
+                    .build();
+
+            assertThat(a.hashCode()).isEqualTo(b.hashCode());
+        }
+    }
+
+    @Nested
+    @DisplayName("canEqual")
+    class CanEqual {
+
+        @Test
+        @DisplayName("Should be compatible with subclass equals")
+        void canEqualWorks() {
+            RemoteBagData data = new RemoteBagData();
+            RemoteBagData other = new RemoteBagData();
+            assertThat(data.canEqual(other)).isTrue();
+        }
+
+        @Test
+        @DisplayName("Should not canEqual non-RemoteBagData")
+        void canNotEqualOtherType() {
+            RemoteBagData data = new RemoteBagData();
+            assertThat(data.canEqual("string")).isFalse();
+        }
     }
 }

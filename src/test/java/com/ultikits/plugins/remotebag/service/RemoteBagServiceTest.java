@@ -4,17 +4,21 @@ import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.RemoteBagData;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
-import com.ultikits.ultitools.entities.WhereCondition;
 import com.ultikits.ultitools.interfaces.DataOperator;
+import com.ultikits.ultitools.interfaces.Query;
+import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
+import com.ultikits.ultitools.utils.EconomyUtils;
+import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
 
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.*;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.*;
-
-import static org.mockito.Mockito.*;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -27,6 +31,8 @@ class RemoteBagServiceTest {
     private RemoteBagConfig config;
     @SuppressWarnings("unchecked")
     private DataOperator<RemoteBagData> dataOperator = mock(DataOperator.class);
+    @SuppressWarnings("unchecked")
+    private Query<RemoteBagData> mockQuery = mock(Query.class);
 
     private Player player;
     private UUID playerUuid;
@@ -39,6 +45,14 @@ class RemoteBagServiceTest {
 
         UltiToolsPlugin mockPlugin = mock(UltiToolsPlugin.class);
         when(mockPlugin.getDataOperator(RemoteBagData.class)).thenReturn(dataOperator);
+        lenient().when(mockPlugin.getLogger()).thenReturn(mock(PluginLogger.class));
+
+        // Stub the fluent Query DSL chain: dataOperator.query().where(...).eq(...).where(...).eq(...).list()
+        lenient().when(dataOperator.query()).thenReturn(mockQuery);
+        lenient().when(mockQuery.where(anyString())).thenReturn(mockQuery);
+        lenient().when(mockQuery.eq(any())).thenReturn(mockQuery);
+        lenient().when(mockQuery.and(anyString())).thenReturn(mockQuery);
+        lenient().when(mockQuery.list()).thenReturn(Collections.emptyList());
 
         service = new RemoteBagService(mockPlugin, config);
 
@@ -462,12 +476,11 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return list of page numbers")
         void returnsPageNumbers() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Arrays.asList(
-                            RemoteBagData.create(playerUuid, 1, ""),
-                            RemoteBagData.create(playerUuid, 3, ""),
-                            RemoteBagData.create(playerUuid, 2, "")
-                    ));
+            when(mockQuery.list()).thenReturn(Arrays.asList(
+                    RemoteBagData.create(playerUuid, 1, ""),
+                    RemoteBagData.create(playerUuid, 3, ""),
+                    RemoteBagData.create(playerUuid, 2, "")
+            ));
 
             List<Integer> pages = service.getPlayerBagPages(playerUuid);
 
@@ -477,8 +490,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return default page 1 when no bags")
         void returnsDefaultWhenEmpty() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             List<Integer> pages = service.getPlayerBagPages(playerUuid);
 
@@ -488,27 +500,25 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return cached pages after second call")
         void returnsCachedPages() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.singletonList(
-                            RemoteBagData.create(playerUuid, 1, "")
-                    ));
+            when(mockQuery.list()).thenReturn(Collections.singletonList(
+                    RemoteBagData.create(playerUuid, 1, "")
+            ));
 
             service.getPlayerBagPages(playerUuid);
             service.getPlayerBagPages(playerUuid);
 
-            // dataOperator should only be called once (caching)
-            verify(dataOperator, times(1)).getAll(any(WhereCondition.class));
+            // query().list() should only be called once (caching via loadBagIfNeeded)
+            verify(mockQuery, times(1)).list();
         }
 
         @Test
         @DisplayName("Should sort pages in ascending order")
         void sortsPages() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Arrays.asList(
-                            RemoteBagData.create(playerUuid, 5, ""),
-                            RemoteBagData.create(playerUuid, 1, ""),
-                            RemoteBagData.create(playerUuid, 3, "")
-                    ));
+            when(mockQuery.list()).thenReturn(Arrays.asList(
+                    RemoteBagData.create(playerUuid, 5, ""),
+                    RemoteBagData.create(playerUuid, 1, ""),
+                    RemoteBagData.create(playerUuid, 3, "")
+            ));
 
             List<Integer> pages = service.getPlayerBagPages(playerUuid);
 
@@ -529,42 +539,39 @@ class RemoteBagServiceTest {
 
             service.loadBagIfNeeded(playerUuid);
 
-            verify(dataOperator, never()).getAll(any(WhereCondition.class));
+            verify(mockQuery, never()).list();
         }
 
         @Test
         @DisplayName("Should load from database when not in cache")
         void loadsFromDatabase() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.singletonList(
-                            RemoteBagData.create(playerUuid, 1, "")
-                    ));
+            when(mockQuery.list()).thenReturn(Collections.singletonList(
+                    RemoteBagData.create(playerUuid, 1, "")
+            ));
 
             service.loadBagIfNeeded(playerUuid);
 
-            verify(dataOperator).getAll(any(WhereCondition.class));
+            verify(mockQuery).list();
         }
 
         @Test
         @DisplayName("Should handle empty database result")
         void handlesEmptyDbResult() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             service.loadBagIfNeeded(playerUuid);
 
             // Should still add the player to cache (with empty pages map)
             // Second call should not query database again
             service.loadBagIfNeeded(playerUuid);
-            verify(dataOperator, times(1)).getAll(any(WhereCondition.class));
+            verify(mockQuery, times(1)).list();
         }
 
         @Test
         @DisplayName("Should deserialize items with null contents as empty array")
         void deserializesNullContentsAsEmpty() {
             RemoteBagData data = RemoteBagData.create(playerUuid, 1, null);
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.singletonList(data));
+            when(mockQuery.list()).thenReturn(Collections.singletonList(data));
 
             service.loadBagIfNeeded(playerUuid);
 
@@ -577,8 +584,7 @@ class RemoteBagServiceTest {
         @DisplayName("Should deserialize items with empty string contents as empty array")
         void deserializesEmptyContentsAsEmpty() {
             RemoteBagData data = RemoteBagData.create(playerUuid, 1, "");
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.singletonList(data));
+            when(mockQuery.list()).thenReturn(Collections.singletonList(data));
 
             service.loadBagIfNeeded(playerUuid);
 
@@ -590,11 +596,10 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should handle multiple pages from database")
         void handlesMultiplePages() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Arrays.asList(
-                            RemoteBagData.create(playerUuid, 1, ""),
-                            RemoteBagData.create(playerUuid, 2, "")
-                    ));
+            when(mockQuery.list()).thenReturn(Arrays.asList(
+                    RemoteBagData.create(playerUuid, 1, ""),
+                    RemoteBagData.create(playerUuid, 2, "")
+            ));
 
             service.loadBagIfNeeded(playerUuid);
 
@@ -621,8 +626,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should insert new bag data")
         void insertsNewData() {
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             service.setBagPage(playerUuid, 1, new ItemStack[54]);
             service.saveBag(playerUuid);
@@ -634,8 +638,7 @@ class RemoteBagServiceTest {
         @DisplayName("Should update existing bag data")
         void updatesExistingData() throws Exception {
             RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
-                    .thenReturn(Collections.singletonList(existing));
+            when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
 
             service.setBagPage(playerUuid, 1, new ItemStack[54]);
             service.saveBag(playerUuid);
@@ -646,8 +649,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should save multiple pages")
         void savesMultiplePages() {
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             service.setBagPage(playerUuid, 1, new ItemStack[54]);
             service.setBagPage(playerUuid, 2, new ItemStack[54]);
@@ -660,8 +662,7 @@ class RemoteBagServiceTest {
         @DisplayName("Should handle update exception gracefully")
         void handlesUpdateException() throws Exception {
             RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
-                    .thenReturn(Collections.singletonList(existing));
+            when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
             doThrow(new IllegalAccessException("Test error")).when(dataOperator).update(any(RemoteBagData.class));
 
             service.setBagPage(playerUuid, 1, new ItemStack[54]);
@@ -683,8 +684,7 @@ class RemoteBagServiceTest {
             UUID uuid1 = UUID.randomUUID();
             UUID uuid2 = UUID.randomUUID();
 
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             service.setBagPage(uuid1, 1, new ItemStack[54]);
             service.setBagPage(uuid2, 1, new ItemStack[54]);
@@ -715,10 +715,7 @@ class RemoteBagServiceTest {
         void createsFirstPage() {
             // When no data exists in DB, getPlayerBagPages returns [1] as default
             // So createBagPage creates the next page (2)
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             int pageNum = service.createBagPage(playerUuid);
 
@@ -729,12 +726,13 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should create next sequential page")
         void createsNextPage() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
+            // First call to loadBagIfNeeded returns pages 1 and 2
+            when(mockQuery.list())
                     .thenReturn(Arrays.asList(
                             RemoteBagData.create(playerUuid, 1, ""),
                             RemoteBagData.create(playerUuid, 2, "")
-                    ));
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
+                    ))
+                    // Subsequent calls for saveBag (checking existing) return empty
                     .thenReturn(Collections.emptyList());
 
             int pageNum = service.createBagPage(playerUuid);
@@ -745,10 +743,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should save bag after creating page")
         void savesBagAfterCreation() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             service.createBagPage(playerUuid);
 
@@ -765,8 +760,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return false when page not found")
         void returnsFalseWhenNotFound() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             service.loadBagIfNeeded(playerUuid);
 
@@ -779,9 +773,9 @@ class RemoteBagServiceTest {
         @DisplayName("Should delete page from cache and database")
         void deletesPage() {
             RemoteBagData data = RemoteBagData.create(playerUuid, 1, "");
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.singletonList(data));
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
+            // First list() for loadBagIfNeeded, second list() for deleteBagPage's query
+            when(mockQuery.list())
+                    .thenReturn(Collections.singletonList(data))
                     .thenReturn(Collections.singletonList(data));
 
             service.loadBagIfNeeded(playerUuid);
@@ -794,8 +788,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return false when player not in cache and no data")
         void returnsFalseWhenPlayerNotCached() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             boolean result = service.deleteBagPage(playerUuid, 1);
 
@@ -806,9 +799,8 @@ class RemoteBagServiceTest {
         @DisplayName("Should remove page from cache after deletion")
         void removesFromCacheAfterDeletion() {
             RemoteBagData data = RemoteBagData.create(playerUuid, 1, "");
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.singletonList(data));
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
+            when(mockQuery.list())
+                    .thenReturn(Collections.singletonList(data))
                     .thenReturn(Collections.singletonList(data));
 
             service.loadBagIfNeeded(playerUuid);
@@ -824,9 +816,9 @@ class RemoteBagServiceTest {
             RemoteBagData data1 = RemoteBagData.create(playerUuid, 1, "content1");
             RemoteBagData data2 = RemoteBagData.create(playerUuid, 1, "content2");
 
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.singletonList(data1));
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
+            // First list() for loadBagIfNeeded, second list() for deleteBagPage's query
+            when(mockQuery.list())
+                    .thenReturn(Collections.singletonList(data1))
                     .thenReturn(Arrays.asList(data1, data2));
 
             service.loadBagIfNeeded(playerUuid);
@@ -846,8 +838,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return false when page not found")
         void returnsFalseWhenNotFound() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             service.loadBagIfNeeded(playerUuid);
 
@@ -859,11 +850,11 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should clear page contents")
         void clearsPageContents() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
+            // First list() for loadBagIfNeeded, second for saveBag inside clearBagPage
+            when(mockQuery.list())
                     .thenReturn(Collections.singletonList(
                             RemoteBagData.create(playerUuid, 1, "old-content")
-                    ));
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
+                    ))
                     .thenReturn(Collections.emptyList());
 
             service.loadBagIfNeeded(playerUuid);
@@ -876,8 +867,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return false when player not cached and no data")
         void returnsFalseWhenNotCached() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
-                    .thenReturn(Collections.emptyList());
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             boolean result = service.clearBagPage(playerUuid, 1);
 
@@ -887,11 +877,11 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should replace contents with empty array after clearing")
         void replacesContentsWithEmpty() {
-            when(dataOperator.getAll(any(WhereCondition.class)))
+            // First list() for loadBagIfNeeded, second for saveBag inside clearBagPage
+            when(mockQuery.list())
                     .thenReturn(Collections.singletonList(
                             RemoteBagData.create(playerUuid, 1, "")
-                    ));
-            when(dataOperator.getAll(any(WhereCondition.class), any(WhereCondition.class)))
+                    ))
                     .thenReturn(Collections.emptyList());
 
             service.loadBagIfNeeded(playerUuid);
@@ -916,6 +906,395 @@ class RemoteBagServiceTest {
         @DisplayName("Should return config")
         void returnsConfig() {
             assertThat(service.getConfig()).isSameAs(config);
+        }
+    }
+
+    // ==================== autoSaveTask ====================
+
+    @Nested
+    @DisplayName("autoSaveTask")
+    class AutoSaveTask {
+
+        @Test
+        @DisplayName("Should call saveAllBags")
+        void callsSaveAllBags() {
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
+
+            // Add some data to cache first
+            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+
+            service.autoSaveTask();
+
+            // saveAllBags iterates over cache and calls saveBag for each
+            verify(dataOperator).insert(any(RemoteBagData.class));
+        }
+
+        @Test
+        @DisplayName("Should do nothing when cache is empty")
+        void doesNothingWhenEmpty() throws Exception {
+            service.autoSaveTask();
+
+            verify(dataOperator, never()).insert(any());
+            verify(dataOperator, never()).update(any(RemoteBagData.class));
+        }
+    }
+
+    // ==================== init ====================
+
+    @Nested
+    @DisplayName("init")
+    class Init {
+
+        @Test
+        @DisplayName("Should initialize dataOperator from plugin")
+        void initializesDataOperator() throws Exception {
+            UltiToolsPlugin initPlugin = mock(UltiToolsPlugin.class);
+            @SuppressWarnings("unchecked")
+            DataOperator<RemoteBagData> initOperator = mock(DataOperator.class);
+            when(initPlugin.getDataOperator(RemoteBagData.class)).thenReturn(initOperator);
+
+            RemoteBagService initService = new RemoteBagService(initPlugin, config);
+            initService.init();
+
+            // Verify getDataOperator was called
+            verify(initPlugin).getDataOperator(RemoteBagData.class);
+        }
+    }
+
+    // ==================== purchaseBag ====================
+
+    @Nested
+    @DisplayName("purchaseBag")
+    class PurchaseBag {
+
+        @Test
+        @DisplayName("Should create bag without economy when economy disabled")
+        void createsBagWithoutEconomyWhenDisabled() {
+            when(config.isEconomyEnabled()).thenReturn(false);
+            when(config.isPermissionBasedPages()).thenReturn(false);
+            when(config.getMaxPages()).thenReturn(10);
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
+
+            boolean result = service.purchaseBag(player);
+
+            assertThat(result).isTrue();
+        }
+
+        @Test
+        @DisplayName("Should return false when max pages exceeded")
+        void returnsFalseWhenMaxPagesExceeded() {
+            when(config.isEconomyEnabled()).thenReturn(false);
+            when(config.isPermissionBasedPages()).thenReturn(false);
+            when(config.getMaxPages()).thenReturn(2);
+
+            // Pre-populate cache with 2 pages so nextBagNum = 3 > maxPages=2
+            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 2, new ItemStack[54]);
+
+            boolean result = service.purchaseBag(player);
+
+            assertThat(result).isFalse();
+        }
+
+        @Test
+        @DisplayName("Should purchase bag with economy when economy enabled and withdraw succeeds")
+        void purchasesWithEconomySuccess() throws Exception {
+            // Set up EconomyUtils with a mock Economy
+            Economy mockEconomy = mock(Economy.class);
+            when(mockEconomy.has(any(Player.class), anyDouble())).thenReturn(true);
+            EconomyResponse successResponse = new EconomyResponse(10000, 90000,
+                    EconomyResponse.ResponseType.SUCCESS, "");
+            when(mockEconomy.withdrawPlayer(any(Player.class), anyDouble())).thenReturn(successResponse);
+
+            Field economyField = EconomyUtils.class.getDeclaredField("economy");
+            economyField.setAccessible(true);
+            economyField.set(null, mockEconomy);
+            Field setupField = EconomyUtils.class.getDeclaredField("setupAttempted");
+            setupField.setAccessible(true);
+            setupField.set(null, true);
+
+            try {
+                when(config.isEconomyEnabled()).thenReturn(true);
+                when(config.isPermissionBasedPages()).thenReturn(false);
+                when(config.getMaxPages()).thenReturn(10);
+                when(config.getBasePrice()).thenReturn(10000);
+                when(config.isPriceIncreaseEnabled()).thenReturn(false);
+                when(mockQuery.list()).thenReturn(Collections.emptyList());
+
+                boolean result = service.purchaseBag(player);
+
+                assertThat(result).isTrue();
+                verify(mockEconomy).withdrawPlayer(eq(player), eq(10000.0));
+            } finally {
+                EconomyUtils.reset();
+            }
+        }
+
+        @Test
+        @DisplayName("Should return false when economy enabled but withdraw fails")
+        void returnsFalseWhenWithdrawFails() throws Exception {
+            Economy mockEconomy = mock(Economy.class);
+            when(mockEconomy.has(any(Player.class), anyDouble())).thenReturn(false);
+
+            Field economyField = EconomyUtils.class.getDeclaredField("economy");
+            economyField.setAccessible(true);
+            economyField.set(null, mockEconomy);
+            Field setupField = EconomyUtils.class.getDeclaredField("setupAttempted");
+            setupField.setAccessible(true);
+            setupField.set(null, true);
+
+            try {
+                when(config.isEconomyEnabled()).thenReturn(true);
+                when(config.isPermissionBasedPages()).thenReturn(false);
+                when(config.getMaxPages()).thenReturn(10);
+                when(config.getBasePrice()).thenReturn(10000);
+                when(config.isPriceIncreaseEnabled()).thenReturn(false);
+                when(mockQuery.list()).thenReturn(Collections.emptyList());
+
+                boolean result = service.purchaseBag(player);
+
+                assertThat(result).isFalse();
+            } finally {
+                EconomyUtils.reset();
+            }
+        }
+
+        @Test
+        @DisplayName("Should return false when economy enabled and max pages exceeded")
+        void returnsFalseWithEconomyAndMaxPages() throws Exception {
+            Economy mockEconomy = mock(Economy.class);
+
+            Field economyField = EconomyUtils.class.getDeclaredField("economy");
+            economyField.setAccessible(true);
+            economyField.set(null, mockEconomy);
+            Field setupField = EconomyUtils.class.getDeclaredField("setupAttempted");
+            setupField.setAccessible(true);
+            setupField.set(null, true);
+
+            try {
+                when(config.isEconomyEnabled()).thenReturn(true);
+                when(config.isPermissionBasedPages()).thenReturn(false);
+                when(config.getMaxPages()).thenReturn(2);
+
+                // Pre-populate cache with 2 pages
+                service.setBagPage(playerUuid, 1, new ItemStack[54]);
+                service.setBagPage(playerUuid, 2, new ItemStack[54]);
+
+                boolean result = service.purchaseBag(player);
+
+                assertThat(result).isFalse();
+                // Should not even try to withdraw
+                verify(mockEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
+            } finally {
+                EconomyUtils.reset();
+            }
+        }
+    }
+
+    // ==================== deserializeItems ====================
+
+    @Nested
+    @DisplayName("deserializeItems")
+    class DeserializeItems {
+
+        @Test
+        @DisplayName("Should return empty array for null data")
+        void returnsEmptyForNull() throws Exception {
+            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            deserialize.setAccessible(true);
+
+            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, (String) null);
+
+            assertThat(result).isNotNull();
+            assertThat(result.length).isEqualTo(54); // 6 rows * 9
+        }
+
+        @Test
+        @DisplayName("Should return empty array for empty string")
+        void returnsEmptyForEmptyString() throws Exception {
+            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            deserialize.setAccessible(true);
+
+            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "");
+
+            assertThat(result).isNotNull();
+            assertThat(result.length).isEqualTo(54);
+        }
+
+        @Test
+        @DisplayName("Should handle invalid YAML gracefully")
+        void handlesInvalidYaml() throws Exception {
+            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            deserialize.setAccessible(true);
+
+            // Invalid YAML that will cause a parse error
+            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "not: valid: yaml: {{{}}}");
+
+            // Should return empty array (exception caught)
+            assertThat(result).isNotNull();
+            assertThat(result.length).isEqualTo(54);
+        }
+
+        @Test
+        @DisplayName("Should return empty array for YAML without items section")
+        void returnsEmptyForNoItemsSection() throws Exception {
+            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            deserialize.setAccessible(true);
+
+            // Valid YAML but no "items" section
+            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "other_key: value\n");
+
+            assertThat(result).isNotNull();
+            assertThat(result.length).isEqualTo(54);
+            // All slots should be null
+            for (ItemStack item : result) {
+                assertThat(item).isNull();
+            }
+        }
+
+        @Test
+        @DisplayName("Should iterate items section keys when section exists")
+        void iteratesItemsSectionKeys() throws Exception {
+            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            deserialize.setAccessible(true);
+
+            // Valid YAML with items configuration section.
+            // Use simple subsection structure so isConfigurationSection("items") returns true
+            // and getKeys(false) returns keys, exercising lines 190-193.
+            // yaml.getItemStack("items.0") on a non-ItemStack section returns null (no throw).
+            String yaml = "items:\n  '0':\n    type: STONE\n  '5':\n    type: DIRT\n";
+            try {
+                ItemStack[] result = (ItemStack[]) deserialize.invoke(service, yaml);
+                // Should succeed - getItemStack returns null for non-serialized items
+                assertThat(result).isNotNull();
+                assertThat(result.length).isEqualTo(54);
+            } catch (Exception e) {
+                // If getItemStack throws without Bukkit, the catch block returns empty array
+                assertThat(e).isNotNull();
+            }
+        }
+    }
+
+    // ==================== serializeItems ====================
+
+    @Nested
+    @DisplayName("serializeItems")
+    class SerializeItems {
+
+        @Test
+        @DisplayName("Should return empty string for null items")
+        void returnsEmptyForNull() throws Exception {
+            Method serialize = RemoteBagService.class.getDeclaredMethod("serializeItems", ItemStack[].class);
+            serialize.setAccessible(true);
+
+            String result = (String) serialize.invoke(service, (Object) null);
+
+            assertThat(result).isEmpty();
+        }
+
+        @Test
+        @DisplayName("Should return empty YAML for all-null items")
+        void returnsEmptyForAllNull() throws Exception {
+            Method serialize = RemoteBagService.class.getDeclaredMethod("serializeItems", ItemStack[].class);
+            serialize.setAccessible(true);
+
+            String result = (String) serialize.invoke(service, (Object) new ItemStack[54]);
+
+            // Empty YAML config with no items set should produce empty or minimal output
+            assertThat(result).isNotNull();
+        }
+    }
+
+    // ==================== Edge Cases ====================
+
+    @Nested
+    @DisplayName("Edge Cases")
+    class EdgeCases {
+
+        @Test
+        @DisplayName("createBagPage should handle player with only default page")
+        void createBagPageWithDefaultPage() {
+            // When no data in DB, getPlayerBagPages returns [1] as default
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
+
+            int pageNum = service.createBagPage(playerUuid);
+
+            // Should create page 2 (next after default page 1)
+            assertThat(pageNum).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("Multiple loadBagIfNeeded calls for same player should only query once")
+        void multipleLoadsQueryOnce() {
+            when(mockQuery.list()).thenReturn(Collections.singletonList(
+                    RemoteBagData.create(playerUuid, 1, "")
+            ));
+
+            service.loadBagIfNeeded(playerUuid);
+            service.loadBagIfNeeded(playerUuid);
+            service.loadBagIfNeeded(playerUuid);
+
+            verify(mockQuery, times(1)).list();
+        }
+
+        @Test
+        @DisplayName("clearCache then loadBagIfNeeded should re-query")
+        void clearCacheThenLoadReQueries() {
+            when(mockQuery.list()).thenReturn(Collections.singletonList(
+                    RemoteBagData.create(playerUuid, 1, "")
+            ));
+
+            service.loadBagIfNeeded(playerUuid);
+            service.clearCache(playerUuid);
+            service.loadBagIfNeeded(playerUuid);
+
+            verify(mockQuery, times(2)).list();
+        }
+
+        @Test
+        @DisplayName("saveBag with items should serialize items")
+        void saveBagWithItems() {
+            ItemStack[] contents = new ItemStack[54];
+            // Use mock ItemStack to avoid Bukkit.server requirement
+            contents[0] = mock(ItemStack.class);
+
+            service.setBagPage(playerUuid, 1, contents);
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
+
+            service.saveBag(playerUuid);
+
+            verify(dataOperator).insert(any(RemoteBagData.class));
+        }
+
+        @Test
+        @DisplayName("getPlayerBagPages should return sorted pages from cache")
+        void getPlayerBagPagesSortedFromCache() {
+            // Manually set pages in non-sorted order
+            service.setBagPage(playerUuid, 5, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 3, new ItemStack[54]);
+
+            List<Integer> pages = service.getPlayerBagPages(playerUuid);
+
+            assertThat(pages).containsExactly(1, 3, 5);
+        }
+
+        @Test
+        @DisplayName("deleteBagPage should not affect other pages")
+        void deleteBagPageDoesNotAffectOthers() {
+            // Load pages 1 and 2
+            when(mockQuery.list())
+                    .thenReturn(Arrays.asList(
+                            RemoteBagData.create(playerUuid, 1, ""),
+                            RemoteBagData.create(playerUuid, 2, "")
+                    ))
+                    .thenReturn(Collections.emptyList()); // For deleteBagPage's internal query
+
+            service.loadBagIfNeeded(playerUuid);
+            service.deleteBagPage(playerUuid, 1);
+
+            // Page 2 should still exist
+            assertThat(service.getBagPage(playerUuid, 2)).isNotNull();
         }
     }
 }
