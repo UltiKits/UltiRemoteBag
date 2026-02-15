@@ -194,7 +194,8 @@ public class RemoteBagService {
             }
             return items;
         } catch (Exception e) {
-            e.printStackTrace();
+            java.util.logging.Logger.getLogger(RemoteBagService.class.getName())
+                    .log(java.util.logging.Level.WARNING, "Failed to deserialize bag items", e);
             return new ItemStack[config.getRowsPerPage() * 9];
         }
     }
@@ -346,13 +347,19 @@ public class RemoteBagService {
         // 创建空的背包页
         ItemStack[] emptyContents = new ItemStack[config.getRowsPerPage() * 9];
         setBagPage(playerUuid, nextPage, emptyContents);
-        
-        // 保存到数据库
-        saveBag(playerUuid);
-        
+
+        // 保存到数据库，失败时回滚缓存
+        try {
+            saveBag(playerUuid);
+        } catch (Exception e) {
+            Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
+            if (pages != null) pages.remove(nextPage);
+            throw e;
+        }
+
         return true;
     }
-    
+
     // ==================== 管理员命令支持方法 ====================
     
     /**
@@ -372,10 +379,16 @@ public class RemoteBagService {
         // 创建空的背包页
         ItemStack[] emptyContents = new ItemStack[config.getRowsPerPage() * 9];
         setBagPage(playerUuid, nextPage, emptyContents);
-        
-        // 保存到数据库
-        saveBag(playerUuid);
-        
+
+        // 保存到数据库，失败时回滚缓存
+        try {
+            saveBag(playerUuid);
+        } catch (Exception e) {
+            Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
+            if (pages != null) pages.remove(nextPage);
+            throw e;
+        }
+
         return nextPage;
     }
     
@@ -427,11 +440,19 @@ public class RemoteBagService {
         
         // 创建空的内容
         ItemStack[] emptyContents = new ItemStack[config.getRowsPerPage() * 9];
+        ItemStack[] oldContents = pages.get(page);
         setBagPage(playerUuid, page, emptyContents);
-        
-        // 保存到数据库
-        saveBag(playerUuid);
-        
+
+        // 保存到数据库，失败时回滚缓存
+        try {
+            saveBag(playerUuid);
+        } catch (Exception e) {
+            if (oldContents != null) {
+                setBagPage(playerUuid, page, oldContents);
+            }
+            throw e;
+        }
+
         return true;
     }
 }
