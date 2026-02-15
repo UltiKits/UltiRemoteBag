@@ -54,6 +54,7 @@ msg_owner_still_using: "所有者仍在使用中，请稍后再试"
 msg_bag_saved: "背包已保存！"
 msg_cannot_save_readonly: "当前为只读模式，无法保存修改"
 msg_readonly_no_move: "只读模式，无法移动物品"
+msg_owner_started_using: "{0} 已开始使用此背包，您的视图已切换为只读模式。点击刷新按钮可尝试获取编辑权限。"
 
 # 命令相关
 page_out_of_range: "页码 {0} 超出范围，最大页码为 {1}"

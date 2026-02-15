@@ -4,6 +4,8 @@ import com.ultikits.plugins.remotebag.entity.BagLockInfo;
 import com.ultikits.plugins.remotebag.entity.BagOpenResult;
 import com.ultikits.plugins.remotebag.enums.AccessMode;
 import com.ultikits.plugins.remotebag.enums.LockType;
+import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
+import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Service;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -25,7 +27,10 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Service
 public class BagLockService {
-    
+
+    @Autowired
+    private UltiToolsPlugin plugin;
+
     /**
      * 锁存储: "ownerUUID:pageNum" -> LockInfo
      */
@@ -300,7 +305,7 @@ public class BagLockService {
             for (UUID adminUuid : sessions) {
                 Player admin = Bukkit.getPlayer(adminUuid);
                 if (admin != null && admin.isOnline()) {
-                    admin.sendMessage("§e" + ownerName + " 已开始使用此背包，您的视图已切换为只读模式。点击刷新按钮可尝试获取编辑权限。");
+                    admin.sendMessage("§e" + plugin.i18n("msg_owner_started_using").replace("{0}", ownerName));
                 }
             }
         }

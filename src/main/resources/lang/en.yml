@@ -54,6 +54,7 @@ msg_owner_still_using: "Owner is still using, please try again later"
 msg_bag_saved: "Bag saved!"
 msg_cannot_save_readonly: "Currently in read-only mode, cannot save changes"
 msg_readonly_no_move: "Read-only mode, cannot move items"
+msg_owner_started_using: "{0} has started using this bag, your view has been switched to read-only mode. Click the refresh button to try to acquire edit permission."
 
 # Command Related
 page_out_of_range: "Page {0} out of range, max page is {1}"

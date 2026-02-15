@@ -5,6 +5,7 @@ import com.ultikits.plugins.remotebag.entity.BagLockInfo;
 import com.ultikits.plugins.remotebag.entity.BagOpenResult;
 import com.ultikits.plugins.remotebag.enums.AccessMode;
 import com.ultikits.plugins.remotebag.enums.LockType;
+import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Server;
@@ -32,6 +33,14 @@ class BagLockServiceTest {
         UltiRemoteBagTestHelper.setUp();
 
         service = new BagLockService();
+
+        // Inject mock plugin for i18n calls
+        UltiToolsPlugin mockPlugin = mock(UltiToolsPlugin.class);
+        when(mockPlugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        Field pluginField = BagLockService.class.getDeclaredField("plugin");
+        pluginField.setAccessible(true); // NOPMD
+        pluginField.set(service, mockPlugin);
+
         service.setLockTimeout(300); // 5 minutes
 
         ownerUuid = UUID.randomUUID();
