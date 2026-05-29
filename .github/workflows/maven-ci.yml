@@ -1,0 +1,13 @@
+name: Maven CI
+on:
+  push:
+    branches: ['**']
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ci:
+    # Pin to the floating major tag @v1 to auto-receive security re-pins; immutable tags (e.g. v1.1.0) remain available for strict pinning.
+    uses: UltiKits/ci-workflows/.github/workflows/maven-ci.yml@v1
+    with:
+      needs-nms: false

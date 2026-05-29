@@ -25,7 +25,7 @@ import java.util.UUID;
 @AllArgsConstructor
 @Builder
 @Table("remote_bags")
-public class RemoteBagData extends BaseDataEntity<Integer> {
+public class RemoteBagData extends BaseDataEntity<String> {
     
     @Column("player_uuid")
     private String playerUuid;
