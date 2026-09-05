@@ -3,6 +3,7 @@ package com.ultikits.plugins.remotebag.util;
 import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 
+import com.cryptomorin.xseries.XSound;
 import org.bukkit.Location;
 import org.bukkit.Sound;
 import org.bukkit.World;
@@ -47,7 +48,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.BLOCK_CHEST_OPEN),
+                    eq(XSound.BLOCK_CHEST_OPEN.get()),
                     eq(1.0f),
                     eq(1.0f)
             );
@@ -60,7 +61,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.BLOCK_CHEST_OPEN),
+                    eq(XSound.BLOCK_CHEST_OPEN.get()),
                     eq(1.0f),
                     eq(1.0f)
             );
@@ -107,7 +108,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.BLOCK_CHEST_OPEN),
+                    eq(XSound.BLOCK_CHEST_OPEN.get()),
                     eq(0.5f),
                     eq(1.5f)
             );
@@ -131,7 +132,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.BLOCK_CHEST_OPEN),
+                    eq(XSound.BLOCK_CHEST_OPEN.get()),
                     eq(0.8f),
                     eq(1.2f)
             );
@@ -166,7 +167,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.BLOCK_CHEST_OPEN),
+                    eq(XSound.BLOCK_CHEST_OPEN.get()),
                     eq(1.0f),
                     eq(1.0f)
             );
@@ -201,7 +202,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.BLOCK_CHEST_CLOSE),
+                    eq(XSound.BLOCK_CHEST_CLOSE.get()),
                     eq(1.0f),
                     eq(1.0f)
             );
@@ -236,7 +237,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.ENTITY_PLAYER_LEVELUP),
+                    eq(XSound.ENTITY_PLAYER_LEVELUP.get()),
                     eq(1.0f),
                     eq(1.0f)
             );
@@ -271,7 +272,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.ENTITY_VILLAGER_NO),
+                    eq(XSound.ENTITY_VILLAGER_NO.get()),
                     eq(1.0f),
                     eq(1.0f)
             );
@@ -305,7 +306,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.UI_BUTTON_CLICK),
+                    eq(XSound.UI_BUTTON_CLICK.get()),
                     eq(0.5f),  // half volume
                     eq(1.0f)
             );
@@ -322,7 +323,7 @@ class SoundUtilTest {
 
             verify(player).playSound(
                     any(Location.class),
-                    eq(Sound.UI_BUTTON_CLICK),
+                    eq(XSound.UI_BUTTON_CLICK.get()),
                     eq(0.3f),  // 0.6 * 0.5
                     eq(1.5f)
             );
