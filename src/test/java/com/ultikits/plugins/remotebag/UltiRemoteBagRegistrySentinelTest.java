@@ -3,7 +3,10 @@ package com.ultikits.plugins.remotebag;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockbukkit.mockbukkit.MockBukkit;
 
 import java.util.UUID;
 
@@ -11,13 +14,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Reopen guard: proves the test tree actually reaches a live Bukkit registry rather than merely
- * declaring the {@code mockbukkit-v1.21} dependency. Every assertion is non-null on a
- * live-server-backed accessor — never a bare registry constant, which would resolve via
- * {@code mockbukkit-v1.21}'s {@code ServiceLoader}-registered {@code RegistryAccess} from the
- * classpath alone, independent of whether {@code MockBukkit.mock()} ever ran.
+ * Reopen guard (TEST-03): fails the build the moment this module's tests stop being able to
+ * reach a live Bukkit registry, even though the {@code mockbukkit-v1.21} dependency by itself
+ * (via its {@code java.util.ServiceLoader}-registered {@code RegistryAccess} provider) makes a
+ * bare registry constant resolve regardless of whether a live server was ever bootstrapped.
+ * <p>
+ * Every assertion below therefore depends on the <em>live server</em> path, not the
+ * ServiceLoader-only path.
  */
-public class UltiRemoteBagRegistrySentinelTest {
+class UltiRemoteBagRegistrySentinelTest {
+
+    @BeforeEach
+    void setUp() {
+        MockBukkit.mock();
+    }
+
+    @AfterEach
+    void tearDown() {
+        MockBukkit.unmock();
+    }
 
     @Test
     void liveServerIsBootstrapped() {
