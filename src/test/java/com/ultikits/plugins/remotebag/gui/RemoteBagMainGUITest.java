@@ -1,5 +1,6 @@
 package com.ultikits.plugins.remotebag.gui;
 
+import com.ultikits.plugins.remotebag.MockBukkitSupport;
 import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.service.BagLockService;
@@ -14,6 +15,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.junit.jupiter.api.*;
+import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 
@@ -44,6 +46,11 @@ class RemoteBagMainGUITest {
 
     @BeforeEach
     void setUp() throws Exception {
+        // Live test-time Bukkit server: RemoteBagMainGUI extends obliviate-invs' Gui, whose
+        // constructor touches InventoryType/MenuType, which needs a live registry to resolve.
+        MockBukkitSupport.ensureCleanState();
+        MockBukkit.mock();
+
         UltiRemoteBagTestHelper.setUp();
 
         bagService = mock(RemoteBagService.class);
@@ -59,6 +66,7 @@ class RemoteBagMainGUITest {
     @AfterEach
     void tearDown() throws Exception {
         UltiRemoteBagTestHelper.tearDown();
+        MockBukkitSupport.safeUnmock();
     }
 
     // ==================== Constructor ====================

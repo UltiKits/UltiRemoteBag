@@ -1,5 +1,6 @@
 package com.ultikits.plugins.remotebag.service;
 
+import com.ultikits.plugins.remotebag.MockBukkitSupport;
 import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.RemoteBagData;
@@ -15,6 +16,7 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.*;
+import org.mockbukkit.mockbukkit.MockBukkit;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -39,6 +41,11 @@ class RemoteBagServiceTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        // Live test-time Bukkit server: several tests below construct real ItemStacks
+        // (new ItemStack(Material.X, n)) which need a live registry to resolve.
+        MockBukkitSupport.ensureCleanState();
+        MockBukkit.mock();
+
         UltiRemoteBagTestHelper.setUp();
 
         config = UltiRemoteBagTestHelper.createDefaultConfig();
@@ -66,6 +73,7 @@ class RemoteBagServiceTest {
     @AfterEach
     void tearDown() throws Exception {
         UltiRemoteBagTestHelper.tearDown();
+        MockBukkitSupport.safeUnmock();
     }
 
     // ==================== getPlayerMaxPages ====================

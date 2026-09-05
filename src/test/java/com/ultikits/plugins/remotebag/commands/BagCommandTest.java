@@ -1,5 +1,6 @@
 package com.ultikits.plugins.remotebag.commands;
 
+import com.ultikits.plugins.remotebag.MockBukkitSupport;
 import com.ultikits.plugins.remotebag.UltiRemoteBag;
 import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
@@ -16,6 +17,8 @@ import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.*;
+import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.ServerMock;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
@@ -42,8 +45,14 @@ class BagCommandTest {
     void setUp() throws Exception {
         UltiRemoteBagTestHelper.setUp();
 
-        // Mock Bukkit.server for Bukkit.getOfflinePlayer()
-        mockServer = mock(Server.class);
+        // Live test-time Bukkit server so registry-backed production code (InventoryType/MenuType
+        // via the GUI open path, XSound) resolves. MockBukkit.mock() returns a real, functioning
+        // ServerMock; wrap it in a Mockito spy() so the pre-existing getOfflinePlayer(...) stub
+        // below keeps working. doReturn(...).when(spy) is required here, not when(spy.method()) --
+        // the latter invokes the real method first and is unsafe on a spy.
+        MockBukkitSupport.ensureCleanState();
+        ServerMock realServer = MockBukkit.mock();
+        mockServer = spy(realServer);
         Field serverField = Bukkit.class.getDeclaredField("server");
         serverField.setAccessible(true);
         serverField.set(null, mockServer);
@@ -52,7 +61,7 @@ class BagCommandTest {
         offlinePlayer = mock(OfflinePlayer.class);
         lenient().when(offlinePlayer.hasPlayedBefore()).thenReturn(true);
         lenient().when(offlinePlayer.getUniqueId()).thenReturn(UUID.randomUUID());
-        lenient().when(mockServer.getOfflinePlayer(anyString())).thenReturn(offlinePlayer);
+        lenient().doReturn(offlinePlayer).when(mockServer).getOfflinePlayer(anyString());
 
         bagService = mock(RemoteBagService.class);
         lockService = mock(BagLockService.class);
@@ -70,11 +79,7 @@ class BagCommandTest {
     @AfterEach
     void tearDown() throws Exception {
         UltiRemoteBagTestHelper.tearDown();
-
-        // Clean up Bukkit.server
-        Field serverField = Bukkit.class.getDeclaredField("server");
-        serverField.setAccessible(true);
-        serverField.set(null, null);
+        MockBukkitSupport.safeUnmock();
     }
 
     // ==================== openMainPage ====================
