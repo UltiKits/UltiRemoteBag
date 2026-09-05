@@ -1,7 +1,7 @@
 package com.ultikits.plugins.remotebag.util;
 
+import com.cryptomorin.xseries.XSound;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
-import org.bukkit.Sound;
 import org.bukkit.entity.Player;
 
 /**
@@ -29,14 +29,11 @@ public final class SoundUtil {
         if (player == null || soundName == null || soundName.isEmpty()) {
             return;
         }
-        
-        try {
-            Sound sound = Sound.valueOf(soundName.toUpperCase());
-            player.playSound(player.getLocation(), sound, volume, pitch);
-        } catch (IllegalArgumentException e) {
-            // 音效名无效，静默忽略
-            // 可能是不同 MC 版本的音效名不同
-        }
+
+        // 音效名无效，静默忽略（Optional 为空时短路，行为与原 catch 分支一致）
+        // Invalid sound name -- silently ignore (empty Optional short-circuits, same as the old catch)
+        XSound.matchXSound(soundName.toUpperCase()).ifPresent(xSound ->
+                player.playSound(player.getLocation(), xSound.get(), volume, pitch));
     }
     
     /**
