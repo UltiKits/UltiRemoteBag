@@ -46,7 +46,7 @@ class BagCommandTest {
 
         // Live test-time Bukkit server so registry-backed production code (InventoryType/MenuType
         // via the GUI open path, XSound) resolves. MockBukkitSupport.bootstrapLiveServer() is this
-        // module's shared bootstrap entry point (TEST-03); it returns a real, functioning
+        // module's shared bootstrap entry point; it returns a real, functioning
         // ServerMock. Wrap it in a Mockito spy() so the pre-existing getOfflinePlayer(...) stub
         // below keeps working. doReturn(...).when(spy) is required here, not when(spy.method()) --
         // the latter invokes the real method first and is unsafe on a spy.

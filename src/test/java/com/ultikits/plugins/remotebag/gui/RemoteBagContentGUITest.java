@@ -50,7 +50,7 @@ class RemoteBagContentGUITest {
         // Live test-time Bukkit server: RemoteBagContentGUI extends obliviate-invs' Gui, whose
         // constructor touches InventoryType/MenuType, which needs a live registry to resolve.
         // MockBukkitSupport.bootstrapLiveServer() is this module's shared bootstrap
-        // entry point (TEST-03).
+        // entry point.
         MockBukkitSupport.bootstrapLiveServer();
 
         UltiRemoteBagTestHelper.setUp();

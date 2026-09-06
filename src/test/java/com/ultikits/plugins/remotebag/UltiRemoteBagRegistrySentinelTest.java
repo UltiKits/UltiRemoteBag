@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Reopen guard (TEST-03): fails the build the moment this module's tests stop being able to
+ * Reopen guard: fails the build the moment this module's tests stop being able to
  * reach a live Bukkit registry, even though the {@code mockbukkit-v1.21} dependency by itself
  * (via its {@code java.util.ServiceLoader}-registered {@code RegistryAccess} provider) makes a
  * bare registry constant resolve regardless of whether a live server was ever bootstrapped.

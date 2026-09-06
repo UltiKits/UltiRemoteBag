@@ -28,7 +28,7 @@ class SoundUtilTest {
         // Live test-time Bukkit server: SoundUtil.playSound resolves sounds through XSound's own
         // XRegistry-backed static initializer, which needs a live registry.
         // MockBukkitSupport.bootstrapLiveServer() is this module's shared bootstrap entry
-        // point (TEST-03).
+        // point.
         MockBukkitSupport.bootstrapLiveServer();
 
         UltiRemoteBagTestHelper.setUp();

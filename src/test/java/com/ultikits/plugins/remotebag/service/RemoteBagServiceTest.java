@@ -43,7 +43,7 @@ class RemoteBagServiceTest {
         // Live test-time Bukkit server: several tests below construct real ItemStacks
         // (new ItemStack(Material.X, n)) which need a live registry to resolve.
         // MockBukkitSupport.bootstrapLiveServer() is this module's shared bootstrap entry
-        // point (TEST-03).
+        // point.
         MockBukkitSupport.bootstrapLiveServer();
 
         UltiRemoteBagTestHelper.setUp();
