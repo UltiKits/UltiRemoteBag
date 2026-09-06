@@ -7,10 +7,10 @@ import org.mockbukkit.mockbukkit.ServerMock;
 import java.lang.reflect.Field;
 
 /**
- * Defensive MockBukkit singleton-cleanup helper, copied from the logic of
- * {@code Framework/UltiTools-Reborn/src/test/java/com/ultikits/ultitools/utils/MockBukkitHelper.java}
- * per {@code 14-CONTEXT.md}'s "no shared artifact" decision — the logic is copied, not a dependency
- * on that class, which lives in a different git repository.
+ * Defensive MockBukkit singleton-cleanup helper. Its logic mirrors the equivalent helper in the
+ * UltiTools-API framework's own test tree, but is deliberately duplicated rather than shared: that
+ * class lives in a different git repository and is not published as a test artifact, so there is
+ * nothing for this module to depend on.
  * <p>
  * Named {@code MockBukkitSupport}, deliberately not {@code MockBukkitHelper}: that name is already
  * used by four other classes in this monorepo (the framework's own live helper, and legacy
@@ -29,10 +29,19 @@ public final class MockBukkitSupport {
     }
 
     /**
-     * Call before {@code MockBukkit.mock()} in {@code @BeforeEach}. Force-clears MockBukkit's and
-     * Bukkit's static singleton fields, tolerating exceptions, so a prior test's failed teardown
-     * cannot leave {@code MockBukkit.mock()} throwing {@code IllegalStateException: A mock server
-     * is already running!} for the next class in the same reused Surefire fork.
+     * Call before {@code MockBukkit.mock()} in {@code @BeforeEach}. Unmocks if a mock server is
+     * still running, then force-clears MockBukkit's {@code mock} field and Bukkit's {@code server}
+     * field by reflection, tolerating exceptions at every step.
+     * <p>
+     * The two reflective steps are redundant on the happy path: {@code MockBukkit.unmock()} ends in
+     * {@code setServerInstanceToNull()}, which nulls both fields itself. They exist for the failure
+     * path. In MockBukkit 4.101.0, {@code unmock()} guards only the scheduler shutdown with a
+     * catch-all that repeats the cleanup; a throw from {@code PluginManagerMock.disablePlugins()}
+     * or from the later {@code unload()}/{@code LifecycleEventRunnerMock.reset()} pair skips
+     * {@code setServerInstanceToNull()} outright and leaves the static {@code mock} non-null. The
+     * next class in the same reused Surefire fork would then see {@code MockBukkit.mock()} throw
+     * {@code IllegalStateException: Already mocking}, because that guard tests exactly this field
+     * for null.
      */
     @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // test helper requires reflection for singleton cleanup
     public static void ensureCleanState() {
@@ -45,9 +54,9 @@ public final class MockBukkitSupport {
         }
 
         try {
-            Field mockedField = MockBukkit.class.getDeclaredField("mocked");
-            mockedField.setAccessible(true);
-            mockedField.setBoolean(null, false);
+            Field mockField = MockBukkit.class.getDeclaredField("mock");
+            mockField.setAccessible(true);
+            mockField.set(null, null);
         } catch (Exception ignored) {
             // best-effort cleanup only
         }
@@ -77,10 +86,10 @@ public final class MockBukkitSupport {
     }
 
     /**
-     * This module's single shared test-time live-server bootstrap entry point (reopen guard
-     * TEST-03). Calls {@link #ensureCleanState()} then {@code MockBukkit.mock()}, returning the
-     * resulting {@link ServerMock} so callers that need to wrap it (e.g. in a Mockito
-     * {@code spy()}) still can.
+     * This module's single shared test-time live-server bootstrap entry point. Calls
+     * {@link #ensureCleanState()} then {@code MockBukkit.mock()}, returning the resulting
+     * {@link ServerMock} so callers that need to wrap it (e.g. in a Mockito {@code spy()})
+     * still can.
      * <p>
      * Every test class in this module that needs a live Bukkit server -- including
      * {@code UltiRemoteBagRegistrySentinelTest} -- must call this method rather than
