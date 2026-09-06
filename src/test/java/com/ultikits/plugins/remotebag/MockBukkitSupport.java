@@ -12,16 +12,17 @@ import java.lang.reflect.Field;
  * class lives in a different git repository and is not published as a test artifact, so there is
  * nothing for this module to depend on.
  * <p>
- * Named {@code MockBukkitSupport}, deliberately not {@code MockBukkitHelper}: that name is already
- * used by four other classes in this monorepo (the framework's own live helper, and legacy
- * {@code be.seeseemelk.mockbukkit}-importing copies in {@code UltiMail} and {@code UltiEssentials}),
- * and a fifth collision would make a cross-repo grep for one module's guard unable to distinguish it
- * from another's.
+ * Named {@code MockBukkitSupport}, deliberately not {@code MockBukkitHelper}: three classes with
+ * that name already exist across this ecosystem -- the framework's own live helper, and one each in
+ * the UltiMail and UltiEssentials modules -- so a fourth would make a search for one module's guard
+ * unable to distinguish it from another's. (All three are on the current
+ * {@code org.mockbukkit.mockbukkit} generation; none imports the legacy
+ * {@code be.seeseemelk.mockbukkit} package.)
  * <p>
- * Public, not package-private: unlike {@code UltiTradeTestHelper} (which owns {@code Bukkit.server}
- * centrally and is the only caller of its own {@code MockBukkitSupport}), this module's affected test
- * classes span four subpackages ({@code commands}, {@code gui}, {@code service}, {@code util}) and
- * call this helper directly from each of their own {@code @BeforeEach}/{@code @AfterEach} methods.
+ * Public, not package-private: this module has no single test helper that owns {@code Bukkit.server}
+ * centrally. Its affected test classes span four subpackages ({@code commands}, {@code gui},
+ * {@code service}, {@code util}) and call this helper directly from each of their own
+ * {@code @BeforeEach}/{@code @AfterEach} methods.
  */
 public final class MockBukkitSupport {
 
