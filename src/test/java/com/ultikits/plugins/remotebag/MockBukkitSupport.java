@@ -2,6 +2,7 @@ package com.ultikits.plugins.remotebag;
 
 import org.bukkit.Bukkit;
 import org.mockbukkit.mockbukkit.MockBukkit;
+import org.mockbukkit.mockbukkit.ServerMock;
 
 import java.lang.reflect.Field;
 
@@ -73,5 +74,23 @@ public final class MockBukkitSupport {
             // best-effort cleanup only
         }
         ensureCleanState();
+    }
+
+    /**
+     * This module's single shared test-time live-server bootstrap entry point (reopen guard
+     * TEST-03). Calls {@link #ensureCleanState()} then {@code MockBukkit.mock()}, returning the
+     * resulting {@link ServerMock} so callers that need to wrap it (e.g. in a Mockito
+     * {@code spy()}) still can.
+     * <p>
+     * Every test class in this module that needs a live Bukkit server -- including
+     * {@code UltiRemoteBagRegistrySentinelTest} -- must call this method rather than
+     * {@code MockBukkit.mock()} directly. A sentinel that called {@code MockBukkit.mock()} on its
+     * own line would build an unrelated live server of its own and stay green even if this
+     * module's real tests silently lost their bootstrap; routing through this one method means
+     * deleting or breaking it fails every caller, sentinel included.
+     */
+    public static ServerMock bootstrapLiveServer() {
+        ensureCleanState();
+        return MockBukkit.mock();
     }
 }

@@ -17,7 +17,6 @@ import org.bukkit.Server;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.junit.jupiter.api.*;
-import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
 
 import java.lang.reflect.Field;
@@ -46,12 +45,12 @@ class BagCommandTest {
         UltiRemoteBagTestHelper.setUp();
 
         // Live test-time Bukkit server so registry-backed production code (InventoryType/MenuType
-        // via the GUI open path, XSound) resolves. MockBukkit.mock() returns a real, functioning
-        // ServerMock; wrap it in a Mockito spy() so the pre-existing getOfflinePlayer(...) stub
+        // via the GUI open path, XSound) resolves. MockBukkitSupport.bootstrapLiveServer() is this
+        // module's shared bootstrap entry point (TEST-03); it returns a real, functioning
+        // ServerMock. Wrap it in a Mockito spy() so the pre-existing getOfflinePlayer(...) stub
         // below keeps working. doReturn(...).when(spy) is required here, not when(spy.method()) --
         // the latter invokes the real method first and is unsafe on a spy.
-        MockBukkitSupport.ensureCleanState();
-        ServerMock realServer = MockBukkit.mock();
+        ServerMock realServer = MockBukkitSupport.bootstrapLiveServer();
         mockServer = spy(realServer);
         Field serverField = Bukkit.class.getDeclaredField("server");
         serverField.setAccessible(true);

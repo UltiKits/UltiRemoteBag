@@ -19,7 +19,6 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.junit.jupiter.api.*;
-import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockito.MockedConstruction;
 import org.mockito.MockedStatic;
 
@@ -50,8 +49,9 @@ class RemoteBagContentGUITest {
     void setUp() throws Exception {
         // Live test-time Bukkit server: RemoteBagContentGUI extends obliviate-invs' Gui, whose
         // constructor touches InventoryType/MenuType, which needs a live registry to resolve.
-        MockBukkitSupport.ensureCleanState();
-        MockBukkit.mock();
+        // MockBukkitSupport.bootstrapLiveServer() is this module's shared bootstrap
+        // entry point (TEST-03).
+        MockBukkitSupport.bootstrapLiveServer();
 
         UltiRemoteBagTestHelper.setUp();
 

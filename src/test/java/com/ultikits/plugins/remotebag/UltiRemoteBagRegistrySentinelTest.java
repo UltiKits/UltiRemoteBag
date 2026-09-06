@@ -6,7 +6,6 @@ import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockbukkit.mockbukkit.MockBukkit;
 
 import java.util.UUID;
 
@@ -21,17 +20,22 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * <p>
  * Every assertion below therefore depends on the <em>live server</em> path, not the
  * ServiceLoader-only path.
+ * <p>
+ * Bootstraps through {@link MockBukkitSupport#bootstrapLiveServer()} -- this module's shared
+ * test-time bootstrap entry point -- rather than calling {@code MockBukkit.mock()} directly, so
+ * that removing or breaking that shared bootstrap fails this sentinel too, not just the real test
+ * classes that already route through it.
  */
 class UltiRemoteBagRegistrySentinelTest {
 
     @BeforeEach
     void setUp() {
-        MockBukkit.mock();
+        MockBukkitSupport.bootstrapLiveServer();
     }
 
     @AfterEach
     void tearDown() {
-        MockBukkit.unmock();
+        MockBukkitSupport.safeUnmock();
     }
 
     @Test
