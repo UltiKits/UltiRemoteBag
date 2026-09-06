@@ -1,5 +1,6 @@
 package com.ultikits.plugins.remotebag.service;
 
+import com.ultikits.plugins.remotebag.MockBukkitSupport;
 import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.RemoteBagData;
@@ -39,6 +40,12 @@ class RemoteBagServiceTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        // Live test-time Bukkit server: several tests below construct real ItemStacks
+        // (new ItemStack(Material.X, n)) which need a live registry to resolve.
+        // MockBukkitSupport.bootstrapLiveServer() is this module's shared bootstrap entry
+        // point.
+        MockBukkitSupport.bootstrapLiveServer();
+
         UltiRemoteBagTestHelper.setUp();
 
         config = UltiRemoteBagTestHelper.createDefaultConfig();
@@ -66,6 +73,7 @@ class RemoteBagServiceTest {
     @AfterEach
     void tearDown() throws Exception {
         UltiRemoteBagTestHelper.tearDown();
+        MockBukkitSupport.safeUnmock();
     }
 
     // ==================== getPlayerMaxPages ====================

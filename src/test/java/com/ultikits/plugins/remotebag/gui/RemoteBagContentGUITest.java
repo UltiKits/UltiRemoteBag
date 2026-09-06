@@ -1,5 +1,6 @@
 package com.ultikits.plugins.remotebag.gui;
 
+import com.ultikits.plugins.remotebag.MockBukkitSupport;
 import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.enums.AccessMode;
@@ -46,6 +47,12 @@ class RemoteBagContentGUITest {
 
     @BeforeEach
     void setUp() throws Exception {
+        // Live test-time Bukkit server: RemoteBagContentGUI extends obliviate-invs' Gui, whose
+        // constructor touches InventoryType/MenuType, which needs a live registry to resolve.
+        // MockBukkitSupport.bootstrapLiveServer() is this module's shared bootstrap
+        // entry point.
+        MockBukkitSupport.bootstrapLiveServer();
+
         UltiRemoteBagTestHelper.setUp();
 
         bagService = mock(RemoteBagService.class);
@@ -62,6 +69,7 @@ class RemoteBagContentGUITest {
     @AfterEach
     void tearDown() throws Exception {
         UltiRemoteBagTestHelper.tearDown();
+        MockBukkitSupport.safeUnmock();
     }
 
     // ==================== buildTitle ====================

@@ -1,5 +1,6 @@
 package com.ultikits.plugins.remotebag.util;
 
+import com.ultikits.plugins.remotebag.MockBukkitSupport;
 import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 
@@ -24,6 +25,12 @@ class SoundUtilTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        // Live test-time Bukkit server: SoundUtil.playSound resolves sounds through XSound's own
+        // XRegistry-backed static initializer, which needs a live registry.
+        // MockBukkitSupport.bootstrapLiveServer() is this module's shared bootstrap entry
+        // point.
+        MockBukkitSupport.bootstrapLiveServer();
+
         UltiRemoteBagTestHelper.setUp();
 
         player = UltiRemoteBagTestHelper.createMockPlayer("TestPlayer", UUID.randomUUID());
@@ -33,6 +40,7 @@ class SoundUtilTest {
     @AfterEach
     void tearDown() throws Exception {
         UltiRemoteBagTestHelper.tearDown();
+        MockBukkitSupport.safeUnmock();
     }
 
     // ==================== playSound(Player, String, float, float) ====================
