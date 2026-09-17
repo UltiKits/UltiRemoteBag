@@ -8,16 +8,14 @@ import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.interfaces.Query;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
+import com.ultikits.ultitools.services.EconomyProvider;
 import com.ultikits.ultitools.utils.EconomyUtils;
-import net.milkbowl.vault.economy.Economy;
-import net.milkbowl.vault.economy.EconomyResponse;
 
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.junit.jupiter.api.*;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.*;
 
@@ -1007,19 +1005,11 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should purchase bag with economy when economy enabled and withdraw succeeds")
         void purchasesWithEconomySuccess() throws Exception {
-            // Set up EconomyUtils with a mock Economy
-            Economy mockEconomy = mock(Economy.class);
-            when(mockEconomy.has(any(Player.class), anyDouble())).thenReturn(true);
-            EconomyResponse successResponse = new EconomyResponse(10000, 90000,
-                    EconomyResponse.ResponseType.SUCCESS, "");
-            when(mockEconomy.withdrawPlayer(any(Player.class), anyDouble())).thenReturn(successResponse);
-
-            Field economyField = EconomyUtils.class.getDeclaredField("economy");
-            economyField.setAccessible(true);
-            economyField.set(null, mockEconomy);
-            Field setupField = EconomyUtils.class.getDeclaredField("setupAttempted");
-            setupField.setAccessible(true);
-            setupField.set(null, true);
+            // Set up EconomyUtils with an available mock economy provider
+            EconomyProvider mockEconomy = mock(EconomyProvider.class);
+            when(mockEconomy.getState()).thenReturn(EconomyProvider.State.AVAILABLE);
+            when(mockEconomy.withdraw(any(Player.class), anyDouble())).thenReturn(true);
+            EconomyUtils.setProvider(mockEconomy);
 
             try {
                 when(config.isEconomyEnabled()).thenReturn(true);
@@ -1032,7 +1022,7 @@ class RemoteBagServiceTest {
                 boolean result = service.purchaseBag(player);
 
                 assertThat(result).isTrue();
-                verify(mockEconomy).withdrawPlayer(eq(player), eq(10000.0));
+                verify(mockEconomy).withdraw(eq(player), eq(10000.0));
             } finally {
                 EconomyUtils.reset();
             }
@@ -1041,15 +1031,10 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return false when economy enabled but withdraw fails")
         void returnsFalseWhenWithdrawFails() throws Exception {
-            Economy mockEconomy = mock(Economy.class);
-            when(mockEconomy.has(any(Player.class), anyDouble())).thenReturn(false);
-
-            Field economyField = EconomyUtils.class.getDeclaredField("economy");
-            economyField.setAccessible(true);
-            economyField.set(null, mockEconomy);
-            Field setupField = EconomyUtils.class.getDeclaredField("setupAttempted");
-            setupField.setAccessible(true);
-            setupField.set(null, true);
+            EconomyProvider mockEconomy = mock(EconomyProvider.class);
+            when(mockEconomy.getState()).thenReturn(EconomyProvider.State.AVAILABLE);
+            when(mockEconomy.withdraw(any(Player.class), anyDouble())).thenReturn(false);
+            EconomyUtils.setProvider(mockEconomy);
 
             try {
                 when(config.isEconomyEnabled()).thenReturn(true);
@@ -1070,14 +1055,9 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return false when economy enabled and max pages exceeded")
         void returnsFalseWithEconomyAndMaxPages() throws Exception {
-            Economy mockEconomy = mock(Economy.class);
-
-            Field economyField = EconomyUtils.class.getDeclaredField("economy");
-            economyField.setAccessible(true);
-            economyField.set(null, mockEconomy);
-            Field setupField = EconomyUtils.class.getDeclaredField("setupAttempted");
-            setupField.setAccessible(true);
-            setupField.set(null, true);
+            EconomyProvider mockEconomy = mock(EconomyProvider.class);
+            when(mockEconomy.getState()).thenReturn(EconomyProvider.State.AVAILABLE);
+            EconomyUtils.setProvider(mockEconomy);
 
             try {
                 when(config.isEconomyEnabled()).thenReturn(true);
@@ -1092,7 +1072,7 @@ class RemoteBagServiceTest {
 
                 assertThat(result).isFalse();
                 // Should not even try to withdraw
-                verify(mockEconomy, never()).withdrawPlayer(any(Player.class), anyDouble());
+                verify(mockEconomy, never()).withdraw(any(Player.class), anyDouble());
             } finally {
                 EconomyUtils.reset();
             }
