@@ -130,6 +130,34 @@ therefore needs both `ultibag.use` and the specific admin permission for each ac
 | ultiremotebag.admin.clear | Empty the item contents of a target player's specific bag page in place (page itself is not deleted); same lock and never-played refusals as `.delete` | command | `/bag clear <player> <page>` | ultibag.use AND ultibag.admin.clear | player | admin | brief | BagCommand#clearBag |
 | ultiremotebag.admin.list | List every bag page a target player owns, with per-page item and slot-usage counts and a total count; refuses if the target has never played. The code path also has a `no_bags` empty-list branch, but it is UNREACHABLE for the same reason as `ultiremotebag.admin.see` — `getPlayerBagPages` never actually returns an empty list. Known product defect, `UltiKits/UltiRemoteBag#26` | command | `/bag list <player>` | ultibag.use AND ultibag.admin.list | player | admin | detailed | BagCommand#listBags |
 
+## Lifecycle Hooks
+
+`UltiRemoteBag#onUnregister()` is the extension-point hook the framework's `final`
+`UltiToolsPlugin#unregisterSelf()` invokes when this module is unloaded (`/upm uninstall UltiRemoteBag`,
+or server shutdown). It runs first; the framework then unregisters this module's commands and
+listeners. Before `UltiKits/UltiRemoteBag#12`'s wave-0 lifecycle-hook migration this module overrode
+`unregisterSelf()` itself, so `/upm uninstall UltiRemoteBag` skipped both command and listener
+unregistration. Server shutdown was unaffected: the framework ran its own command and listener cleanup
+there independently of the override. `/upm uninstall` still does not cancel this module's `@Scheduled` auto-save task
+(`UltiKits/UltiTools-Reborn#503`), so `RemoteBagService#autoSaveTask` keeps running until restart.
+
+This module declares no `onReload()` hook. `/ul reload UltiRemoteBag` runs only the framework's own
+reload steps: configuration reload (`ConfigManager#reloadConfigs` re-initialises the same
+`RemoteBagConfig` bean the services hold, so a live-read key such as `max_pages` takes effect
+immediately), language refresh, `@ConditionalOnConfig` drift report (this module has no gate), and the
+framework's `Module 'UltiRemoteBag' reloaded.` line. Before the migration this module replaced
+`reloadSelf()` with a log-only override, so neither the configuration nor the language catalogue was
+reloaded; that override and its `UltiRemoteBag configuration reloaded!` console line were removed.
+Keys applied only once at boot (`lock.timeout_seconds`, read by `UltiRemoteBag#registerSelf`) still
+need a restart. `/ul reload` and `/upm uninstall` are the framework's own commands, not `@CmdMapping`
+sites in this repository, so no `command`-Kind row is added for either; both rows below are
+framework-invoked and therefore `event`-Kind.
+
+| ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
+|---|---|---|---|---|---|---|---|---|
+| ultiremotebag.lifecycle.reload | Re-read `config/remotebag.yml` into the live `RemoteBagConfig` bean when the module is reloaded, so a key read on every use (e.g. `max_pages` in `RemoteBagService#getPlayerMaxPages`) follows the edited file without a restart; the module adds no reload work or log line of its own | event | `/ul reload UltiRemoteBag` (framework `reloadSelf()`: config reload, language refresh, drift report, reload line) | n/a | n/a | admin | brief | UltiToolsPlugin#reloadSelf, RemoteBagService#getPlayerMaxPages |
+| ultiremotebag.lifecycle.unload | When the module is unloaded, write every cached player's bag pages to the database (`RemoteBagService#saveAllBags`), then log `UltiRemoteBag has been disabled!`. In routine play this rewrites what is already stored, because every cache-write path already saves synchronously (`UltiKits/UltiRemoteBag#23`); its distinguishing effect is that a page still held in `bagCache` overwrites its database row, including a row changed outside the module since the page was loaded, and stamps `last_updated` at the moment of the unload | event | unload the module at runtime, e.g. `/upm uninstall UltiRemoteBag` from the console (the framework calls `unregisterSelf()`, which invokes this hook first) | n/a | n/a | internal | brief | UltiRemoteBag#onUnregister, RemoteBagService#saveAllBags |
+
 ## Configuration
 
 Every `@ConfigEntry`-annotated field on this module's one `@ConfigEntity` class,
