@@ -87,6 +87,25 @@ class RemoteBagServiceTest {
     class GetPlayerMaxPages {
 
         @Test
+        @DisplayName("Should follow max_pages changed on the same config bean without re-creating the service (/ul reload, UltiKits/UltiRemoteBag#12)")
+        void followsMaxPagesChangedOnTheSameConfigBean() {
+            // ConfigManager#reloadConfigs re-initialises the SAME RemoteBagConfig instance the
+            // service was constructed with; a reload only takes effect if the service reads the
+            // key on every call instead of caching it.
+            RemoteBagConfig realConfig = new RemoteBagConfig("config/remotebag.yml");
+            realConfig.setPermissionBasedPages(false);
+            realConfig.setMaxPages(1);
+            UltiToolsPlugin plugin = mock(UltiToolsPlugin.class);
+            RemoteBagService liveService = new RemoteBagService(plugin, realConfig);
+
+            assertThat(liveService.getPlayerMaxPages(player)).isEqualTo(1);
+
+            realConfig.setMaxPages(3);
+
+            assertThat(liveService.getPlayerMaxPages(player)).isEqualTo(3);
+        }
+
+        @Test
         @DisplayName("Should return max pages when permission based disabled")
         void returnMaxWhenDisabled() {
             when(config.isPermissionBasedPages()).thenReturn(false);
