@@ -9,14 +9,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Reloading or unloading this module now actually runs the framework's own steps, which were
-  previously silently skipped (UltiKits/UltiRemoteBag#12). `/ul reload UltiRemoteBag` now reloads
-  the configuration, refreshes the language catalogue and reports `@ConditionalOnConfig` drift.
-  Unloading the module (for example `/upm uninstall UltiRemoteBag`) still saves every cached bag
-  first, and then unregisters the module's commands and listeners.
-- 重载或卸载本模块时，现在会真正执行框架自身的步骤，此前这些步骤会被静默跳过（UltiKits/UltiRemoteBag#12）。
-  `/ul reload UltiRemoteBag` 现在会重载配置、刷新语言文件并报告 `@ConditionalOnConfig` 漂移；
-  卸载本模块（例如 `/upm uninstall UltiRemoteBag`）时仍会先保存所有已缓存的背包，然后注销本模块的命令和监听器。
+- `/ul reload UltiRemoteBag` now reloads this module's configuration and refreshes its language
+  catalogue; previously this module replaced the framework's reload step, so neither happened and
+  an edited `config/remotebag.yml` took effect only after a restart (UltiKits/UltiRemoteBag#12).
+- Unloading this module (`/upm uninstall UltiRemoteBag`, or server shutdown) still saves every
+  cached bag first, and now also unregisters the module's commands afterwards, which previously
+  never happened on either path; on `/upm uninstall` it now also unregisters the module's
+  listeners, which previously stayed registered (UltiKits/UltiRemoteBag#12).
+- `/ul reload UltiRemoteBag` 现在会重载本模块的配置并刷新其语言文件；此前本模块替换了框架的重载步骤，两者都不会发生，
+  修改 `config/remotebag.yml` 后只有重启才会生效（UltiKits/UltiRemoteBag#12）。
+- 卸载本模块（`/upm uninstall UltiRemoteBag` 或关闭服务器）时仍会先保存所有已缓存的背包，之后现在还会注销本模块的命令，
+  此前两条路径都不会注销；通过 `/upm uninstall` 卸载时现在还会注销本模块的监听器，此前它们会一直保持注册
+  （UltiKits/UltiRemoteBag#12）。
 
 ### Removed
 
