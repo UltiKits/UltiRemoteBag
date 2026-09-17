@@ -8,13 +8,19 @@ import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.interfaces.Query;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
-import com.ultikits.ultitools.services.EconomyProvider;
 import com.ultikits.ultitools.utils.EconomyUtils;
+import net.milkbowl.vault.economy.Economy;
+import net.milkbowl.vault.economy.EconomyResponse;
 
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.ServicePriority;
 import org.junit.jupiter.api.*;
+import org.mockbukkit.mockbukkit.MockBukkit;
 
 import java.lang.reflect.Method;
 import java.util.*;
@@ -1002,14 +1008,32 @@ class RemoteBagServiceTest {
             assertThat(result).isFalse();
         }
 
+        /**
+         * Makes a Vault economy available through the public Bukkit/Vault types only (#31): a mock
+         * plugin named {@code Vault} plus a Vault {@link Economy} registered with the live
+         * MockBukkit services manager. The framework's default economy bridge resolves exactly
+         * these, so no framework-internal seam is touched.
+         */
+        private Plugin registerVaultEconomy(Economy economy) {
+            Plugin vault = MockBukkit.createMockPlugin("Vault");
+            Bukkit.getServicesManager().register(Economy.class, economy, vault, ServicePriority.Normal);
+            return vault;
+        }
+
+        private void unregisterVaultEconomy(Plugin vault) {
+            Bukkit.getServicesManager().unregisterAll(vault);
+            EconomyUtils.reset();
+        }
+
         @Test
         @DisplayName("Should purchase bag with economy when economy enabled and withdraw succeeds")
         void purchasesWithEconomySuccess() throws Exception {
-            // Set up EconomyUtils with an available mock economy provider
-            EconomyProvider mockEconomy = mock(EconomyProvider.class);
-            when(mockEconomy.getState()).thenReturn(EconomyProvider.State.AVAILABLE);
-            when(mockEconomy.withdraw(any(Player.class), anyDouble())).thenReturn(true);
-            EconomyUtils.setProvider(mockEconomy);
+            Economy mockEconomy = mock(Economy.class);
+            when(mockEconomy.has(any(OfflinePlayer.class), anyDouble())).thenReturn(true);
+            EconomyResponse successResponse = new EconomyResponse(10000, 90000,
+                    EconomyResponse.ResponseType.SUCCESS, "");
+            when(mockEconomy.withdrawPlayer(any(OfflinePlayer.class), anyDouble())).thenReturn(successResponse);
+            Plugin vault = registerVaultEconomy(mockEconomy);
 
             try {
                 when(config.isEconomyEnabled()).thenReturn(true);
@@ -1022,19 +1046,18 @@ class RemoteBagServiceTest {
                 boolean result = service.purchaseBag(player);
 
                 assertThat(result).isTrue();
-                verify(mockEconomy).withdraw(eq(player), eq(10000.0));
+                verify(mockEconomy).withdrawPlayer(eq(player), eq(10000.0));
             } finally {
-                EconomyUtils.reset();
+                unregisterVaultEconomy(vault);
             }
         }
 
         @Test
-        @DisplayName("Should return false when economy enabled but withdraw fails")
+        @DisplayName("Should return false and create no page when economy enabled but withdraw fails")
         void returnsFalseWhenWithdrawFails() throws Exception {
-            EconomyProvider mockEconomy = mock(EconomyProvider.class);
-            when(mockEconomy.getState()).thenReturn(EconomyProvider.State.AVAILABLE);
-            when(mockEconomy.withdraw(any(Player.class), anyDouble())).thenReturn(false);
-            EconomyUtils.setProvider(mockEconomy);
+            Economy mockEconomy = mock(Economy.class);
+            when(mockEconomy.has(any(OfflinePlayer.class), anyDouble())).thenReturn(false);
+            Plugin vault = registerVaultEconomy(mockEconomy);
 
             try {
                 when(config.isEconomyEnabled()).thenReturn(true);
@@ -1047,17 +1070,18 @@ class RemoteBagServiceTest {
                 boolean result = service.purchaseBag(player);
 
                 assertThat(result).isFalse();
+                verify(mockEconomy, never()).withdrawPlayer(any(OfflinePlayer.class), anyDouble());
+                verify(dataOperator, never()).insert(any());
             } finally {
-                EconomyUtils.reset();
+                unregisterVaultEconomy(vault);
             }
         }
 
         @Test
         @DisplayName("Should return false when economy enabled and max pages exceeded")
         void returnsFalseWithEconomyAndMaxPages() throws Exception {
-            EconomyProvider mockEconomy = mock(EconomyProvider.class);
-            when(mockEconomy.getState()).thenReturn(EconomyProvider.State.AVAILABLE);
-            EconomyUtils.setProvider(mockEconomy);
+            Economy mockEconomy = mock(Economy.class);
+            Plugin vault = registerVaultEconomy(mockEconomy);
 
             try {
                 when(config.isEconomyEnabled()).thenReturn(true);
@@ -1072,9 +1096,9 @@ class RemoteBagServiceTest {
 
                 assertThat(result).isFalse();
                 // Should not even try to withdraw
-                verify(mockEconomy, never()).withdraw(any(Player.class), anyDouble());
+                verify(mockEconomy, never()).withdrawPlayer(any(OfflinePlayer.class), anyDouble());
             } finally {
-                EconomyUtils.reset();
+                unregisterVaultEconomy(vault);
             }
         }
     }
