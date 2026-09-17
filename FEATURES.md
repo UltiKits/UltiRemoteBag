@@ -136,9 +136,9 @@ therefore needs both `ultibag.use` and the specific admin permission for each ac
 `UltiToolsPlugin#unregisterSelf()` invokes when this module is unloaded (`/upm uninstall UltiRemoteBag`,
 or server shutdown). It runs first; the framework then unregisters this module's commands and
 listeners. Before `UltiKits/UltiRemoteBag#12`'s wave-0 lifecycle-hook migration this module overrode
-`unregisterSelf()` itself, so command cleanup never ran on either unload path, and listener cleanup
-never ran on `/upm uninstall` (server shutdown's `PluginManager#unregister` already unregistered
-listeners itself). `/upm uninstall` still does not cancel this module's `@Scheduled` auto-save task
+`unregisterSelf()` itself, so `/upm uninstall UltiRemoteBag` skipped both command and listener
+unregistration. Server shutdown was unaffected: the framework ran its own command and listener cleanup
+there independently of the override. `/upm uninstall` still does not cancel this module's `@Scheduled` auto-save task
 (`UltiKits/UltiTools-Reborn#503`), so `RemoteBagService#autoSaveTask` keeps running until restart.
 
 This module declares no `onReload()` hook. `/ul reload UltiRemoteBag` runs only the framework's own
