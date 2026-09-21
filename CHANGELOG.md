@@ -37,8 +37,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   back at whatever size its stored slots need, so an item saved from one of the content GUI's
   higher slots survives; previously the load threw out of bounds, the failure was swallowed, and
   every item on that page was silently lost. A single unreadable entry in a stored page (a
-  non-numeric or negative slot key) is now skipped with a `WARNING` naming the page and the key,
-  instead of costing the whole page. This does not change how many rows the GUI shows — it still
+  non-numeric or negative slot key, or one beyond the 54 slots that `rows_per_page`'s own 1-6 range
+  makes addressable) is now skipped with a `WARNING` naming the page and the key, instead of costing
+  the whole page. This does not change how many rows the GUI shows — it still
   shows and saves 45 slots whatever `rows_per_page` holds, which is still open as
   UltiKits/UltiRemoteBag#24 (UltiKits/UltiRemoteBag#24).
 - `/ul reload UltiRemoteBag` 现在会重载本模块的配置并刷新其语言文件；此前本模块替换了框架的重载步骤，两者都不会发生，
@@ -59,8 +60,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   的提示，但该物品会在下次重启后丢失（UltiKits/UltiRemoteBag#22）。
 - 当 `rows_per_page` 被设为小于 5 时，加载背包页不再会销毁该页。读取时会按照所存槽位实际需要的大小还原，
   因此从内容界面较高槽位保存的物品能够保留；此前加载会数组越界，该失败被静默吞掉，该页中的所有物品都会悄无声息地
-  丢失。所存页面中单个无法读取的条目（非数字或负数槽位键）现在只会被跳过，并输出一条指明页码与键名的 `WARNING`，
-  而不再让整页作废。此改动不改变界面显示的行数——无论 `rows_per_page` 为何值，界面仍显示并保存 45 个槽位，
+  丢失。所存页面中单个无法读取的条目（非数字、负数，或超出 `rows_per_page` 自身 1-6 取值所能寻址的 54 个槽位）现在只会被跳过，
+  并输出一条指明页码与键名的 `WARNING`，而不再让整页作废。此改动不改变界面显示的行数——无论 `rows_per_page` 为何值，界面仍显示并保存 45 个槽位，
   这一点仍未解决（UltiKits/UltiRemoteBag#24）。
 
 ### Removed
