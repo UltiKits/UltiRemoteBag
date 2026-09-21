@@ -12,7 +12,6 @@ import com.ultikits.ultitools.utils.XVersionUtils;
 
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.inventory.Inventory;
@@ -30,9 +29,14 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests for RemoteBagContentGUI non-open methods.
- * Tests onClick(), onClose(), buildTitle(), and saveCurrentContents() via reflection.
- * Does NOT test open() or methods that require InventoryAPI initialization.
+ * Tests for RemoteBagContentGUI methods that need neither an open inventory nor the GUI library:
+ * buildTitle(), the toolbar icon builders, onClose(), and saveCurrentContents() through reflection.
+ * <p>
+ * Click and drag behaviour is deliberately NOT here. It lives in
+ * RemoteBagContentGUIInteractionMatrixTest, which dispatches real events through the GUI library's
+ * own listener and asserts both inventories' contents afterwards -- the only way to tell "cancelled"
+ * from "allowed", since this class cannot reach the code that turns the return value into
+ * event.setCancelled(...). See the note where those cases used to sit.
  */
 @DisplayName("RemoteBagContentGUI Tests")
 class RemoteBagContentGUITest {
