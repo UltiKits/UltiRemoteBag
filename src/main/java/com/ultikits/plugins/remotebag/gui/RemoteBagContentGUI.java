@@ -545,9 +545,14 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * <p>
      * The open page is resolved through {@link InventoryAPI#getPlayersCurrentGui(Player)} — the same
      * player-to-page map the GUI library's listener consults to decide which page receives a click,
-     * so this cannot disagree with what the player is actually looking at. Because the lookup is
-     * keyed by the viewer, it can only ever reach that viewer's own page; the identity check below
-     * states that invariant rather than relying on it silently.
+     * so this cannot disagree with what the player is actually looking at.
+     * <p>
+     * The page must also be a page of the sender's OWN bag. {@code /bag save} persists the sender's
+     * pages, and an admin viewing someone else's bag through {@code /bag see} holds a page whose
+     * viewer is the admin while its owner is the target — so a viewer-identity check would be
+     * tautologically true there and the command would write the target's data. The comparison is
+     * therefore against {@link #ownerUuid}. An admin's own edits to someone else's page are still
+     * saved by that page's Save button and by closing it, which is where that write belongs.
      * <p>
      * A read-only page is deliberately skipped: its live inventory is another player's bag being
      * looked at, and writing it back would let a viewer's stale view overwrite the owner's page.
@@ -567,7 +572,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
 
         RemoteBagContentGUI page = (RemoteBagContentGUI) current;
         if (page.accessMode != AccessMode.EDIT
-                || !viewer.getUniqueId().equals(page.player.getUniqueId())) {
+                || !viewer.getUniqueId().equals(page.ownerUuid)) {
             return false;
         }
 
