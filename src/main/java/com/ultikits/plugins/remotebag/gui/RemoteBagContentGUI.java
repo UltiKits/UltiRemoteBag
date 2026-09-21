@@ -13,6 +13,7 @@ import com.ultikits.ultitools.utils.XVersionUtils;
 import mc.obliviate.inventory.Gui;
 import mc.obliviate.inventory.Icon;
 import mc.obliviate.inventory.InventoryAPI;
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -21,6 +22,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
@@ -305,9 +307,12 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     private Icon createSaveButton() {
         Icon icon = createActionButton(Colors.GREEN, ChatColor.GREEN + plugin.i18n("btn_save"), e -> {
-            saveCurrentContents();
-            SoundUtil.playCloseSound(player, config);
-            player.sendMessage(ChatColor.GREEN + plugin.i18n("msg_bag_saved"));
+            // Only report a save that happened: saveCurrentContents() refuses, with its own message,
+            // when this page no longer holds edit authority.
+            if (saveCurrentContents()) {
+                SoundUtil.playCloseSound(player, config);
+                player.sendMessage(ChatColor.GREEN + plugin.i18n("msg_bag_saved"));
+            }
         });
         
         // 设置 lore
@@ -558,37 +563,139 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * looked at, and writing it back would let a viewer's stale view overwrite the owner's page.
      *
      * @param viewer 玩家 / the player whose open page should be flushed
-     * @return true if an open edit-mode page was written
+     * @return what happened, so the caller can report a save only when one occurred
      */
-    public static boolean flushOpenEditPage(Player viewer) {
+    public static FlushOutcome flushOpenEditPage(Player viewer) {
         if (viewer == null || InventoryAPI.getInstance() == null) {
-            return false;
+            return FlushOutcome.NO_OPEN_PAGE;
         }
 
         Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
         if (!(current instanceof RemoteBagContentGUI)) {
-            return false;
+            return FlushOutcome.NO_OPEN_PAGE;
         }
 
         RemoteBagContentGUI page = (RemoteBagContentGUI) current;
         if (page.accessMode != AccessMode.EDIT
                 || !viewer.getUniqueId().equals(page.ownerUuid)) {
+            return FlushOutcome.NO_OPEN_PAGE;
+        }
+
+        return page.saveCurrentContents() ? FlushOutcome.WRITTEN : FlushOutcome.REFUSED;
+    }
+
+    /**
+     * What {@link #flushOpenEditPage(Player)} did.
+     * <p>
+     * Three outcomes rather than a boolean, because a caller that reports "saved" has to distinguish
+     * "there was nothing open, so persist the cache instead" from "there was an open page and it
+     * refused to write" — the second must report nothing, since the page has already told the viewer
+     * why.
+     */
+    public enum FlushOutcome {
+        /** No flushable page was open; the caller should persist the cache itself. */
+        NO_OPEN_PAGE,
+        /** An open edit page was written, which also persisted the rest of that player's cache. */
+        WRITTEN,
+        /** An open edit page declined to write because it no longer holds edit authority. */
+        REFUSED
+    }
+
+    /**
+     * Whether {@code holderUuid} is, right now, looking at this bag page.
+     * <p>
+     * This is what {@link BagLockService} asks before letting a lock's timeout reclaim it: the
+     * timeout exists to free a lock whose holder's session ended without releasing it, and a holder
+     * who is online with the page open has not ended their session.
+     * <p>
+     * Presence is READ, never stored. There is no "page is open" flag anywhere, because a flag can
+     * leak — on a crash, on a reload, on a force-close by another plugin, on a server-side inventory
+     * replacement — and a leaked flag would make a lock immortal, which is worse than the lost update
+     * it was added to prevent. Both facts below are live:
+     * <ul>
+     *   <li>{@link InventoryAPI#getPlayersCurrentGui(Player)} is the library's own player-to-page
+     *       registry, written by {@code Gui#open()} and removed by its listener on
+     *       {@link InventoryCloseEvent}. Every way a page stops being open fires that event —
+     *       quitting, Escape, another plugin's {@code closeInventory()}, opening any other
+     *       inventory — so a closed page cannot still be registered.</li>
+     *   <li>The holder's live {@link org.bukkit.inventory.InventoryView} must still be showing this
+     *       page's inventory. After a crash or a reload there is no view at all, so the lock expires
+     *       under the ordinary rule with no special case and no separate backstop.</li>
+     * </ul>
+     * The comparison is {@code equals}, not {@code ==}, deliberately:
+     * {@code org.bukkit.craftbukkit.inventory.CraftInventory#equals} compares the underlying
+     * {@code net.minecraft.world.Container}, and a view's top inventory can be a different wrapper
+     * around that same container, so reference identity would be a false negative on a real server
+     * (measured from {@code paper-1.21.11.jar}) and would leave this check silently inert.
+     *
+     * @param ownerUuid  the bag's owner
+     * @param pageNum    the page number
+     * @param holderUuid the lock holder to look for
+     * @return true if that player is online and has this very page open
+     */
+    public static boolean isPageOpenBy(UUID ownerUuid, int pageNum, UUID holderUuid) {
+        if (ownerUuid == null || holderUuid == null || InventoryAPI.getInstance() == null) {
             return false;
         }
 
-        page.saveCurrentContents();
-        return true;
+        // No server means nobody is online, so no page is open. Reached during early boot and during
+        // shutdown, when Bukkit's static server reference is not (or no longer) set.
+        if (Bukkit.getServer() == null) {
+            return false;
+        }
+
+        Player holder = Bukkit.getPlayer(holderUuid);
+        if (holder == null || !holder.isOnline()) {
+            return false;
+        }
+
+        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(holder);
+        if (!(current instanceof RemoteBagContentGUI)) {
+            return false;
+        }
+
+        RemoteBagContentGUI page = (RemoteBagContentGUI) current;
+        if (page.pageNum != pageNum || !ownerUuid.equals(page.ownerUuid)) {
+            return false;
+        }
+
+        InventoryView view = holder.getOpenInventory();
+        return view != null && page.getInventory().equals(view.getTopInventory());
     }
 
     /**
      * 保存当前 GUI 中的内容到背包服务
+     * <p>
+     * Copies this page's live inventory into the service cache and persists it.
+     * <p>
+     * Defence in depth, explicitly secondary: the primary protection against a stale page
+     * overwriting a newer one is that a lock can no longer expire while its page is open
+     * ({@link #isPageOpenBy}), so two pages of the same bag can no longer be open in edit mode at
+     * once. This guard exists in case some path still gets there, and it asks the LIVE lock rather
+     * than the {@code accessMode} this page was constructed with.
+     * <p>
+     * {@link BagLockService#mayWrite} answers true when no lock is held at all, which is the ordinary
+     * benign case — the lock expired and nobody took it — and that case must keep saving. A guard
+     * that refused there would silently stop persisting every normal session.
+     *
+     * @return true if the contents were written
      */
-    private void saveCurrentContents() {
+    private boolean saveCurrentContents() {
+        if (!lockService.mayWrite(ownerUuid, pageNum, player.getUniqueId())) {
+            // Somebody else holds this page now. Writing would overwrite their committed edits with
+            // a snapshot taken before they existed. Refusing silently would trade their loss for
+            // this viewer's, so say so.
+            SoundUtil.playErrorSound(player, config);
+            player.sendMessage(ChatColor.RED + plugin.i18n("msg_save_refused_lock_taken"));
+            return false;
+        }
+
         ItemStack[] contents = new ItemStack[CONTENT_SIZE];
         for (int i = 0; i < CONTENT_SIZE; i++) {
             contents[i] = getInventory().getItem(i);
         }
         bagService.setBagPage(ownerUuid, pageNum, contents);
         bagService.saveBag(ownerUuid);
+        return true;
     }
 }

@@ -130,13 +130,21 @@ public class RemoteBagService {
     
     /**
      * Save bag to database.
+     * <p>
+     * Reports whether anything was written. Nothing is cached for a player who has not opened a bag
+     * this session, and in that case this method writes no row at all — a caller that announces a
+     * save has to be able to tell that apart from a real one.
+     *
+     * @param playerUuid 玩家 UUID
+     * @return true if at least one page was inserted or updated
      */
-    public void saveBag(UUID playerUuid) {
+    public boolean saveBag(UUID playerUuid) {
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
-        if (pages == null) {
-            return;
+        if (pages == null || pages.isEmpty()) {
+            return false;
         }
 
+        boolean written = false;
         for (Map.Entry<Integer, ItemStack[]> entry : pages.entrySet()) {
             String contents = serializeItems(entry.getValue());
 
@@ -148,17 +156,20 @@ public class RemoteBagService {
 
             if (existing.isEmpty()) {
                 dataOperator.insert(RemoteBagData.create(playerUuid, entry.getKey(), contents));
+                written = true;
             } else {
                 RemoteBagData data = existing.get(0);
                 data.setContents(contents);
                 data.setLastUpdated(System.currentTimeMillis());
                 try {
                     dataOperator.update(data);
+                    written = true;
                 } catch (IllegalAccessException e) {
                     plugin.getLogger().error("Failed to update bag data", e);
                 }
             }
         }
+        return written;
     }
     
     /**

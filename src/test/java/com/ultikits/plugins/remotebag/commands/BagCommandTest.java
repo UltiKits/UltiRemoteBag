@@ -262,10 +262,27 @@ class BagCommandTest {
         @Test
         @DisplayName("Should save and send confirmation")
         void savesAndConfirms() {
+            when(bagService.saveBag(playerUuid)).thenReturn(true);
+
             command.saveBag(player);
 
             verify(bagService).saveBag(playerUuid);
             verify(player).sendMessage(contains("bag_saved_manually"));
+        }
+
+        @Test
+        @DisplayName("Reports nothing saved when there was nothing cached to save")
+        void reportsNothingSavedWhenTheCacheIsEmpty() {
+            // saveBag returns false for a player with no cached pages -- a fresh login that has not
+            // opened a page. Claiming `bag_saved_manually` there reported a write that never
+            // happened, which is what the UAT row for this command had been amended to assert
+            // against (pull request #34 gate-1 review, WR-05).
+            when(bagService.saveBag(playerUuid)).thenReturn(false);
+
+            command.saveBag(player);
+
+            verify(player).sendMessage(contains("msg_nothing_to_save"));
+            verify(player, never()).sendMessage(contains("bag_saved_manually"));
         }
 
         @Test

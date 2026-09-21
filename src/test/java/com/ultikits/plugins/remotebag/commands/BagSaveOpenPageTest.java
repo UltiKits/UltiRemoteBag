@@ -84,7 +84,12 @@ class BagSaveOpenPageTest {
         bagService = new RemoteBagService(mockPlugin, config);
         UltiRemoteBagTestHelper.setField(bagService, "dataOperator", store);
 
-        lockService = mock(BagLockService.class);
+        // A REAL lock service, not a mock. The page's save path now asks it for the live access mode
+        // before writing, and with no lock held it answers EDIT -- the ordinary benign case, which
+        // must keep saving. A mock would answer null there and make every case below refuse, so the
+        // real service is what keeps these cases about /bag save rather than about the stub.
+        lockService = new BagLockService();
+        UltiRemoteBagTestHelper.setField(lockService, "plugin", mockPlugin);
         command = new BagCommand(mockPlugin, bagService, lockService, config);
 
         player = server.addPlayer("Owner");

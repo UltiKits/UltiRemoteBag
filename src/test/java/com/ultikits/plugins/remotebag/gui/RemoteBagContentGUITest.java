@@ -57,6 +57,12 @@ class RemoteBagContentGUITest {
 
         bagService = mock(RemoteBagService.class);
         lockService = mock(BagLockService.class);
+        // What a real BagLockService answers when no lock is held on the page -- the ordinary case,
+        // in which a save must go through. The save path asks the LIVE lock rather than the mode the
+        // page was constructed with, so a mock left unstubbed would answer false and every save case
+        // below would refuse for a reason that has nothing to do with what it tests. The refusal
+        // itself is asserted in SaveCurrentContents#refusesWhenTheLockIsNoLongerOurs.
+        lenient().when(lockService.mayWrite(any(), anyInt(), any())).thenReturn(true);
         config = UltiRemoteBagTestHelper.createDefaultConfig();
         mockPlugin = mock(UltiToolsPlugin.class);
         when(mockPlugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -257,6 +263,50 @@ class RemoteBagContentGUITest {
             for (int i = 0; i < 45; i++) {
                 verify(mockInventory).getItem(i);
             }
+        }
+
+        @Test
+        @DisplayName("Refuses to write, with a message, when the live lock is no longer this page's")
+        void refusesWhenTheLockIsNoLongerOurs() throws Exception {
+            // Defence in depth for the lost update in pull request #34's gate-1 review: this page was
+            // constructed in EDIT mode, but the live lock now says READ_ONLY, i.e. somebody else holds
+            // the page. Writing would overwrite their committed edits with a snapshot taken before
+            // they existed. The primary protection is that a lock can no longer expire while its page
+            // is open, so this state should be unreachable; this asserts the guard behind it.
+            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
+            when(lockService.mayWrite(ownerUuid, 1, playerUuid)).thenReturn(false);
+
+            Inventory mockInventory = mock(Inventory.class);
+            setInventory(gui, mockInventory);
+
+            Method saveMethod = RemoteBagContentGUI.class.getDeclaredMethod("saveCurrentContents");
+            saveMethod.setAccessible(true);
+            Object written = saveMethod.invoke(gui);
+
+            assertThat(written).as("the write must be reported as not performed").isEqualTo(false);
+            verify(bagService, never()).setBagPage(any(), anyInt(), any());
+            verify(bagService, never()).saveBag(any());
+            verify(player).sendMessage(contains("msg_save_refused_lock_taken"));
+        }
+
+        @Test
+        @DisplayName("Still writes when no lock is held at all, which is the ordinary case")
+        void stillWritesWhenNobodyHoldsTheLock() throws Exception {
+            // mayWrite answers true when the map holds no lock for the page -- the lock expired and
+            // nobody took it. A guard that refused there would silently stop persisting every normal
+            // session, so this is the control that the guard above is not that.
+            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
+            when(lockService.mayWrite(ownerUuid, 1, playerUuid)).thenReturn(true);
+
+            Inventory mockInventory = mock(Inventory.class);
+            setInventory(gui, mockInventory);
+
+            Method saveMethod = RemoteBagContentGUI.class.getDeclaredMethod("saveCurrentContents");
+            saveMethod.setAccessible(true);
+            Object written = saveMethod.invoke(gui);
+
+            assertThat(written).isEqualTo(true);
+            verify(bagService).saveBag(ownerUuid);
         }
     }
 

@@ -110,7 +110,12 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     // ==================== 锁定设置 ====================
 
     @Range(min = 10, max = 3600)
-    @ConfigEntry(path = "lock.timeout_seconds", comment = "背包锁超时时间（秒），超时后自动释放")
+    @ConfigEntry(path = "lock.timeout_seconds",
+            comment = "Bag lock recovery timeout in seconds. Reclaims a lock whose holder's session "
+                    + "ended without releasing it; a holder who is online with the page open keeps "
+                    + "the lock however long they idle. "
+                    + "背包锁的回收超时时间（秒）。仅用于回收持有者会话异常结束而未释放的锁；"
+                    + "持有者在线且页面仍打开时，无论空闲多久都会保留该锁")
     private int lockTimeout = 300;
     
     @ConfigEntry(path = "lock.notify_readonly_viewers", comment = "所有者开始使用背包时是否通知只读查看者")
