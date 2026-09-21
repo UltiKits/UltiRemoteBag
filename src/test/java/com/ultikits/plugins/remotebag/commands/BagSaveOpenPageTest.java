@@ -166,6 +166,37 @@ class BagSaveOpenPageTest {
     }
 
     @Test
+    @DisplayName("Another player's bag, opened by this sender as an admin, is not written by /bag save")
+    void savingDoesNotFlushAnotherPlayersBagOpenedByThisViewer() {
+        // The /bag see path constructs the page with the ADMIN as its viewer and the TARGET as its
+        // owner (BagCommand#openAdminBagPage), and BagLockService#adminOpen hands back EDIT mode when
+        // the target holds no lock. Comparing the sender against the page's viewer is therefore
+        // tautologically true here, and comparing it against the page's OWNER is what the command's
+        // "save my bag" semantics actually require. Raised as a P2 on pull request #34.
+        PlayerMock target = server.addPlayer("Target");
+        RemoteBagContentGUI targetsPage = new RemoteBagContentGUI(player, mockPlugin,
+                target.getUniqueId(), PAGE, bagService, lockService, config, AccessMode.EDIT);
+        targetsPage.open();
+        Bukkit.getPluginManager().callEvent(new InventoryOpenEvent(player.getOpenInventory()));
+        targetsPage.getInventory().setItem(CONTENT_SLOT, new ItemStack(Material.DIAMOND));
+
+        // Control: the sender does have a page of their own in the cache, so a flush that wrongly
+        // treated this page as the sender's would be visible as a write, not as silence.
+        ItemStack[] own = new ItemStack[45];
+        own[CONTENT_SLOT] = new ItemStack(Material.EMERALD);
+        bagService.setBagPage(player.getUniqueId(), PAGE, own);
+
+        command.saveBag(player);
+
+        assertThat(store.storedContents(target.getUniqueId().toString(), PAGE))
+                .as("/bag save must not write the bag of the player whose page the sender is viewing")
+                .isNull();
+        assertThat(store.storedContents(player.getUniqueId().toString(), PAGE))
+                .as("control: the sender's own cached page was still persisted by the same command")
+                .contains("minecraft:emerald");
+    }
+
+    @Test
     @DisplayName("With no page open, /bag save still persists what the cache already holds")
     void savingWithNoPageOpenStillPersistsTheCache() {
         ItemStack[] cached = new ItemStack[45];

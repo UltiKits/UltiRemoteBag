@@ -145,6 +145,46 @@ class RemoteBagDeserializationTest {
     }
 
     @Test
+    @DisplayName("An absurd slot index is skipped instead of sizing an array from it")
+    void anAbsurdSlotIndexDoesNotDriveTheAllocation() {
+        // Sizing the array from the highest stored index makes that index an allocation request from
+        // untrusted stored data: a hand-edited row carrying items.100000000 would ask for an array of
+        // hundreds of megabytes, and the resulting OutOfMemoryError is an Error, so the surrounding
+        // catch (Exception) would not contain it. Raised as a P2 on pull request #34; the fixed-size
+        // allocation this replaced could not do that. rows_per_page is @Range(min = 1, max = 6), so 54
+        // slots is the largest page any legal configuration can address.
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items.100000000", new ItemStack(Material.DIAMOND));
+        yaml.set("items.2", new ItemStack(Material.EMERALD));
+        store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
+
+        service.loadBagIfNeeded(playerUuid);
+        ItemStack[] page = service.getBagPage(playerUuid, PAGE);
+
+        assertThat(page).isNotNull();
+        assertThat(page.length)
+                .as("no stored key may size the page beyond what a legal rows_per_page can address")
+                .isLessThanOrEqualTo(54);
+        assertThat(page[2])
+                .as("the addressable item still loads")
+                .isEqualTo(new ItemStack(Material.EMERALD));
+    }
+
+    @Test
+    @DisplayName("A slot inside the largest legal page still survives a small rows_per_page")
+    void aSlotWithinTheLargestLegalPageIsKept() {
+        lenient().when(config.getRowsPerPage()).thenReturn(1);
+        store.seed(playerUuid.toString(), PAGE, yamlWith(53, new ItemStack(Material.DIAMOND)));
+
+        service.loadBagIfNeeded(playerUuid);
+        ItemStack[] page = service.getBagPage(playerUuid, PAGE);
+
+        assertThat(page[53])
+                .as("control: bounding the allocation must not reintroduce the loss it replaced")
+                .isEqualTo(new ItemStack(Material.DIAMOND));
+    }
+
+    @Test
     @DisplayName("A page stored entirely within rows_per_page still loads at the configured size")
     void anInRangePageKeepsTheConfiguredSize() {
         lenient().when(config.getRowsPerPage()).thenReturn(6);
