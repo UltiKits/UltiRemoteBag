@@ -13,12 +13,15 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 /**
  * Loading a stored bag page whose slot indices do not fit the array that {@code rows_per_page}
@@ -49,6 +52,7 @@ class RemoteBagDeserializationTest {
     private RemoteBagService service;
     private RemoteBagConfig config;
     private InMemoryRemoteBagStore store;
+    private PluginLogger pluginLogger;
     private UUID playerUuid;
 
     @BeforeEach
@@ -60,7 +64,8 @@ class RemoteBagDeserializationTest {
         store = new InMemoryRemoteBagStore();
 
         UltiToolsPlugin mockPlugin = mock(UltiToolsPlugin.class);
-        lenient().when(mockPlugin.getLogger()).thenReturn(mock(PluginLogger.class));
+        pluginLogger = mock(PluginLogger.class);
+        lenient().when(mockPlugin.getLogger()).thenReturn(pluginLogger);
 
         service = new RemoteBagService(mockPlugin, config);
         UltiRemoteBagTestHelper.setField(service, "dataOperator", store);
@@ -108,6 +113,29 @@ class RemoteBagDeserializationTest {
                 .as("the in-range emerald must not be lost because a later index was out of range")
                 .isEqualTo(new ItemStack(Material.EMERALD));
         assertThat(page[40]).isEqualTo(new ItemStack(Material.DIAMOND));
+    }
+
+    @Test
+    @DisplayName("A skipped slot is warned about through the module's own logger, not an inline one")
+    void aSkippedSlotWarnsThroughTheModuleLogger() {
+        // Both warnings used an inline java.util.logging.Logger while this class holds a plugin whose
+        // getLogger() is the framework PluginLogger used everywhere else in the module, so the lines
+        // appeared without the [UltiTools] [UltiRemoteBag] prefix that
+        // ultiremotebag.bag.persistence.small-rows-per-page's verdict looks for (gate-1 review, IN-13).
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items.0", new ItemStack(Material.DIAMOND));
+        yaml.set("items.not-a-slot", "garbage");
+        store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
+
+        service.loadBagIfNeeded(playerUuid);
+
+        ArgumentCaptor<String> warned = ArgumentCaptor.forClass(String.class);
+        verify(pluginLogger, atLeastOnce()).warn(warned.capture());
+        assertThat(warned.getAllValues())
+                .as("the skip is reported through the plugin logger, naming the page and the key")
+                .anySatisfy(line -> assertThat(line)
+                        .contains("Skipping unreadable slot in bag page 1")
+                        .contains("not-a-slot"));
     }
 
     @Test
