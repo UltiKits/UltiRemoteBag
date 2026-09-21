@@ -91,7 +91,7 @@ public class RemoteBagService {
                 .list();
 
         for (RemoteBagData bagData : data) {
-            ItemStack[] items = deserializeItems(bagData.getContents());
+            ItemStack[] items = deserializeItems(bagData.getContents(), bagData.getPageNumber());
             pages.put(bagData.getPageNumber(), items);
         }
 
@@ -175,22 +175,58 @@ public class RemoteBagService {
     
     /**
      * Deserialize items from YAML string.
+     * <p>
+     * The returned array is sized to hold every slot index the stored page actually uses, which can
+     * exceed {@code rows_per_page * 9}: the content GUI exposes and saves 45 slots whatever
+     * {@code rows_per_page} holds, so a server configured below 5 rows stores indices the configured
+     * size cannot address. Writing such an index into an array sized from the config used to throw
+     * {@link ArrayIndexOutOfBoundsException}, which was caught and turned into an empty page — every
+     * item on that page silently destroyed on load (UltiKits/UltiRemoteBag#24).
+     * <p>
+     * A single unreadable entry (a non-numeric key, a negative index) is now skipped with a warning
+     * naming the page and the key instead of costing the whole page. Whether a smaller
+     * {@code rows_per_page} ought to shrink the displayed page at all is a separate open question;
+     * this method's contract is only that loading never loses a stored item.
+     *
+     * @param data       stored YAML, may be null or empty
+     * @param pageNumber the page this data belongs to, for the warning messages
+     * @return the page's items, indexable for every slot the stored data uses
      */
-    private ItemStack[] deserializeItems(String data) {
+    private ItemStack[] deserializeItems(String data, int pageNumber) {
         if (data == null || data.isEmpty()) {
             return new ItemStack[config.getRowsPerPage() * 9];
         }
-        
+
         try {
             YamlConfiguration yaml = new YamlConfiguration();
             yaml.loadFromString(data);
-            
-            ItemStack[] items = new ItemStack[config.getRowsPerPage() * 9];
-            if (yaml.isConfigurationSection("items")) {
-                for (String key : yaml.getConfigurationSection("items").getKeys(false)) {
-                    int slot = Integer.parseInt(key);
-                    items[slot] = yaml.getItemStack("items." + key);
+
+            if (!yaml.isConfigurationSection("items")) {
+                return new ItemStack[config.getRowsPerPage() * 9];
+            }
+
+            Set<String> keys = yaml.getConfigurationSection("items").getKeys(false);
+            Map<Integer, String> slots = new LinkedHashMap<>();
+            int highestSlot = -1;
+            for (String key : keys) {
+                int slot;
+                try {
+                    slot = Integer.parseInt(key);
+                } catch (NumberFormatException e) {
+                    warnSkippedSlot(pageNumber, key, "not a slot number");
+                    continue;
                 }
+                if (slot < 0) {
+                    warnSkippedSlot(pageNumber, key, "negative slot index");
+                    continue;
+                }
+                slots.put(slot, key);
+                highestSlot = Math.max(highestSlot, slot);
+            }
+
+            ItemStack[] items = new ItemStack[Math.max(config.getRowsPerPage() * 9, highestSlot + 1)];
+            for (Map.Entry<Integer, String> entry : slots.entrySet()) {
+                items[entry.getKey()] = yaml.getItemStack("items." + entry.getValue());
             }
             return items;
         } catch (Exception e) {
@@ -199,7 +235,14 @@ public class RemoteBagService {
             return new ItemStack[config.getRowsPerPage() * 9];
         }
     }
-    
+
+    private void warnSkippedSlot(int pageNumber, String key, String reason) {
+        java.util.logging.Logger.getLogger(RemoteBagService.class.getName())
+                .log(java.util.logging.Level.WARNING,
+                        "Skipping unreadable slot in bag page {0}: key ''{1}'' ({2}); the rest of the page is kept",
+                        new Object[]{pageNumber, key, reason});
+    }
+
     /**
      * Clear cache for a player.
      * 
