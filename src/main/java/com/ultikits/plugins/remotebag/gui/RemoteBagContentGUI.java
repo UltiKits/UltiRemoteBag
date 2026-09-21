@@ -169,20 +169,24 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     
     /**
      * 加载背包内容到 GUI
+     * <p>
+     * Writes EVERY content slot, including the empty ones. This method is also the read-only Refresh
+     * button's whole implementation, and writing only the non-null entries left a refreshed view
+     * showing the union of what was displayed before and what is stored now — so a viewer whose whole
+     * purpose is to see the current state saw items the owner had already taken out. With
+     * UltiKits/UltiRemoteBag#27 fixed the viewer can no longer act on those phantom items, but an
+     * administrator can still act on the wrong picture.
      */
     private void loadBagContents() {
         // 确保背包数据已加载
         bagService.loadBagIfNeeded(ownerUuid);
-        
+
         ItemStack[] contents = bagService.getBagPage(ownerUuid, pageNum);
-        if (contents != null) {
-            for (int i = 0; i < Math.min(contents.length, CONTENT_SIZE); i++) {
-                if (contents[i] != null) {
-                    // 物品直接放入，不设置 Icon 点击事件
-                    // 编辑模式下允许自由移动，只读模式在 onClick 中处理
-                    getInventory().setItem(i, contents[i]);
-                }
-            }
+        for (int i = 0; i < CONTENT_SIZE; i++) {
+            // 物品直接放入，不设置 Icon 点击事件
+            // 编辑模式下允许自由移动，只读模式在 onClick 中处理
+            boolean stored = contents != null && i < contents.length && contents[i] != null;
+            getInventory().setItem(i, stored ? contents[i] : null);
         }
     }
     
@@ -450,8 +454,14 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return CANCEL;
         }
 
-        // Edit mode: the content area and the viewer's own inventory behave like a chest.
-        return ALLOW;
+        // Edit mode: the content area and the viewer's own inventory behave like a chest -- but only
+        // as far as nobody else has already said no. The library turns ALLOW into
+        // event.setCancelled(false), which CLEARS a cancellation an earlier handler set rather than
+        // merely declining to add one, and its own listener is a bare @EventHandler (NORMAL,
+        // ignoreCancelled = false). Returning ALLOW unconditionally therefore overrode an anti-cheat
+        // or region plugin at LOWEST/LOW/earlier-NORMAL. Deciding for this page is ours; reversing
+        // somebody else's decision is not.
+        return event.isCancelled() ? CANCEL : ALLOW;
     }
 
     /**
@@ -499,7 +509,9 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             }
         }
 
-        return ALLOW;
+        // Same reasoning as onClick's edit branch: the library applies setCancelled(!onDrag(...))
+        // unconditionally, so answering ALLOW would clear another plugin's cancellation.
+        return event.isCancelled() ? CANCEL : ALLOW;
     }
 
     /**

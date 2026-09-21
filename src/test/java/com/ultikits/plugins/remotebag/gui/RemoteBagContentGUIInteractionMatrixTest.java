@@ -12,7 +12,10 @@ import mc.obliviate.inventory.InventoryAPI;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.HandlerList;
+import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
@@ -99,6 +102,8 @@ class RemoteBagContentGUIInteractionMatrixTest {
     private static final int CONTENT_SLOT_2 = 1;
     /** Toolbar row: raw slots 45-53. Slot 49 is the save button (bottom row, column 4). */
     private static final int TOOLBAR_SAVE_SLOT = 49;
+    /** Bottom row, column 3: the Refresh button in read-only mode, a filler in edit mode. */
+    private static final int REFRESH_SLOT = 48;
     /** First raw slot of the viewer's own inventory in a 54-slot view. */
     private static final int OWN_INVENTORY_SLOT = 54;
     /**
@@ -484,7 +489,127 @@ class RemoteBagContentGUIInteractionMatrixTest {
         }
     }
 
+    // ==================== Cross-cutting: other plugins, and the Refresh button ====================
+
+    @Nested
+    @DisplayName("Interaction with other plugins and with the Refresh button")
+    class CrossCutting {
+
+        @Test
+        @DisplayName("An edit-mode click another plugin cancelled stays cancelled")
+        void editModeDoesNotUnCancelAnotherPluginsDecision() {
+            // The library turns this page's ALLOW into event.setCancelled(false), which CLEARS a
+            // cancellation rather than declining to add one, and its listener is NORMAL priority with
+            // ignoreCancelled = false. Answering ALLOW unconditionally therefore overrode an anti-cheat
+            // or region plugin (pull request #34 gate-1 review, IN-12).
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+            Listener otherPlugin = registerCancellingListenerAtLowest();
+            try {
+                InventoryClickEvent event = click(gui, CONTENT_SLOT, ClickType.LEFT,
+                        InventoryAction.PICKUP_ALL);
+
+                assertThat(event.isCancelled())
+                        .as("another plugin's cancellation must survive this page's edit-mode answer")
+                        .isTrue();
+                assertBagStillHoldsTheDiamond(gui);
+                assertViewerHoldsNoDiamond();
+            } finally {
+                HandlerList.unregisterAll(otherPlugin);
+            }
+        }
+
+        @Test
+        @DisplayName("Control: with no other plugin involved the identical click is allowed")
+        void theSameClickIsAllowedWithoutTheOtherPlugin() {
+            // Without this, the case above could pass because the click was refused for some unrelated
+            // reason rather than because the cancellation was respected.
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+
+            InventoryClickEvent event = click(gui, CONTENT_SLOT, ClickType.LEFT,
+                    InventoryAction.PICKUP_ALL);
+
+            assertThat(event.isCancelled()).isFalse();
+            assertThat(viewer.getItemOnCursor().getType()).isEqualTo(Material.DIAMOND);
+        }
+
+        @Test
+        @DisplayName("An edit-mode drag another plugin cancelled stays cancelled")
+        void editModeDragDoesNotUnCancelAnotherPluginsDecision() {
+            // Same defect class through the other entry point: the library applies
+            // setCancelled(!onDrag(...)) unconditionally, so a drag was un-cancelled the same way.
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+            gui.getInventory().setItem(CONTENT_SLOT_2, null);
+            Listener otherPlugin = registerCancellingDragListenerAtLowest();
+            try {
+                InventoryDragEvent event = dragEmeraldOver(gui, CONTENT_SLOT_2, CONTENT_SLOT_2 + 1);
+
+                assertThat(event.isCancelled())
+                        .as("another plugin's cancellation of a drag must survive too")
+                        .isTrue();
+                assertThat(gui.getInventory().getItem(CONTENT_SLOT_2)).isNull();
+            } finally {
+                HandlerList.unregisterAll(otherPlugin);
+            }
+        }
+
+        @Test
+        @DisplayName("Refresh clears a slot the owner has emptied since the page opened")
+        void refreshClearsAVacatedSlot() {
+            // The read-only Refresh button is loadBagContents()'s only other caller, and it wrote only
+            // the non-null entries -- so a refreshed view showed the union of what was displayed before
+            // and what is stored now, i.e. items the owner had already taken out (pull request #34
+            // gate-1 review, IN-11).
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
+            // The owner empties the page elsewhere while this read-only view stays open.
+            lenient().when(bagService.getBagPage(ownerUuid, PAGE)).thenReturn(new ItemStack[45]);
+            // The owner still holds the page, so Refresh re-reads rather than upgrading to edit mode.
+            lenient().when(lockService.canUpgradeToEdit(ownerUuid, PAGE)).thenReturn(false);
+
+            click(gui, REFRESH_SLOT, ClickType.LEFT, InventoryAction.PICKUP_ALL);
+
+            assertThat(gui.getInventory().getItem(CONTENT_SLOT))
+                    .as("a refreshed read-only view must not still show an item that is gone")
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("Control: Refresh still shows an item that is still stored")
+        void refreshKeepsAnItemThatIsStillThere() {
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
+            lenient().when(lockService.canUpgradeToEdit(ownerUuid, PAGE)).thenReturn(false);
+
+            click(gui, REFRESH_SLOT, ClickType.LEFT, InventoryAction.PICKUP_ALL);
+
+            assertThat(gui.getInventory().getItem(CONTENT_SLOT))
+                    .as("control: clearing first must not wipe the page it is meant to redraw")
+                    .isEqualTo(new ItemStack(Material.DIAMOND));
+        }
+    }
+
     // ==================== Harness ====================
+
+    /** A stand-in for an anti-cheat or region plugin that cancels the click before the library sees it. */
+    private Listener registerCancellingListenerAtLowest() {
+        Listener listener = new Listener() {
+            @EventHandler(priority = EventPriority.LOWEST)
+            public void onClick(InventoryClickEvent event) {
+                event.setCancelled(true);
+            }
+        };
+        Bukkit.getPluginManager().registerEvents(listener, MockBukkit.createMockPlugin("OtherPlugin"));
+        return listener;
+    }
+
+    private Listener registerCancellingDragListenerAtLowest() {
+        Listener listener = new Listener() {
+            @EventHandler(priority = EventPriority.LOWEST)
+            public void onDrag(InventoryDragEvent event) {
+                event.setCancelled(true);
+            }
+        };
+        Bukkit.getPluginManager().registerEvents(listener, MockBukkit.createMockPlugin("OtherDragPlugin"));
+        return listener;
+    }
 
     /**
      * Opens a real content GUI for {@link #viewer} whose page 1 holds a single DIAMOND in slot 0,
