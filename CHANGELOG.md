@@ -50,6 +50,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the administrator had added, or restoring an item the administrator had taken out so that it existed
   twice. The administrator is now told why their view is read-only instead of being downgraded
   silently (UltiKits/UltiRemoteBag#34).
+- A drag confined to your own inventory is no longer refused while you are viewing somebody else's
+  bag read-only. Read-only guards the bag, not your own inventory, which is already how clicking
+  behaves. And a drag that IS refused now says why, in both modes, instead of failing silently
+  (UltiKits/UltiRemoteBag#34).
 - `/bag save` now reports only a save it actually performed. With nothing cached to save — a fresh
   login that has not opened a page — it says so instead of confirming a write that did not happen, and
   it no longer persists every cached page twice when it flushed an open page (UltiKits/UltiRemoteBag#34).
@@ -78,6 +82,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   异常结束而未释放的锁，并非持有者在场时仍需续期的租约。此前只要配置的超时时间到达，即使所有者仍在查看该页，锁
   也会被转交，而所有者随后的保存会把管理员出现之前的快照写回该行——销毁管理员放入的物品，或把管理员取出的物品
   还原，导致其存在两份。现在管理员会被告知其视图为何是只读，而不再被静默降级（UltiKits/UltiRemoteBag#34）。
+- 以只读方式查看他人背包时，完全在自己背包内进行的拖拽不再被拒绝：只读保护的是背包本身，而不是查看者自己的
+  背包——点击操作原本就是如此。并且被拒绝的拖拽现在会在两种模式下都说明原因，而不再静默失败
+  （UltiKits/UltiRemoteBag#34）。
 - `/bag save` 现在只在确实完成保存时才如此报告。当没有任何缓存内容可保存时（例如刚登录且尚未打开过背包页），
   它会明确说明，而不再确认一次并未发生的写入；并且在刷新了打开的页面后，不再把每个缓存页重复保存两次
   （UltiKits/UltiRemoteBag#34）。
