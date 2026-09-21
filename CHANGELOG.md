@@ -50,6 +50,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the administrator had added, or restoring an item the administrator had taken out so that it existed
   twice. The administrator is now told why their view is read-only instead of being downgraded
   silently (UltiKits/UltiRemoteBag#34).
+- A toolbar button can no longer be collected out of a bag page, or have one of your items merged
+  into it. Two vanilla actions are not confined to the slot you clicked — a double-click sweeps
+  matching stacks out of the whole page, and a shift-click from your own inventory looks anywhere in
+  the page for somewhere to put the stack — so if you were holding an item identical to one of the
+  buttons, the button could be taken (and reappear when the page was reopened, duplicating it) or
+  your item could vanish into the button row and be lost when the page closed. Both are refused now,
+  with a line saying why. Holding such an item is realistic on a server upgrading from a version
+  where the buttons could be picked up (UltiKits/UltiRemoteBag#34).
 - A save whose database write fails now says so instead of confirming a save. The page's own Save
   button, `/bag save` and closing the page in edit mode all reported success whenever the copy into
   memory succeeded, even when the write to the database did not, so an edit that existed only in
@@ -99,6 +107,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   异常结束而未释放的锁，并非持有者在场时仍需续期的租约。此前只要配置的超时时间到达，即使所有者仍在查看该页，锁
   也会被转交，而所有者随后的保存会把管理员出现之前的快照写回该行——销毁管理员放入的物品，或把管理员取出的物品
   还原，导致其存在两份。现在管理员会被告知其视图为何是只读，而不再被静默降级（UltiKits/UltiRemoteBag#34）。
+- 现在无法再把工具栏按钮从背包页中取走，也无法把自己的物品并入按钮中。有两种原版操作并不局限于你点击的那一格——
+  双击会把整页中相同的物品全部收拢到光标上，从自己背包 Shift 点击则会在整页中寻找可放置的位置——因此如果你手持
+  与某个按钮完全相同的物品，该按钮可能被取走（重新打开页面后又会重新生成，从而复制），或者你的物品会被并入按钮行
+  并在关闭页面时丢失。现在两者都会被拒绝，并说明原因。从按钮可被取走的旧版本升级而来的服务器上，玩家持有这类物品
+  是现实存在的情况（UltiKits/UltiRemoteBag#34）。
 - 数据库写入失败的保存现在会明确报错，而不再确认保存成功。此前只要写入内存缓存成功，页面自身的保存按钮、
   `/bag save` 以及在编辑模式下关闭页面都会报告成功，即使数据库写入并未成功，因此仅存在于内存中的改动会被
   报告为已保存，并在下次重启后丢失。现在也会区分「没有需要保存的内容」与「保存失败」，因为二者要求操作者
