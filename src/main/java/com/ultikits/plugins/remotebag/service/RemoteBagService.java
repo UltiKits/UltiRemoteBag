@@ -35,6 +35,18 @@ public class RemoteBagService {
     // Cache for player bags - Map<PlayerUUID, Map<PageNumber, ItemStack[]>>
     private final Map<UUID, Map<Integer, ItemStack[]>> bagCache = new ConcurrentHashMap<>();
 
+    /**
+     * Largest page any legal configuration can address: {@code rows_per_page} is validated
+     * {@code @Range(min = 1, max = 6)} and each row is 9 slots.
+     * <p>
+     * A stored slot index is data, and {@link #deserializeItems(String, int)} sizes the page from the
+     * highest one it finds, so without this ceiling a corrupt or hand-edited row could turn its own
+     * key into an allocation request — {@code items.100000000} asking for an array of hundreds of
+     * megabytes, and the resulting {@link OutOfMemoryError} is an {@link Error}, so the
+     * {@code catch (Exception)} around the deserializer would not contain it.
+     */
+    private static final int MAX_PAGE_SLOTS = 54;
+
     public RemoteBagService(UltiToolsPlugin plugin, RemoteBagConfig config) {
         this.plugin = plugin;
         this.config = config;
@@ -183,8 +195,10 @@ public class RemoteBagService {
      * {@link ArrayIndexOutOfBoundsException}, which was caught and turned into an empty page — every
      * item on that page silently destroyed on load (UltiKits/UltiRemoteBag#24).
      * <p>
-     * A single unreadable entry (a non-numeric key, a negative index) is now skipped with a warning
-     * naming the page and the key instead of costing the whole page. Whether a smaller
+     * A single unreadable entry — a non-numeric key, a negative index, or an index beyond
+     * {@link #MAX_PAGE_SLOTS} — is skipped with a warning naming the page and the key instead of
+     * costing the whole page. The ceiling is applied before any array is allocated, so no stored key
+     * can size the allocation. Whether a smaller
      * {@code rows_per_page} ought to shrink the displayed page at all is a separate open question;
      * this method's contract is only that loading never loses a stored item.
      *
@@ -218,6 +232,11 @@ public class RemoteBagService {
                 }
                 if (slot < 0) {
                     warnSkippedSlot(pageNumber, key, "negative slot index");
+                    continue;
+                }
+                if (slot >= MAX_PAGE_SLOTS) {
+                    warnSkippedSlot(pageNumber, key,
+                            "slot beyond the largest addressable page of " + MAX_PAGE_SLOTS + " slots");
                     continue;
                 }
                 slots.put(slot, key);
