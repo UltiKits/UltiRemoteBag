@@ -147,124 +147,18 @@ class RemoteBagContentGUITest {
         }
     }
 
-    // ==================== onClick ====================
-
-    @Nested
-    @DisplayName("onClick")
-    class OnClick {
-
-        @Test
-        @DisplayName("Should cancel event in toolbar area (slot >= 45)")
-        void cancelsToolbarClick() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(45);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isTrue(); // true = cancel event
-        }
-
-        @Test
-        @DisplayName("Should cancel event in toolbar area (last slot)")
-        void cancelsLastSlotClick() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(53);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isTrue();
-        }
-
-        @Test
-        @DisplayName("Should allow click in content area in edit mode")
-        void allowsContentClickInEditMode() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(0);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isFalse(); // false = allow event
-        }
-
-        @Test
-        @DisplayName("Should allow click on middle content slot in edit mode")
-        void allowsMiddleSlotClickInEditMode() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(22);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isFalse();
-        }
-
-        @Test
-        @DisplayName("Should cancel click in content area in read-only mode with items")
-        void cancelsContentClickInReadOnlyMode() {
-            RemoteBagContentGUI gui = createGui(AccessMode.READ_ONLY);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(0);
-            when(event.getCurrentItem()).thenReturn(mock(ItemStack.class));
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isTrue(); // cancel event
-            verify(player).sendMessage(contains("msg_readonly_no_move"));
-        }
-
-        @Test
-        @DisplayName("Should cancel click in read-only mode with cursor item")
-        void cancelsReadOnlyWithCursor() {
-            RemoteBagContentGUI gui = createGui(AccessMode.READ_ONLY);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(0);
-            when(event.getCurrentItem()).thenReturn(null);
-            when(event.getCursor()).thenReturn(mock(ItemStack.class));
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isTrue();
-            verify(player).sendMessage(contains("msg_readonly_no_move"));
-        }
-
-        @Test
-        @DisplayName("Should cancel click in read-only mode even with no items")
-        void cancelsReadOnlyEmptySlot() {
-            RemoteBagContentGUI gui = createGui(AccessMode.READ_ONLY);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(10);
-            when(event.getCurrentItem()).thenReturn(null);
-            when(event.getCursor()).thenReturn(null);
-
-            boolean result = gui.onClick(event);
-
-            // Still cancels but no message since both are null
-            assertThat(result).isTrue();
-        }
-
-        @Test
-        @DisplayName("Should allow content slot at boundary (slot 44)")
-        void allowsContentBoundarySlot() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(44);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isFalse(); // content area, edit mode
-        }
-    }
+    // ==================== onClick / onDrag ====================
+    //
+    // Deliberately absent here. The cases that used to sit in this position asserted only the
+    // boolean onClick returns, reading it through the comment "true = cancel event" -- the inverse
+    // of the deployed GUI library's real contract, so they were green while a read-only viewer
+    // could genuinely take another player's item (UltiKits/UltiRemoteBag#27). Reading that return
+    // value also never runs the code that turns it into event.setCancelled(...), so no assertion on
+    // it can tell "cancelled" from "allowed".
+    //
+    // Click and drag behaviour is now asserted in RemoteBagContentGUIInteractionMatrixTest, which
+    // dispatches real events through the library's own listener and asserts both inventories'
+    // contents afterwards.
 
     // ==================== onClose ====================
 
