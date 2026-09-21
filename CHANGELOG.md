@@ -33,6 +33,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   only what had already reached the plugin's cache — which happens when the page's own Save button
   is clicked, or when it is closed in edit mode — so an item placed and then saved with `/bag save`
   was reported as saved and then lost on the next restart (UltiKits/UltiRemoteBag#22).
+- Loading a bag page no longer destroys it when `rows_per_page` is set below 5. The page is read
+  back at whatever size its stored slots need, so an item saved from one of the content GUI's
+  higher slots survives; previously the load threw out of bounds, the failure was swallowed, and
+  every item on that page was silently lost. A single unreadable entry in a stored page (a
+  non-numeric or negative slot key) is now skipped with a `WARNING` naming the page and the key,
+  instead of costing the whole page. This does not change how many rows the GUI shows — it still
+  shows and saves 45 slots whatever `rows_per_page` holds, which is still open as
+  UltiKits/UltiRemoteBag#24 (UltiKits/UltiRemoteBag#24).
 - `/ul reload UltiRemoteBag` 现在会重载本模块的配置并刷新其语言文件；此前本模块替换了框架的重载步骤，两者都不会发生，
   修改 `config/remotebag.yml` 后只有重启才会生效（UltiKits/UltiRemoteBag#12）。
 - 通过 `/upm uninstall UltiRemoteBag` 卸载本模块时仍会先保存所有已缓存的背包；之后本模块的命令现在会被真正移除，
@@ -49,6 +57,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/bag save` 现在会保存放入仍处于打开状态的背包页中的物品。此前它只保存已经进入插件缓存的内容（点击该页
   自身的保存按钮，或在编辑模式下关闭该页时才会进入缓存），因此放入物品后立刻执行 `/bag save`，会收到已保存
   的提示，但该物品会在下次重启后丢失（UltiKits/UltiRemoteBag#22）。
+- 当 `rows_per_page` 被设为小于 5 时，加载背包页不再会销毁该页。读取时会按照所存槽位实际需要的大小还原，
+  因此从内容界面较高槽位保存的物品能够保留；此前加载会数组越界，该失败被静默吞掉，该页中的所有物品都会悄无声息地
+  丢失。所存页面中单个无法读取的条目（非数字或负数槽位键）现在只会被跳过，并输出一条指明页码与键名的 `WARNING`，
+  而不再让整页作废。此改动不改变界面显示的行数——无论 `rows_per_page` 为何值，界面仍显示并保存 45 个槽位，
+  这一点仍未解决（UltiKits/UltiRemoteBag#24）。
 
 ### Removed
 
