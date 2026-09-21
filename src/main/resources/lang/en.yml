@@ -58,6 +58,7 @@ msg_cannot_drag_toolbar: "The toolbar row is buttons, not storage — nothing ca
 msg_owner_started_using: "{0} has started using this bag, your view has been switched to read-only mode. Click the refresh button to try to acquire edit permission."
 msg_owner_has_page_open: "The owner has this page open right now, so the lock timeout does not hand it over. Click refresh once they close it."
 msg_save_refused_lock_taken: "This page is now held by someone else, so your changes were not saved. Reopen it to see the current contents."
+msg_save_failed: "The save did not reach the database, so your changes are not stored. Check the server console."
 msg_nothing_to_save: "Nothing to save."
 
 # Command Related

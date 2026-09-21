@@ -67,6 +67,9 @@ class RemoteBagContentGUITest {
         // below would refuse for a reason that has nothing to do with what it tests. The refusal
         // itself is asserted in SaveCurrentContents#refusesWhenTheLockIsNoLongerOurs.
         lenient().when(lockService.mayWrite(any(), anyInt(), any())).thenReturn(true);
+        // What a real service answers for a cache it persisted. saveCurrentContents now propagates
+        // this, so an unstubbed mock would answer false and every save case would report failure.
+        lenient().when(bagService.saveBag(any())).thenReturn(true);
         config = UltiRemoteBagTestHelper.createDefaultConfig();
         mockPlugin = mock(UltiToolsPlugin.class);
         when(mockPlugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -291,6 +294,29 @@ class RemoteBagContentGUITest {
             verify(bagService, never()).setBagPage(any(), anyInt(), any());
             verify(bagService, never()).saveBag(any());
             verify(player).sendMessage(contains("msg_save_refused_lock_taken"));
+        }
+
+        @Test
+        @DisplayName("Reports failure, with a message, when the persistence write did not land")
+        void reportsFailureWhenThePersistenceWriteFails() throws Exception {
+            // saveBag returns false when an update throws IllegalAccessException: the edit is in the
+            // cache and not in the database, so it is lost on the next restart. Discarding that result
+            // and reporting success is the same defect as reporting a save with an empty cache, one
+            // layer in -- raised as a P2 on pull request #34's second external review round.
+            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
+            when(lockService.mayWrite(ownerUuid, 1, playerUuid)).thenReturn(true);
+            when(bagService.saveBag(ownerUuid)).thenReturn(false);
+
+            Inventory mockInventory = mock(Inventory.class);
+            setInventory(gui, mockInventory);
+
+            Method saveMethod = RemoteBagContentGUI.class.getDeclaredMethod("saveCurrentContents");
+            saveMethod.setAccessible(true);
+            Object written = saveMethod.invoke(gui);
+
+            assertThat(written).as("a failed write must not be reported as performed").isEqualTo(false);
+            verify(player).sendMessage(contains("msg_save_failed"));
+            verify(player, never()).sendMessage(contains("msg_bag_saved"));
         }
 
         @Test

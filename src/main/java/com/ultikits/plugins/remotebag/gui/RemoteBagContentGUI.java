@@ -621,24 +621,27 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return FlushOutcome.NO_OPEN_PAGE;
         }
 
-        return page.saveCurrentContents() ? FlushOutcome.WRITTEN : FlushOutcome.REFUSED;
+        return page.saveCurrentContents() ? FlushOutcome.WRITTEN : FlushOutcome.NOT_WRITTEN;
     }
 
     /**
      * What {@link #flushOpenEditPage(Player)} did.
      * <p>
      * Three outcomes rather than a boolean, because a caller that reports "saved" has to distinguish
-     * "there was nothing open, so persist the cache instead" from "there was an open page and it
-     * refused to write" — the second must report nothing, since the page has already told the viewer
-     * why.
+     * "there was nothing open, so persist the cache instead" from "there was an open page and it did
+     * not write" — the second must report nothing, since the page has already told the viewer why,
+     * whether it declined for lack of authority or the database write failed.
      */
     public enum FlushOutcome {
         /** No flushable page was open; the caller should persist the cache itself. */
         NO_OPEN_PAGE,
         /** An open edit page was written, which also persisted the rest of that player's cache. */
         WRITTEN,
-        /** An open edit page declined to write because it no longer holds edit authority. */
-        REFUSED
+        /**
+         * An open edit page did not write: it no longer holds edit authority, or the database write
+         * failed. Either way the page has already said so, and the caller must report nothing.
+         */
+        NOT_WRITTEN
     }
 
     /**
@@ -735,7 +738,14 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             contents[i] = getInventory().getItem(i);
         }
         bagService.setBagPage(ownerUuid, pageNum, contents);
-        bagService.saveBag(ownerUuid);
+        if (!bagService.saveBag(ownerUuid)) {
+            // The cache holds the edit but the database does not, so it is lost on the next restart.
+            // Discarding this result and reporting success is the same defect as reporting a save with
+            // an empty cache, one layer in.
+            SoundUtil.playErrorSound(player, config);
+            player.sendMessage(ChatColor.RED + plugin.i18n("msg_save_failed"));
+            return false;
+        }
         return true;
     }
 }

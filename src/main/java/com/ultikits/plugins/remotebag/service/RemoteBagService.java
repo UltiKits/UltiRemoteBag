@@ -142,12 +142,15 @@ public class RemoteBagService {
     /**
      * Save bag to database.
      * <p>
-     * Reports whether anything was written. Nothing is cached for a player who has not opened a bag
-     * this session, and in that case this method writes no row at all — a caller that announces a
-     * save has to be able to tell that apart from a real one.
+     * Reports whether EVERY cached page reached the database. Two ways it can be false, and a caller
+     * that announces a save has to be able to tell both apart from success: nothing is cached at all
+     * for a player who has not opened a bag this session, so no row is written; and an update can fail
+     * with {@link IllegalAccessException}, which is logged and swallowed here because one bad page
+     * must not cost the others. Use {@link #hasCachedPages(UUID)} to distinguish the two.
      *
      * @param playerUuid 玩家 UUID
-     * @return true if at least one page was inserted or updated
+     * @return true if every cached page was inserted or updated; false if there was nothing to write
+     *         or if any page failed
      */
     public boolean saveBag(UUID playerUuid) {
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
@@ -155,7 +158,7 @@ public class RemoteBagService {
             return false;
         }
 
-        boolean written = false;
+        boolean written = true;
         for (Map.Entry<Integer, ItemStack[]> entry : pages.entrySet()) {
             String contents = serializeItems(entry.getValue());
 
@@ -167,20 +170,36 @@ public class RemoteBagService {
 
             if (existing.isEmpty()) {
                 dataOperator.insert(RemoteBagData.create(playerUuid, entry.getKey(), contents));
-                written = true;
             } else {
                 RemoteBagData data = existing.get(0);
                 data.setContents(contents);
                 data.setLastUpdated(System.currentTimeMillis());
                 try {
                     dataOperator.update(data);
-                    written = true;
                 } catch (IllegalAccessException e) {
                     plugin.getLogger().error("Failed to update bag data", e);
+                    // Keep going -- one unwritable page must not cost the others -- but do not let the
+                    // caller report a completed save.
+                    written = false;
                 }
             }
         }
         return written;
+    }
+
+    /**
+     * Whether this player has any page in the cache at all.
+     * <p>
+     * Lets a caller tell {@link #saveBag(UUID)}'s two falses apart: "there was nothing to write" and
+     * "a write failed" need different things said to the player, and reporting either as the other is
+     * the same defect class as reporting a save that did not happen.
+     *
+     * @param playerUuid 玩家 UUID
+     * @return true if at least one page is cached for this player
+     */
+    public boolean hasCachedPages(UUID playerUuid) {
+        Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
+        return pages != null && !pages.isEmpty();
     }
     
     /**

@@ -262,6 +262,7 @@ class BagCommandTest {
         @Test
         @DisplayName("Should save and send confirmation")
         void savesAndConfirms() {
+            when(bagService.hasCachedPages(playerUuid)).thenReturn(true);
             when(bagService.saveBag(playerUuid)).thenReturn(true);
 
             command.saveBag(player);
@@ -273,16 +274,33 @@ class BagCommandTest {
         @Test
         @DisplayName("Reports nothing saved when there was nothing cached to save")
         void reportsNothingSavedWhenTheCacheIsEmpty() {
-            // saveBag returns false for a player with no cached pages -- a fresh login that has not
-            // opened a page. Claiming `bag_saved_manually` there reported a write that never
-            // happened, which is what the UAT row for this command had been amended to assert
-            // against (pull request #34 gate-1 review, WR-05).
-            when(bagService.saveBag(playerUuid)).thenReturn(false);
+            // Nothing is cached for a player who has not opened a page this session. Claiming
+            // `bag_saved_manually` there reported a write that never happened, which is what the UAT
+            // row for this command had been amended to assert against (gate-1 review, WR-05).
+            when(bagService.hasCachedPages(playerUuid)).thenReturn(false);
 
             command.saveBag(player);
 
             verify(player).sendMessage(contains("msg_nothing_to_save"));
             verify(player, never()).sendMessage(contains("bag_saved_manually"));
+            verify(bagService, never()).saveBag(playerUuid);
+        }
+
+        @Test
+        @DisplayName("Reports a failed save distinctly from having nothing to save")
+        void reportsAFailedSaveDistinctly() {
+            // saveBag's second false: a page IS cached but its write did not reach the database, so the
+            // edit exists only in memory and is lost on the next restart. "Nothing to save" would be as
+            // wrong here as "saved" -- the two ask different things of the operator (second external
+            // review round on pull request #34).
+            when(bagService.hasCachedPages(playerUuid)).thenReturn(true);
+            when(bagService.saveBag(playerUuid)).thenReturn(false);
+
+            command.saveBag(player);
+
+            verify(player).sendMessage(contains("msg_save_failed"));
+            verify(player, never()).sendMessage(contains("bag_saved_manually"));
+            verify(player, never()).sendMessage(contains("msg_nothing_to_save"));
         }
 
         @Test
@@ -290,6 +308,7 @@ class BagCommandTest {
         void savesWithCorrectUuid() {
             UUID specificUuid = UUID.randomUUID();
             Player specificPlayer = UltiRemoteBagTestHelper.createMockPlayer("SpecificPlayer", specificUuid);
+            when(bagService.hasCachedPages(specificUuid)).thenReturn(true);
 
             command.saveBag(specificPlayer);
 
