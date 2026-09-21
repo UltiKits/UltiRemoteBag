@@ -14,8 +14,10 @@ import mc.obliviate.inventory.Icon;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -33,7 +35,7 @@ import java.util.UUID;
  * Features:
  * <ul>
  *   <li>编辑模式：允许移动物品、保存</li>
- *   <li>只读模式：禁止移动物品、显示刷新按钮</li>
+ *   <li>只读模式：禁止移动物品（点击与拖拽均取消）、显示刷新按钮</li>
  *   <li>工具栏：返回、刷新、保存、模式指示、关闭按钮</li>
  *   <li>关闭时自动保存（编辑模式）并释放锁</li>
  * </ul>
@@ -58,7 +60,39 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * 内容区域槽位数（前 5 行 = 45 槽）
      */
     private static final int CONTENT_SIZE = 45;
-    
+
+    /**
+     * Return value of {@link #onClick}/{@link #onDrag} that REFUSES the interaction.
+     * <p>
+     * Spelled out as a named constant because the polarity is the opposite of what this class's
+     * javadoc claimed until UltiKits/UltiRemoteBag#27, and a bare {@code return false} reads as
+     * "no, do not cancel" to anyone who has not read the library.
+     * <p>
+     * Measured from {@code obliviate-invs} 4.3.0 bytecode ({@code core-4.3.0.jar},
+     * {@code mc.obliviate.inventory.InvListener}), which is the only code that turns this value
+     * into a cancel decision:
+     * <ul>
+     *   <li>{@code onClick}: {@code true} → {@code event.setCancelled(false)} — the click is
+     *       ALLOWED. {@code false} → cancelled whenever {@code getSlot() == getRawSlot()} (every
+     *       click on this page's own window), and, for a click in the player's own inventory,
+     *       cancelled for {@code MOVE_TO_OTHER_INVENTORY}, {@code COLLECT_TO_CURSOR} and
+     *       {@code UNKNOWN} only.</li>
+     *   <li>{@code onDrag}: {@code event.setCancelled(!onDrag(event))}, unconditionally, with no
+     *       per-slot fallback.</li>
+     *   <li>{@code Gui}'s own defaults return {@code false} for both, i.e. the library's
+     *       out-of-the-box behaviour is a locked page.</li>
+     * </ul>
+     * The Icon click action registered for the clicked slot is dispatched after {@code onClick}
+     * returns either way, so cancelling does not disable a button.
+     */
+    private static final boolean CANCEL = false;
+
+    /**
+     * Return value of {@link #onClick}/{@link #onDrag} that PERMITS the interaction. See
+     * {@link #CANCEL} for the measured library contract.
+     */
+    private static final boolean ALLOW = true;
+
     /**
      * 创建远程背包内容 GUI
      *
@@ -382,33 +416,106 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     
     /**
      * 处理物品点击事件
+     * <p>
+     * Handles an inventory click.
      *
      * @param event 点击事件
-     * @return true 取消事件，false 允许事件
+     * @return {@link #ALLOW} to let the click through, {@link #CANCEL} to refuse it
      */
     @Override
     public boolean onClick(InventoryClickEvent event) {
-        int slot = event.getRawSlot();
-        
-        // 工具栏区域 - 让 Icon 的点击事件处理
-        if (slot >= CONTENT_SIZE) {
-            return true; // 取消默认行为，由 Icon onClick 处理
+        int rawSlot = event.getRawSlot();
+        boolean insideBagWindow = rawSlot >= 0 && rawSlot < getSize();
+
+        // Toolbar row: buttons, not storage, so it is never movable in either mode. This is what
+        // stops the disabled Save icon being picked up onto the cursor. The library dispatches the
+        // Icon's own click action after this method returns, regardless of the cancel decision, so
+        // every toolbar button keeps working.
+        if (insideBagWindow && rawSlot >= CONTENT_SIZE) {
+            return CANCEL;
         }
-        
-        // 内容区域
+
         if (accessMode == AccessMode.READ_ONLY) {
-            // 只读模式 - 禁止所有物品操作
-            if (event.getCurrentItem() != null || event.getCursor() != null) {
+            if (isRefusalWorthAnnouncing(event, insideBagWindow)) {
                 SoundUtil.playErrorSound(player, config);
                 player.sendMessage(ChatColor.RED + plugin.i18n("msg_readonly_no_move"));
             }
-            return true; // 取消事件
+            return CANCEL;
         }
-        
-        // 编辑模式 - 允许物品移动
-        return false; // 不取消事件
+
+        // Edit mode: the content area and the viewer's own inventory behave like a chest.
+        return ALLOW;
     }
-    
+
+    /**
+     * 处理拖拽事件
+     * <p>
+     * Handles an inventory drag. A drag is not a click and reaches this class through a separate
+     * library entry point, which this page previously did not override at all — leaving every drag
+     * refused, including in edit mode. Read-only drags stay refused; edit-mode drags are allowed
+     * unless they reach into the toolbar row, which would overwrite a button with an item.
+     * <p>
+     * Unlike a click, the library applies this method's answer to the whole drag unconditionally:
+     * there is no per-slot fallback, so a drag spanning the content area and the toolbar has to be
+     * refused outright rather than partially applied.
+     *
+     * @param event 拖拽事件
+     * @return {@link #ALLOW} to let the drag through, {@link #CANCEL} to refuse it
+     */
+    @Override
+    public boolean onDrag(InventoryDragEvent event) {
+        if (accessMode == AccessMode.READ_ONLY) {
+            return CANCEL;
+        }
+
+        for (int rawSlot : event.getRawSlots()) {
+            if (rawSlot >= CONTENT_SIZE && rawSlot < getSize()) {
+                return CANCEL;
+            }
+        }
+
+        return ALLOW;
+    }
+
+    /**
+     * Whether a refused read-only interaction should tell the viewer why.
+     * <p>
+     * True for any attempt to move an item that targets this page's own window, and for a
+     * shift-click from the viewer's own inventory (the one obvious gesture for pushing an item into
+     * the bag from the other side). Deliberately false for the remaining player-side actions: the
+     * library refuses only some of those, and a "cannot move items" line on a move that actually
+     * succeeded would be a worse defect than silence.
+     *
+     * @param event           the click being refused
+     * @param insideBagWindow whether the clicked raw slot belongs to this page's own inventory
+     * @return true if a refusal message and sound should be sent
+     */
+    private boolean isRefusalWorthAnnouncing(InventoryClickEvent event, boolean insideBagWindow) {
+        if (!isItemMovementAttempt(event)) {
+            return false;
+        }
+        return insideBagWindow
+                || event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY;
+    }
+
+    /**
+     * Whether a click actually carries an item, either in the clicked slot or on the cursor.
+     * <p>
+     * Both getters return an AIR stack rather than {@code null} for an empty slot or an empty
+     * cursor on a live server, so a plain null check (which this class used to do) is true for
+     * essentially every click, including a click on a background pane.
+     *
+     * @param event the click to inspect
+     * @return true if an item is involved
+     */
+    private boolean isItemMovementAttempt(InventoryClickEvent event) {
+        return isRealItem(event.getCurrentItem()) || isRealItem(event.getCursor());
+    }
+
+    private boolean isRealItem(ItemStack item) {
+        return item != null && item.getType() != Material.AIR;
+    }
+
     /**
      * 处理 GUI 关闭事件
      *
