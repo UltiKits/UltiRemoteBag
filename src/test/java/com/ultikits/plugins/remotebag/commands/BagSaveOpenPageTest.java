@@ -197,6 +197,37 @@ class BagSaveOpenPageTest {
     }
 
     @Test
+    @DisplayName("An admin's open view of the sender's own bag is not flushed by the sender's /bag save")
+    void savingDoesNotFlushSomebodyElsesViewOfTheSendersBag() {
+        // This is what the sender-keyed lookup is for, as distinct from the owner comparison. Here the
+        // page's OWNER is the sender, so the owner check passes; only the fact that the page is not the
+        // SENDER's open page keeps it out. An implementation that scanned for "any open content page of
+        // this bag" would let one player's /bag save persist another player's half-finished edits at an
+        // arbitrary moment.
+        PlayerMock admin = server.addPlayer("Admin");
+        RemoteBagContentGUI adminsViewOfOurBag = new RemoteBagContentGUI(admin, mockPlugin,
+                player.getUniqueId(), PAGE, bagService, lockService, config, AccessMode.EDIT);
+        adminsViewOfOurBag.open();
+        Bukkit.getPluginManager().callEvent(new InventoryOpenEvent(admin.getOpenInventory()));
+        adminsViewOfOurBag.getInventory().setItem(CONTENT_SLOT, new ItemStack(Material.DIAMOND));
+
+        // The sender has no page open and a cached page of their own.
+        ItemStack[] own = new ItemStack[45];
+        own[CONTENT_SLOT] = new ItemStack(Material.EMERALD);
+        bagService.setBagPage(player.getUniqueId(), PAGE, own);
+
+        command.saveBag(player);
+
+        String stored = store.storedContents(player.getUniqueId().toString(), PAGE);
+        assertThat(stored)
+                .as("the sender's own cached page is what was persisted")
+                .contains("minecraft:emerald");
+        assertThat(stored)
+                .as("the admin's in-progress view of this bag must not have been persisted by the sender")
+                .doesNotContain("minecraft:diamond");
+    }
+
+    @Test
     @DisplayName("With no page open, /bag save still persists what the cache already holds")
     void savingWithNoPageOpenStillPersistsTheCache() {
         ItemStack[] cached = new ItemStack[45];
