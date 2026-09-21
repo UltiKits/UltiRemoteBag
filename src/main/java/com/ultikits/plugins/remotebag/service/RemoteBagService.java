@@ -35,6 +35,29 @@ public class RemoteBagService {
     // Cache for player bags - Map<PlayerUUID, Map<PageNumber, ItemStack[]>>
     private final Map<UUID, Map<Integer, ItemStack[]>> bagCache = new ConcurrentHashMap<>();
 
+    /**
+     * Largest page any legal configuration can address, derived from the config key that bounds it
+     * rather than restated: {@code rows_per_page} is validated
+     * {@code @Range(min = 1, max = }{@link RemoteBagConfig#MAX_ROWS_PER_PAGE}{@code )} and each row is
+     * {@link RemoteBagConfig#SLOTS_PER_ROW} slots.
+     * <p>
+     * It is computed from those two constants, not written as {@code 54}, so the ceiling and the range
+     * it comes from cannot drift apart. As a literal in this file it was a hand-copied derivation of a
+     * range living in another class with nothing linking them: widening {@code rows_per_page} to allow
+     * a double chest would have left every stored index between the old ceiling and the new one legal
+     * for the GUI to write and illegal for this loader to read — skipped with a warning and dropped by
+     * the next save, which is the item loss UltiKits/UltiRemoteBag#24 was filed for, with a log line
+     * instead of an exception. Nothing in the build would have broken to warn about it.
+     * <p>
+     * A stored slot index is data, and {@link #deserializeItems(String, int)} sizes the page from the
+     * highest one it finds, so without this ceiling a corrupt or hand-edited row could turn its own
+     * key into an allocation request — {@code items.100000000} asking for an array of hundreds of
+     * megabytes, and the resulting {@link OutOfMemoryError} is an {@link Error}, so the
+     * {@code catch (Exception)} around the deserializer would not contain it.
+     */
+    private static final int MAX_PAGE_SLOTS =
+            RemoteBagConfig.MAX_ROWS_PER_PAGE * RemoteBagConfig.SLOTS_PER_ROW;
+
     public RemoteBagService(UltiToolsPlugin plugin, RemoteBagConfig config) {
         this.plugin = plugin;
         this.config = config;
@@ -91,7 +114,7 @@ public class RemoteBagService {
                 .list();
 
         for (RemoteBagData bagData : data) {
-            ItemStack[] items = deserializeItems(bagData.getContents());
+            ItemStack[] items = deserializeItems(bagData.getContents(), bagData.getPageNumber());
             pages.put(bagData.getPageNumber(), items);
         }
 
@@ -118,13 +141,24 @@ public class RemoteBagService {
     
     /**
      * Save bag to database.
+     * <p>
+     * Reports whether EVERY cached page reached the database. Two ways it can be false, and a caller
+     * that announces a save has to be able to tell both apart from success: nothing is cached at all
+     * for a player who has not opened a bag this session, so no row is written; and an update can fail
+     * with {@link IllegalAccessException}, which is logged and swallowed here because one bad page
+     * must not cost the others. Use {@link #hasCachedPages(UUID)} to distinguish the two.
+     *
+     * @param playerUuid 玩家 UUID
+     * @return true if every cached page was inserted or updated; false if there was nothing to write
+     *         or if any page failed
      */
-    public void saveBag(UUID playerUuid) {
+    public boolean saveBag(UUID playerUuid) {
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
-        if (pages == null) {
-            return;
+        if (pages == null || pages.isEmpty()) {
+            return false;
         }
 
+        boolean written = true;
         for (Map.Entry<Integer, ItemStack[]> entry : pages.entrySet()) {
             String contents = serializeItems(entry.getValue());
 
@@ -144,9 +178,28 @@ public class RemoteBagService {
                     dataOperator.update(data);
                 } catch (IllegalAccessException e) {
                     plugin.getLogger().error("Failed to update bag data", e);
+                    // Keep going -- one unwritable page must not cost the others -- but do not let the
+                    // caller report a completed save.
+                    written = false;
                 }
             }
         }
+        return written;
+    }
+
+    /**
+     * Whether this player has any page in the cache at all.
+     * <p>
+     * Lets a caller tell {@link #saveBag(UUID)}'s two falses apart: "there was nothing to write" and
+     * "a write failed" need different things said to the player, and reporting either as the other is
+     * the same defect class as reporting a save that did not happen.
+     *
+     * @param playerUuid 玩家 UUID
+     * @return true if at least one page is cached for this player
+     */
+    public boolean hasCachedPages(UUID playerUuid) {
+        Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
+        return pages != null && !pages.isEmpty();
     }
     
     /**
@@ -175,31 +228,92 @@ public class RemoteBagService {
     
     /**
      * Deserialize items from YAML string.
+     * <p>
+     * The returned array is sized to hold every slot index the stored page actually uses, which can
+     * exceed {@code rows_per_page * 9}: the content GUI exposes and saves 45 slots whatever
+     * {@code rows_per_page} holds, so a server configured below 5 rows stores indices the configured
+     * size cannot address. Writing such an index into an array sized from the config used to throw
+     * {@link ArrayIndexOutOfBoundsException}, which was caught and turned into an empty page — every
+     * item on that page silently destroyed on load (UltiKits/UltiRemoteBag#24).
+     * <p>
+     * A single unreadable entry — a non-numeric key, a negative index, or an index beyond
+     * {@link #MAX_PAGE_SLOTS} — is skipped with a warning naming the page and the key instead of
+     * costing the whole page. The ceiling is applied before any array is allocated, so no stored key
+     * can size the allocation. Whether a smaller
+     * {@code rows_per_page} ought to shrink the displayed page at all is a separate open question;
+     * this method's contract is only that loading never loses a stored item.
+     *
+     * @param data       stored YAML, may be null or empty
+     * @param pageNumber the page this data belongs to, for the warning messages
+     * @return the page's items, indexable for every slot the stored data uses
      */
-    private ItemStack[] deserializeItems(String data) {
+    private ItemStack[] deserializeItems(String data, int pageNumber) {
         if (data == null || data.isEmpty()) {
             return new ItemStack[config.getRowsPerPage() * 9];
         }
-        
+
         try {
             YamlConfiguration yaml = new YamlConfiguration();
             yaml.loadFromString(data);
-            
-            ItemStack[] items = new ItemStack[config.getRowsPerPage() * 9];
-            if (yaml.isConfigurationSection("items")) {
-                for (String key : yaml.getConfigurationSection("items").getKeys(false)) {
-                    int slot = Integer.parseInt(key);
-                    items[slot] = yaml.getItemStack("items." + key);
+
+            if (!yaml.isConfigurationSection("items")) {
+                return new ItemStack[config.getRowsPerPage() * 9];
+            }
+
+            Set<String> keys = yaml.getConfigurationSection("items").getKeys(false);
+            Map<Integer, String> slots = new LinkedHashMap<>();
+            int highestSlot = -1;
+            for (String key : keys) {
+                int slot;
+                try {
+                    slot = Integer.parseInt(key);
+                } catch (NumberFormatException e) {
+                    warnSkippedSlot(pageNumber, key, "not a slot number");
+                    continue;
                 }
+                if (slot < 0) {
+                    warnSkippedSlot(pageNumber, key, "negative slot index");
+                    continue;
+                }
+                if (!key.equals(Integer.toString(slot))) {
+                    // Integer.parseInt accepts a signed or padded key, so items.'+5', items.'05' and
+                    // items.' 5' all parse to 5 and collide with items.'5' on one map entry -- the
+                    // second put wins and the first item is gone with no warning at all, the only
+                    // path here that discarded an entry silently. Not reachable from serializeItems,
+                    // which writes plain decimal indices, so it takes a hand-edited or
+                    // foreign-written row to produce.
+                    warnSkippedSlot(pageNumber, key, "not a canonical slot number");
+                    continue;
+                }
+                if (slot >= MAX_PAGE_SLOTS) {
+                    warnSkippedSlot(pageNumber, key,
+                            "slot beyond the largest addressable page of " + MAX_PAGE_SLOTS + " slots");
+                    continue;
+                }
+                slots.put(slot, key);
+                highestSlot = Math.max(highestSlot, slot);
+            }
+
+            ItemStack[] items = new ItemStack[Math.max(config.getRowsPerPage() * 9, highestSlot + 1)];
+            for (Map.Entry<Integer, String> entry : slots.entrySet()) {
+                items[entry.getKey()] = yaml.getItemStack("items." + entry.getValue());
             }
             return items;
         } catch (Exception e) {
-            java.util.logging.Logger.getLogger(RemoteBagService.class.getName())
-                    .log(java.util.logging.Level.WARNING, "Failed to deserialize bag items", e);
+            // The module's own logger, not an inline java.util.logging one: every other line this
+            // module emits carries the framework's [UltiTools] [UltiRemoteBag] prefix, and a checklist
+            // row looks for this exact text, so an unprefixed line is a line a tester cannot match.
+            plugin.getLogger().warn(e, "Failed to deserialize bag items");
             return new ItemStack[config.getRowsPerPage() * 9];
         }
     }
-    
+
+    private void warnSkippedSlot(int pageNumber, String key, String reason) {
+        plugin.getLogger().warn(String.format(
+                "Skipping unreadable slot in bag page %d: key '%s' (%s); the rest of the page is kept",
+                pageNumber, key, reason));
+    }
+
     /**
      * Clear cache for a player.
      * 

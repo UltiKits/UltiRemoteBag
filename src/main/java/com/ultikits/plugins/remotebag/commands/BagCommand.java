@@ -99,11 +99,46 @@ public class BagCommand extends BaseCommandExecutor {
     
     /**
      * 手动保存背包
+     * <p>
+     * Persists the sender's bag pages. An item placed into a content page that is still open has
+     * not reached the service cache yet -- only the page's own Save button and its edit-mode close
+     * do that copy -- so the open page is flushed first. Without that, this command reported
+     * `bag_saved_manually` while the just-placed item was never written, and it was lost on the
+     * next restart (UltiKits/UltiRemoteBag#22).
+     * <p>
+     * It reports only a save it actually performed. A flush already persists the whole of that
+     * player's cache (`saveCurrentContents` ends in `saveBag(ownerUuid)`), so the cache write is the
+     * ELSE branch rather than an unconditional second pass -- running both re-queried, re-serialized
+     * and re-timestamped every cached page twice.
+     * <p>
+     * Three outcomes, not two, because `saveBag` returning false has two causes that ask different
+     * things of the operator: nothing is cached at all -- a fresh login that has not opened a page --
+     * or a write failed and the edit exists only in memory. Reporting either as the other, or either
+     * as a success, is the same defect this command was fixed for.
      */
     @CmdMapping(format = "save")
     public void saveBag(@CmdSender Player player) {
-        bagService.saveBag(player.getUniqueId());
-        player.sendMessage(ChatColor.GREEN + i18n("bag_saved_manually"));
+        RemoteBagContentGUI.FlushOutcome flushed = RemoteBagContentGUI.flushOpenEditPage(player);
+        if (flushed == RemoteBagContentGUI.FlushOutcome.NOT_WRITTEN) {
+            // The page has already told the sender why it would not write. Reporting a save here
+            // would contradict it.
+            return;
+        }
+
+        if (flushed == RemoteBagContentGUI.FlushOutcome.WRITTEN) {
+            player.sendMessage(ChatColor.GREEN + i18n("bag_saved_manually"));
+            return;
+        }
+
+        // Nothing was open, so persist the cache -- and tell the two failures apart, because
+        // "there was nothing to save" and "the save failed" ask different things of the operator.
+        if (!bagService.hasCachedPages(player.getUniqueId())) {
+            player.sendMessage(ChatColor.YELLOW + i18n("msg_nothing_to_save"));
+        } else if (bagService.saveBag(player.getUniqueId())) {
+            player.sendMessage(ChatColor.GREEN + i18n("bag_saved_manually"));
+        } else {
+            player.sendMessage(ChatColor.RED + i18n("msg_save_failed"));
+        }
     }
     
     // ==================== 管理员命令 ====================
@@ -167,6 +202,13 @@ public class BagCommand extends BaseCommandExecutor {
             AccessMode mode = result.getAccessMode();
             if (mode == AccessMode.READ_ONLY) {
                 admin.sendMessage(result.getMessage());
+                // Say WHY it is read-only when the reason is presence rather than a recent lock.
+                // A lock is no longer reclaimed while its page is open, so an admin who waited out
+                // lock.timeout_seconds still gets read-only; without this line that is
+                // indistinguishable from a bug.
+                if (lockService.isHeldByViewingHolder(ownerUuid, page)) {
+                    admin.sendMessage(ChatColor.YELLOW + i18n("msg_owner_has_page_open"));
+                }
             }
             new RemoteBagContentGUI(admin, plugin, ownerUuid, page,
                     bagService, lockService, config, mode).open();

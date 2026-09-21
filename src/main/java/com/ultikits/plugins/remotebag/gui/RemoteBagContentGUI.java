@@ -10,13 +10,19 @@ import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.abstracts.gui.BaseInventoryPage;
 import com.ultikits.ultitools.entities.Colors;
 import com.ultikits.ultitools.utils.XVersionUtils;
+import mc.obliviate.inventory.Gui;
 import mc.obliviate.inventory.Icon;
+import mc.obliviate.inventory.InventoryAPI;
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
@@ -33,7 +39,7 @@ import java.util.UUID;
  * Features:
  * <ul>
  *   <li>编辑模式：允许移动物品、保存</li>
- *   <li>只读模式：禁止移动物品、显示刷新按钮</li>
+ *   <li>只读模式：禁止移动物品（点击与拖拽均取消）、显示刷新按钮</li>
  *   <li>工具栏：返回、刷新、保存、模式指示、关闭按钮</li>
  *   <li>关闭时自动保存（编辑模式）并释放锁</li>
  * </ul>
@@ -58,7 +64,39 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * 内容区域槽位数（前 5 行 = 45 槽）
      */
     private static final int CONTENT_SIZE = 45;
-    
+
+    /**
+     * Return value of {@link #onClick}/{@link #onDrag} that REFUSES the interaction.
+     * <p>
+     * Spelled out as a named constant because the polarity is the opposite of what this class's
+     * javadoc claimed until UltiKits/UltiRemoteBag#27, and a bare {@code return false} reads as
+     * "no, do not cancel" to anyone who has not read the library.
+     * <p>
+     * Measured from {@code obliviate-invs} 4.3.0 bytecode ({@code core-4.3.0.jar},
+     * {@code mc.obliviate.inventory.InvListener}), which is the only code that turns this value
+     * into a cancel decision:
+     * <ul>
+     *   <li>{@code onClick}: {@code true} → {@code event.setCancelled(false)} — the click is
+     *       ALLOWED. {@code false} → cancelled whenever {@code getSlot() == getRawSlot()} (every
+     *       click on this page's own window), and, for a click in the player's own inventory,
+     *       cancelled for {@code MOVE_TO_OTHER_INVENTORY}, {@code COLLECT_TO_CURSOR} and
+     *       {@code UNKNOWN} only.</li>
+     *   <li>{@code onDrag}: {@code event.setCancelled(!onDrag(event))}, unconditionally, with no
+     *       per-slot fallback.</li>
+     *   <li>{@code Gui}'s own defaults return {@code false} for both, i.e. the library's
+     *       out-of-the-box behaviour is a locked page.</li>
+     * </ul>
+     * The Icon click action registered for the clicked slot is dispatched after {@code onClick}
+     * returns either way, so cancelling does not disable a button.
+     */
+    private static final boolean CANCEL = false;
+
+    /**
+     * Return value of {@link #onClick}/{@link #onDrag} that PERMITS the interaction. See
+     * {@link #CANCEL} for the measured library contract.
+     */
+    private static final boolean ALLOW = true;
+
     /**
      * 创建远程背包内容 GUI
      *
@@ -131,20 +169,24 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     
     /**
      * 加载背包内容到 GUI
+     * <p>
+     * Writes EVERY content slot, including the empty ones. This method is also the read-only Refresh
+     * button's whole implementation, and writing only the non-null entries left a refreshed view
+     * showing the union of what was displayed before and what is stored now — so a viewer whose whole
+     * purpose is to see the current state saw items the owner had already taken out. With
+     * UltiKits/UltiRemoteBag#27 fixed the viewer can no longer act on those phantom items, but an
+     * administrator can still act on the wrong picture.
      */
     private void loadBagContents() {
         // 确保背包数据已加载
         bagService.loadBagIfNeeded(ownerUuid);
-        
+
         ItemStack[] contents = bagService.getBagPage(ownerUuid, pageNum);
-        if (contents != null) {
-            for (int i = 0; i < Math.min(contents.length, CONTENT_SIZE); i++) {
-                if (contents[i] != null) {
-                    // 物品直接放入，不设置 Icon 点击事件
-                    // 编辑模式下允许自由移动，只读模式在 onClick 中处理
-                    getInventory().setItem(i, contents[i]);
-                }
-            }
+        for (int i = 0; i < CONTENT_SIZE; i++) {
+            // 物品直接放入，不设置 Icon 点击事件
+            // 编辑模式下允许自由移动，只读模式在 onClick 中处理
+            boolean stored = contents != null && i < contents.length && contents[i] != null;
+            getInventory().setItem(i, stored ? contents[i] : null);
         }
     }
     
@@ -269,9 +311,12 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     private Icon createSaveButton() {
         Icon icon = createActionButton(Colors.GREEN, ChatColor.GREEN + plugin.i18n("btn_save"), e -> {
-            saveCurrentContents();
-            SoundUtil.playCloseSound(player, config);
-            player.sendMessage(ChatColor.GREEN + plugin.i18n("msg_bag_saved"));
+            // Only report a save that happened: saveCurrentContents() refuses, with its own message,
+            // when this page no longer holds edit authority.
+            if (saveCurrentContents()) {
+                SoundUtil.playCloseSound(player, config);
+                player.sendMessage(ChatColor.GREEN + plugin.i18n("msg_bag_saved"));
+            }
         });
         
         // 设置 lore
@@ -382,33 +427,207 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     
     /**
      * 处理物品点击事件
+     * <p>
+     * Handles an inventory click.
      *
      * @param event 点击事件
-     * @return true 取消事件，false 允许事件
+     * @return {@link #ALLOW} to let the click through, {@link #CANCEL} to refuse it
      */
     @Override
     public boolean onClick(InventoryClickEvent event) {
-        int slot = event.getRawSlot();
-        
-        // 工具栏区域 - 让 Icon 的点击事件处理
-        if (slot >= CONTENT_SIZE) {
-            return true; // 取消默认行为，由 Icon onClick 处理
+        int rawSlot = event.getRawSlot();
+        boolean insideBagWindow = rawSlot >= 0 && rawSlot < getSize();
+
+        // Toolbar row: buttons, not storage, so it is never movable in either mode. This is what
+        // stops the disabled Save icon being picked up onto the cursor. The library dispatches the
+        // Icon's own click action after this method returns, regardless of the cancel decision, so
+        // every toolbar button keeps working.
+        if (insideBagWindow && rawSlot >= CONTENT_SIZE) {
+            return CANCEL;
         }
-        
-        // 内容区域
+
         if (accessMode == AccessMode.READ_ONLY) {
-            // 只读模式 - 禁止所有物品操作
-            if (event.getCurrentItem() != null || event.getCursor() != null) {
+            if (isRefusalWorthAnnouncing(event, insideBagWindow)) {
                 SoundUtil.playErrorSound(player, config);
                 player.sendMessage(ChatColor.RED + plugin.i18n("msg_readonly_no_move"));
             }
-            return true; // 取消事件
+            return CANCEL;
         }
-        
-        // 编辑模式 - 允许物品移动
-        return false; // 不取消事件
+
+        // Two vanilla actions are not confined to the slot they were clicked on: COLLECT_TO_CURSOR
+        // sweeps every slot of both inventories, and a shift-click from the player's side scans the
+        // whole top inventory for somewhere to put the stack. Both therefore reach raw slots 45-53,
+        // which the guard above cannot see because it only knows where the click STARTED.
+        if (wouldReachAToolbarIcon(event)) {
+            SoundUtil.playErrorSound(player, config);
+            player.sendMessage(ChatColor.RED + plugin.i18n("msg_toolbar_item_conflict"));
+            return CANCEL;
+        }
+
+        // Edit mode: the content area and the viewer's own inventory behave like a chest -- but only
+        // as far as nobody else has already said no. The library turns ALLOW into
+        // event.setCancelled(false), which CLEARS a cancellation an earlier handler set rather than
+        // merely declining to add one, and its own listener is a bare @EventHandler (NORMAL,
+        // ignoreCancelled = false). Returning ALLOW unconditionally therefore overrode an anti-cheat
+        // or region plugin at LOWEST/LOW/earlier-NORMAL. Deciding for this page is ours; reversing
+        // somebody else's decision is not.
+        return event.isCancelled() ? CANCEL : ALLOW;
     }
-    
+
+    /**
+     * Whether this click is one of the two multi-slot actions AND carries an item that matches a
+     * toolbar icon, so vanilla would reach into the toolbar row while applying it.
+     * <p>
+     * The library's contract is one boolean for the whole click, so a multi-slot action cannot be
+     * allowed "except for slots 45-53" — it is allowed entirely or refused entirely. Refusing it is
+     * the safe half, and it only bites when the player is holding something that matches a button.
+     * <p>
+     * The exposure is real rather than theoretical for this module in particular: before
+     * UltiKits/UltiRemoteBag#27 the toolbar icons COULD be picked up out of the page, so a server
+     * upgrading from that version may have players holding genuine copies of them. With a matching
+     * item on the cursor, a double-click anywhere in the window collects the icon out of the toolbar;
+     * the toolbar is rebuilt from scratch by {@code setupToolbar} on the next open and
+     * {@link #saveCurrentContents} only ever serialises slots 0-44, so the collected copy is pure
+     * duplication. The shift-click direction loses instead: the stack merges into a toolbar slot and
+     * is gone when the page closes.
+     * <p>
+     * {@link ItemStack#isSimilar} is the Bukkit equivalent of the comparison vanilla uses to decide
+     * both of these (type plus metadata, ignoring stack size), so this matches what the server would
+     * actually do rather than approximating it.
+     *
+     * @param event the click being considered
+     * @return true if the action would let vanilla touch a toolbar icon
+     */
+    private boolean wouldReachAToolbarIcon(InventoryClickEvent event) {
+        ItemStack subject;
+        switch (event.getAction()) {
+            case COLLECT_TO_CURSOR:
+                subject = isRealItem(event.getCursor()) ? event.getCursor() : event.getCurrentItem();
+                break;
+            case MOVE_TO_OTHER_INVENTORY:
+                if (event.getRawSlot() >= 0 && event.getRawSlot() < getSize()) {
+                    // Shift-clicking OUT of this window moves into the player's inventory, which has
+                    // no toolbar to reach.
+                    return false;
+                }
+                subject = event.getCurrentItem();
+                break;
+            default:
+                return false;
+        }
+
+        if (!isRealItem(subject)) {
+            return false;
+        }
+
+        for (int slot = CONTENT_SIZE; slot < getSize(); slot++) {
+            ItemStack icon = getInventory().getItem(slot);
+            if (icon != null && icon.isSimilar(subject)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 处理拖拽事件
+     * <p>
+     * Handles an inventory drag. A drag is not a click and reaches this class through a separate
+     * library entry point, which this page previously did not override at all — leaving every drag
+     * refused, including in edit mode.
+     * <p>
+     * The refusal is scoped to THIS page's window, mirroring {@link #onClick}: read-only guards the
+     * bag, not the viewer's own inventory, so an administrator looking at somebody else's bag can
+     * still right-drag a stack among slots of their own inventory. Refusing the whole event on mode
+     * alone took that away, and took it away silently.
+     * <p>
+     * Every refusal this method performs says so. There is no other feedback for a cancelled drag —
+     * no icon action runs, nothing moves — so a silent refusal is indistinguishable from a broken
+     * build, which is exactly the reading that let UltiKits/UltiRemoteBag#27 sit open.
+     * <p>
+     * Unlike a click, the library applies this method's answer to the whole drag unconditionally:
+     * there is no per-slot fallback, so a drag spanning the content area and the toolbar has to be
+     * refused outright rather than partially applied.
+     *
+     * @param event 拖拽事件
+     * @return {@link #ALLOW} to let the drag through, {@link #CANCEL} to refuse it
+     */
+    @Override
+    public boolean onDrag(InventoryDragEvent event) {
+        for (int rawSlot : event.getRawSlots()) {
+            boolean insideBagWindow = rawSlot >= 0 && rawSlot < getSize();
+            if (!insideBagWindow) {
+                // The viewer's own inventory is theirs in either mode.
+                continue;
+            }
+
+            if (accessMode == AccessMode.READ_ONLY) {
+                // In read-only the whole window is guarded, toolbar included, and "read-only" is the
+                // reason for all of it.
+                announceDragRefusal("msg_readonly_no_move");
+                return CANCEL;
+            }
+
+            if (rawSlot >= CONTENT_SIZE) {
+                announceDragRefusal("msg_cannot_drag_toolbar");
+                return CANCEL;
+            }
+        }
+
+        // Same reasoning as onClick's edit branch: the library applies setCancelled(!onDrag(...))
+        // unconditionally, so answering ALLOW would clear another plugin's cancellation.
+        return event.isCancelled() ? CANCEL : ALLOW;
+    }
+
+    /**
+     * Tells the viewer why a drag was refused, and plays the error sound.
+     *
+     * @param messageKey the i18n key naming the reason
+     */
+    private void announceDragRefusal(String messageKey) {
+        SoundUtil.playErrorSound(player, config);
+        player.sendMessage(ChatColor.RED + plugin.i18n(messageKey));
+    }
+
+    /**
+     * Whether a refused read-only interaction should tell the viewer why.
+     * <p>
+     * True for any attempt to move an item that targets this page's own window, and for a
+     * shift-click from the viewer's own inventory (the one obvious gesture for pushing an item into
+     * the bag from the other side). Deliberately false for the remaining player-side actions: the
+     * library refuses only some of those, and a "cannot move items" line on a move that actually
+     * succeeded would be a worse defect than silence.
+     *
+     * @param event           the click being refused
+     * @param insideBagWindow whether the clicked raw slot belongs to this page's own inventory
+     * @return true if a refusal message and sound should be sent
+     */
+    private boolean isRefusalWorthAnnouncing(InventoryClickEvent event, boolean insideBagWindow) {
+        if (!isItemMovementAttempt(event)) {
+            return false;
+        }
+        return insideBagWindow
+                || event.getAction() == InventoryAction.MOVE_TO_OTHER_INVENTORY;
+    }
+
+    /**
+     * Whether a click actually carries an item, either in the clicked slot or on the cursor.
+     * <p>
+     * Both getters return an AIR stack rather than {@code null} for an empty slot or an empty
+     * cursor on a live server, so a plain null check (which this class used to do) is true for
+     * essentially every click, including a click on a background pane.
+     *
+     * @param event the click to inspect
+     * @return true if an item is involved
+     */
+    private boolean isItemMovementAttempt(InventoryClickEvent event) {
+        return isRealItem(event.getCurrentItem()) || isRealItem(event.getCursor());
+    }
+
+    private boolean isRealItem(ItemStack item) {
+        return item != null && item.getType() != Material.AIR;
+    }
+
     /**
      * 处理 GUI 关闭事件
      *
@@ -428,14 +647,170 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     }
     
     /**
-     * 保存当前 GUI 中的内容到背包服务
+     * 将该玩家当前打开的编辑模式内容页写入背包服务并持久化
+     * <p>
+     * Persists the content page {@code viewer} currently has open, if it is one of these pages and
+     * it is in edit mode. Returns whether anything was written, so a caller can tell "there was
+     * nothing open" from "the open page was flushed".
+     * <p>
+     * The open page is resolved through {@link InventoryAPI#getPlayersCurrentGui(Player)} — the same
+     * player-to-page map the GUI library's listener consults to decide which page receives a click,
+     * so this cannot disagree with what the player is actually looking at.
+     * <p>
+     * The page must also be a page of the sender's OWN bag. {@code /bag save} persists the sender's
+     * pages, and an admin viewing someone else's bag through {@code /bag see} holds a page whose
+     * viewer is the admin while its owner is the target — so a viewer-identity check would be
+     * tautologically true there and the command would write the target's data. The comparison is
+     * therefore against {@link #ownerUuid}. An admin's own edits to someone else's page are still
+     * saved by that page's Save button and by closing it, which is where that write belongs.
+     * <p>
+     * A read-only page is deliberately skipped: its live inventory is another player's bag being
+     * looked at, and writing it back would let a viewer's stale view overwrite the owner's page.
+     *
+     * @param viewer 玩家 / the player whose open page should be flushed
+     * @return what happened, so the caller can report a save only when one occurred
      */
-    private void saveCurrentContents() {
+    public static FlushOutcome flushOpenEditPage(Player viewer) {
+        if (viewer == null || InventoryAPI.getInstance() == null) {
+            return FlushOutcome.NO_OPEN_PAGE;
+        }
+
+        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
+        if (!(current instanceof RemoteBagContentGUI)) {
+            return FlushOutcome.NO_OPEN_PAGE;
+        }
+
+        RemoteBagContentGUI page = (RemoteBagContentGUI) current;
+        if (page.accessMode != AccessMode.EDIT
+                || !viewer.getUniqueId().equals(page.ownerUuid)) {
+            return FlushOutcome.NO_OPEN_PAGE;
+        }
+
+        return page.saveCurrentContents() ? FlushOutcome.WRITTEN : FlushOutcome.NOT_WRITTEN;
+    }
+
+    /**
+     * What {@link #flushOpenEditPage(Player)} did.
+     * <p>
+     * Three outcomes rather than a boolean, because a caller that reports "saved" has to distinguish
+     * "there was nothing open, so persist the cache instead" from "there was an open page and it did
+     * not write" — the second must report nothing, since the page has already told the viewer why,
+     * whether it declined for lack of authority or the database write failed.
+     */
+    public enum FlushOutcome {
+        /** No flushable page was open; the caller should persist the cache itself. */
+        NO_OPEN_PAGE,
+        /** An open edit page was written, which also persisted the rest of that player's cache. */
+        WRITTEN,
+        /**
+         * An open edit page did not write: it no longer holds edit authority, or the database write
+         * failed. Either way the page has already said so, and the caller must report nothing.
+         */
+        NOT_WRITTEN
+    }
+
+    /**
+     * Whether {@code holderUuid} is, right now, looking at this bag page.
+     * <p>
+     * This is what {@link BagLockService} asks before letting a lock's timeout reclaim it: the
+     * timeout exists to free a lock whose holder's session ended without releasing it, and a holder
+     * who is online with the page open has not ended their session.
+     * <p>
+     * Presence is READ, never stored. There is no "page is open" flag anywhere, because a flag can
+     * leak — on a crash, on a reload, on a force-close by another plugin, on a server-side inventory
+     * replacement — and a leaked flag would make a lock immortal, which is worse than the lost update
+     * it was added to prevent. Both facts below are live:
+     * <ul>
+     *   <li>{@link InventoryAPI#getPlayersCurrentGui(Player)} is the library's own player-to-page
+     *       registry, written by {@code Gui#open()} and removed by its listener on
+     *       {@link InventoryCloseEvent}. Every way a page stops being open fires that event —
+     *       quitting, Escape, another plugin's {@code closeInventory()}, opening any other
+     *       inventory — so a closed page cannot still be registered.</li>
+     *   <li>The holder's live {@link org.bukkit.inventory.InventoryView} must still be showing this
+     *       page's inventory. After a crash or a reload there is no view at all, so the lock expires
+     *       under the ordinary rule with no special case and no separate backstop.</li>
+     * </ul>
+     * The comparison is {@code equals}, not {@code ==}, deliberately:
+     * {@code org.bukkit.craftbukkit.inventory.CraftInventory#equals} compares the underlying
+     * {@code net.minecraft.world.Container}, and a view's top inventory can be a different wrapper
+     * around that same container, so reference identity would be a false negative on a real server
+     * (measured from {@code paper-1.21.11.jar}) and would leave this check silently inert.
+     *
+     * @param ownerUuid  the bag's owner
+     * @param pageNum    the page number
+     * @param holderUuid the lock holder to look for
+     * @return true if that player is online and has this very page open
+     */
+    public static boolean isPageOpenBy(UUID ownerUuid, int pageNum, UUID holderUuid) {
+        if (ownerUuid == null || holderUuid == null || InventoryAPI.getInstance() == null) {
+            return false;
+        }
+
+        // No server means nobody is online, so no page is open. Reached during early boot and during
+        // shutdown, when Bukkit's static server reference is not (or no longer) set.
+        if (Bukkit.getServer() == null) {
+            return false;
+        }
+
+        Player holder = Bukkit.getPlayer(holderUuid);
+        if (holder == null || !holder.isOnline()) {
+            return false;
+        }
+
+        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(holder);
+        if (!(current instanceof RemoteBagContentGUI)) {
+            return false;
+        }
+
+        RemoteBagContentGUI page = (RemoteBagContentGUI) current;
+        if (page.pageNum != pageNum || !ownerUuid.equals(page.ownerUuid)) {
+            return false;
+        }
+
+        InventoryView view = holder.getOpenInventory();
+        return view != null && page.getInventory().equals(view.getTopInventory());
+    }
+
+    /**
+     * 保存当前 GUI 中的内容到背包服务
+     * <p>
+     * Copies this page's live inventory into the service cache and persists it.
+     * <p>
+     * Defence in depth, explicitly secondary: the primary protection against a stale page
+     * overwriting a newer one is that a lock can no longer expire while its page is open
+     * ({@link #isPageOpenBy}), so two pages of the same bag can no longer be open in edit mode at
+     * once. This guard exists in case some path still gets there, and it asks the LIVE lock rather
+     * than the {@code accessMode} this page was constructed with.
+     * <p>
+     * {@link BagLockService#mayWrite} answers true when no lock is held at all, which is the ordinary
+     * benign case — the lock expired and nobody took it — and that case must keep saving. A guard
+     * that refused there would silently stop persisting every normal session.
+     *
+     * @return true if the contents were written
+     */
+    private boolean saveCurrentContents() {
+        if (!lockService.mayWrite(ownerUuid, pageNum, player.getUniqueId())) {
+            // Somebody else holds this page now. Writing would overwrite their committed edits with
+            // a snapshot taken before they existed. Refusing silently would trade their loss for
+            // this viewer's, so say so.
+            SoundUtil.playErrorSound(player, config);
+            player.sendMessage(ChatColor.RED + plugin.i18n("msg_save_refused_lock_taken"));
+            return false;
+        }
+
         ItemStack[] contents = new ItemStack[CONTENT_SIZE];
         for (int i = 0; i < CONTENT_SIZE; i++) {
             contents[i] = getInventory().getItem(i);
         }
         bagService.setBagPage(ownerUuid, pageNum, contents);
-        bagService.saveBag(ownerUuid);
+        if (!bagService.saveBag(ownerUuid)) {
+            // The cache holds the edit but the database does not, so it is lost on the next restart.
+            // Discarding this result and reporting success is the same defect as reporting a save with
+            // an empty cache, one layer in.
+            SoundUtil.playErrorSound(player, config);
+            player.sendMessage(ChatColor.RED + plugin.i18n("msg_save_failed"));
+            return false;
+        }
+        return true;
     }
 }

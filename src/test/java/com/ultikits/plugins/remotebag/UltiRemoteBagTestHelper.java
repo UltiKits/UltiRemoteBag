@@ -135,4 +135,20 @@ public final class UltiRemoteBagTestHelper {
         field.setAccessible(true);
         field.set(target, value);
     }
+
+    /**
+     * Reads a private field. Used to age a {@code BagLockInfo} past its timeout deterministically,
+     * which is the only way to reach the "the lock is old" half of the handover scenario without
+     * sleeping for the configured timeout.
+     *
+     * @param target    the instance to read from
+     * @param fieldName the declared field name
+     * @return the field's value
+     * @throws Exception if the field does not exist or cannot be read
+     */
+    public static Object getField(Object target, String fieldName) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(target);
+    }
 }

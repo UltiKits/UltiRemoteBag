@@ -54,7 +54,13 @@ msg_owner_still_using: "Owner is still using, please try again later"
 msg_bag_saved: "Bag saved!"
 msg_cannot_save_readonly: "Currently in read-only mode, cannot save changes"
 msg_readonly_no_move: "Read-only mode, cannot move items"
+msg_cannot_drag_toolbar: "The toolbar row is buttons, not storage — nothing can be dragged onto it."
+msg_toolbar_item_conflict: "That item matches one of this page's buttons, so the action was cancelled — it would have taken the button out of the toolbar or merged your item into it."
 msg_owner_started_using: "{0} has started using this bag, your view has been switched to read-only mode. Click the refresh button to try to acquire edit permission."
+msg_owner_has_page_open: "The owner has this page open right now, so the lock timeout does not hand it over. Click refresh once they close it."
+msg_save_refused_lock_taken: "This page is now held by someone else, so your changes were not saved. Reopen it to see the current contents."
+msg_save_failed: "The save did not reach the database, so your changes are not stored. Check the server console."
+msg_nothing_to_save: "Nothing to save."
 
 # Command Related
 page_out_of_range: "Page {0} out of range, max page is {1}"

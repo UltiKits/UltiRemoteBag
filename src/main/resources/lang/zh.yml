@@ -54,7 +54,13 @@ msg_owner_still_using: "所有者仍在使用中，请稍后再试"
 msg_bag_saved: "背包已保存！"
 msg_cannot_save_readonly: "当前为只读模式，无法保存修改"
 msg_readonly_no_move: "只读模式，无法移动物品"
+msg_cannot_drag_toolbar: "底行是按钮而非储物格，无法将物品拖入其中。"
+msg_toolbar_item_conflict: "该物品与本页某个按钮相同，因此操作已被取消——否则会把按钮从底行取走，或把你的物品并入其中。"
 msg_owner_started_using: "{0} 已开始使用此背包，您的视图已切换为只读模式。点击刷新按钮可尝试获取编辑权限。"
+msg_owner_has_page_open: "所有者当前正打开此页，锁超时不会将其转交。待其关闭后点击刷新。"
+msg_save_refused_lock_taken: "此页现由他人持有，你的改动未被保存。请重新打开以查看当前内容。"
+msg_save_failed: "保存未写入数据库，你的改动尚未存储。请查看服务器控制台。"
+msg_nothing_to_save: "没有需要保存的内容。"
 
 # 命令相关
 page_out_of_range: "页码 {0} 超出范围，最大页码为 {1}"

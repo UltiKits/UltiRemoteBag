@@ -1131,10 +1131,11 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return empty array for null data")
         void returnsEmptyForNull() throws Exception {
-            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            Method deserialize = RemoteBagService.class.getDeclaredMethod(
+                    "deserializeItems", String.class, int.class);
             deserialize.setAccessible(true);
 
-            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, (String) null);
+            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, (String) null, 1);
 
             assertThat(result).isNotNull();
             assertThat(result.length).isEqualTo(54); // 6 rows * 9
@@ -1143,10 +1144,11 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return empty array for empty string")
         void returnsEmptyForEmptyString() throws Exception {
-            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            Method deserialize = RemoteBagService.class.getDeclaredMethod(
+                    "deserializeItems", String.class, int.class);
             deserialize.setAccessible(true);
 
-            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "");
+            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "", 1);
 
             assertThat(result).isNotNull();
             assertThat(result.length).isEqualTo(54);
@@ -1155,11 +1157,12 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should handle invalid YAML gracefully")
         void handlesInvalidYaml() throws Exception {
-            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            Method deserialize = RemoteBagService.class.getDeclaredMethod(
+                    "deserializeItems", String.class, int.class);
             deserialize.setAccessible(true);
 
             // Invalid YAML that will cause a parse error
-            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "not: valid: yaml: {{{}}}");
+            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "not: valid: yaml: {{{}}}", 1);
 
             // Should return empty array (exception caught)
             assertThat(result).isNotNull();
@@ -1169,11 +1172,12 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return empty array for YAML without items section")
         void returnsEmptyForNoItemsSection() throws Exception {
-            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            Method deserialize = RemoteBagService.class.getDeclaredMethod(
+                    "deserializeItems", String.class, int.class);
             deserialize.setAccessible(true);
 
             // Valid YAML but no "items" section
-            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "other_key: value\n");
+            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "other_key: value\n", 1);
 
             assertThat(result).isNotNull();
             assertThat(result.length).isEqualTo(54);
@@ -1186,7 +1190,8 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should iterate items section keys when section exists")
         void iteratesItemsSectionKeys() throws Exception {
-            Method deserialize = RemoteBagService.class.getDeclaredMethod("deserializeItems", String.class);
+            Method deserialize = RemoteBagService.class.getDeclaredMethod(
+                    "deserializeItems", String.class, int.class);
             deserialize.setAccessible(true);
 
             // Valid YAML with items configuration section.
@@ -1194,15 +1199,18 @@ class RemoteBagServiceTest {
             // and getKeys(false) returns keys, exercising lines 190-193.
             // yaml.getItemStack("items.0") on a non-ItemStack section returns null (no throw).
             String yaml = "items:\n  '0':\n    type: STONE\n  '5':\n    type: DIRT\n";
-            try {
-                ItemStack[] result = (ItemStack[]) deserialize.invoke(service, yaml);
-                // Should succeed - getItemStack returns null for non-serialized items
-                assertThat(result).isNotNull();
-                assertThat(result.length).isEqualTo(54);
-            } catch (Exception e) {
-                // If getItemStack throws without Bukkit, the catch block returns empty array
-                assertThat(e).isNotNull();
-            }
+
+            ItemStack[] result = (ItemStack[]) deserialize.invoke(service, yaml, 1);
+
+            // getItemStack on a section that is not a serialized ItemStack returns null without
+            // throwing, so both keys parse as slot numbers and both slots stay empty. Asserted
+            // directly: the catch(Exception e) { assertThat(e).isNotNull(); } this case used to
+            // carry passed on ANY throwable, including one from the reflection call itself, so it
+            // could not tell "the keys were iterated" from "nothing ran at all".
+            assertThat(result).isNotNull();
+            assertThat(result.length).isEqualTo(54);
+            assertThat(result[0]).isNull();
+            assertThat(result[5]).isNull();
         }
     }
 

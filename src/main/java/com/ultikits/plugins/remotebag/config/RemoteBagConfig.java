@@ -28,9 +28,25 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     @ConfigEntry(path = "max_pages", comment = "Maximum number of bag pages a player can have")
     private int maxPages = 10;
 
-    @Range(min = 1, max = 6)
+    /**
+     * The largest {@code rows_per_page} any legal configuration may hold.
+     * <p>
+     * A compile-time constant rather than a literal in the {@link Range} below, because
+     * {@code RemoteBagService} bounds its page allocation by this key's ceiling and used to restate
+     * that derivation as its own literal {@code 54}. Nothing linked the two, so widening this range
+     * would silently have turned that allocation guard into a load-time item-discard: every stored
+     * slot index between the old ceiling and the new one would become legal for the GUI to write and
+     * illegal for the loader to read. Referencing one constant makes the two numbers unable to
+     * diverge, which no test can achieve.
+     */
+    public static final int MAX_ROWS_PER_PAGE = 6;
+
+    /** Slots in one inventory row. Fixed by Minecraft, named so the arithmetic is not a literal. */
+    public static final int SLOTS_PER_ROW = 9;
+
+    @Range(min = 1, max = MAX_ROWS_PER_PAGE)
     @ConfigEntry(path = "rows_per_page", comment = "Number of rows per page (1-6, each row = 9 slots)")
-    private int rowsPerPage = 6;
+    private int rowsPerPage = MAX_ROWS_PER_PAGE;
     
     @NotEmpty
     @ConfigEntry(path = "gui_title", comment = "Title of the bag GUI")
@@ -110,7 +126,12 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     // ==================== 锁定设置 ====================
 
     @Range(min = 10, max = 3600)
-    @ConfigEntry(path = "lock.timeout_seconds", comment = "背包锁超时时间（秒），超时后自动释放")
+    @ConfigEntry(path = "lock.timeout_seconds",
+            comment = "Bag lock recovery timeout in seconds. Reclaims a lock whose holder's session "
+                    + "ended without releasing it; a holder who is online with the page open keeps "
+                    + "the lock however long they idle. "
+                    + "背包锁的回收超时时间（秒）。仅用于回收持有者会话异常结束而未释放的锁；"
+                    + "持有者在线且页面仍打开时，无论空闲多久都会保留该锁")
     private int lockTimeout = 300;
     
     @ConfigEntry(path = "lock.notify_readonly_viewers", comment = "所有者开始使用背包时是否通知只读查看者")

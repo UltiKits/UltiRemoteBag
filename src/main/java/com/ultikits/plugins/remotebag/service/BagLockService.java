@@ -4,6 +4,7 @@ import com.ultikits.plugins.remotebag.entity.BagLockInfo;
 import com.ultikits.plugins.remotebag.entity.BagOpenResult;
 import com.ultikits.plugins.remotebag.enums.AccessMode;
 import com.ultikits.plugins.remotebag.enums.LockType;
+import com.ultikits.plugins.remotebag.gui.RemoteBagContentGUI;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Autowired;
 import com.ultikits.ultitools.annotations.Service;
@@ -21,7 +22,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * - 所有者拥有最高优先级，管理员在所有者使用时只能只读
  * - 管理员编辑时，所有者需要等待
  * - 同一时间只有一个人可以编辑
- * 
+ * - 锁在其页面仍处于打开状态时不会因超时被回收（见 {@link #isReclaimable}）
+ * <p>
+ * Lock rules: the owner outranks an administrator, only one holder may edit at a time, and
+ * {@code lock.timeout_seconds} reclaims a lock ONLY when its holder is not currently holding the page
+ * open. The timeout is a recovery mechanism for a session that ended without releasing its lock, not
+ * a lease that a present holder has to renew — see {@link #isReclaimable(UUID, int, BagLockInfo)}.
+ *
  * @author wisdomme
  * @version 1.0.0
  */
@@ -75,8 +82,8 @@ public class BagLockService {
                 return BagOpenResult.editMode();
             }
             
-            // 检查锁是否过期
-            if (existing.isExpired(lockTimeoutMillis)) {
+            // 检查锁是否可被超时回收
+            if (isReclaimable(ownerUuid, pageNum, existing)) {
                 locks.remove(key);
             } else if (existing.getLockType() == LockType.ADMIN) {
                 // 管理员正在编辑，所有者需要等待
@@ -114,8 +121,8 @@ public class BagLockService {
         BagLockInfo existing = locks.get(key);
         
         if (existing != null) {
-            // 检查锁是否过期
-            if (existing.isExpired(lockTimeoutMillis)) {
+            // 检查锁是否可被超时回收
+            if (isReclaimable(ownerUuid, pageNum, existing)) {
                 locks.remove(key);
                 existing = null;
             }
@@ -202,8 +209,8 @@ public class BagLockService {
             return AccessMode.EDIT;
         }
         
-        // 检查锁是否过期
-        if (existing.isExpired(lockTimeoutMillis)) {
+        // 检查锁是否可被超时回收
+        if (isReclaimable(ownerUuid, pageNum, existing)) {
             locks.remove(key);
             return AccessMode.EDIT;
         }
@@ -233,8 +240,8 @@ public class BagLockService {
         String key = makeKey(ownerUuid, pageNum);
         BagLockInfo existing = locks.get(key);
         
-        // 无锁或锁已过期 → 可以编辑
-        return existing == null || existing.isExpired(lockTimeoutMillis);
+        // 无锁或锁已可被超时回收 → 可以编辑
+        return existing == null || isReclaimable(ownerUuid, pageNum, existing);
     }
     
     /**
@@ -248,12 +255,88 @@ public class BagLockService {
         String key = makeKey(ownerUuid, pageNum);
         BagLockInfo info = locks.get(key);
         
-        if (info != null && info.isExpired(lockTimeoutMillis)) {
+        if (info != null && isReclaimable(ownerUuid, pageNum, info)) {
             locks.remove(key);
             return Optional.empty();
         }
-        
+
         return Optional.ofNullable(info);
+    }
+
+    /**
+     * Whether {@code writer} may still persist this page.
+     * <p>
+     * True when no live lock is held on the page, or when the live lock is {@code writer}'s own. The
+     * no-lock case is the ordinary benign one — the lock expired and nobody took it — and must keep
+     * saving, or every normal session would silently stop persisting.
+     * <p>
+     * {@link #getCurrentAccessMode} is deliberately NOT reused for this. Its fall-through returns
+     * {@link AccessMode#EDIT} for an {@link LockType#ADMIN} lock held by somebody else, which is
+     * right for its own purpose (deciding what mode to hand a viewer, given that {@link #adminOpen}
+     * refuses a second administrator outright) and wrong for this one: "another administrator holds
+     * this page" is exactly the case a write must not proceed through.
+     *
+     * @param ownerUuid 背包所有者 UUID
+     * @param pageNum   页码
+     * @param writer    the player whose page wants to write
+     * @return true if nobody else holds this page
+     */
+    public boolean mayWrite(UUID ownerUuid, int pageNum, UUID writer) {
+        BagLockInfo existing = locks.get(makeKey(ownerUuid, pageNum));
+        if (existing == null || isReclaimable(ownerUuid, pageNum, existing)) {
+            return true;
+        }
+        return existing.getHolderUuid().equals(writer);
+    }
+
+    /**
+     * Whether a lock's holder currently has this very page open.
+     * <p>
+     * Public because the admin path needs it to explain itself: without a reason, an administrator
+     * who waited out {@code lock.timeout_seconds} and still got read-only would read the new
+     * behaviour as a bug and file it as one.
+     *
+     * @param ownerUuid 背包所有者 UUID
+     * @param pageNum   页码
+     * @return true if a lock is held on this page and its holder is looking at it right now
+     */
+    public boolean isHeldByViewingHolder(UUID ownerUuid, int pageNum) {
+        BagLockInfo existing = locks.get(makeKey(ownerUuid, pageNum));
+        return existing != null
+                && RemoteBagContentGUI.isPageOpenBy(ownerUuid, pageNum, existing.getHolderUuid());
+    }
+
+    /**
+     * Whether the timeout may reclaim this lock.
+     * <p>
+     * {@code lock.timeout_seconds} exists to free a lock whose holder's session ended without
+     * releasing it — a crash, a network drop, a shutdown mid-session. A holder who is online with
+     * this page open has NOT ended their session, so the clock does not apply to them, however long
+     * they idle.
+     * <p>
+     * The condition is presence, not activity. Refreshing the lock's timestamp on a click or a save
+     * would be an approximation of presence, and an approximation that fails in the case that
+     * matters: a page left open with no clicks at all would still be reclaimed after the timeout,
+     * which is exactly the AFK owner whose later save destroyed an administrator's items. Presence
+     * is directly observable, so it is observed — see
+     * {@link RemoteBagContentGUI#isPageOpenBy(UUID, int, UUID)} for why it is read live rather than
+     * tracked in a flag.
+     * <p>
+     * Every path that ends a session still releases the lock: quitting removes it outright
+     * ({@link #releaseAll}, driven by the module's {@code PlayerQuitEvent} listener), closing the
+     * page releases it in {@code RemoteBagContentGUI#onClose}, and a crash or a reload leaves no open
+     * view for {@code isPageOpenBy} to find.
+     *
+     * @param ownerUuid 背包所有者 UUID
+     * @param pageNum   页码
+     * @param lock      the lock being examined
+     * @return true if the lock is past its timeout AND nobody is holding its page open
+     */
+    private boolean isReclaimable(UUID ownerUuid, int pageNum, BagLockInfo lock) {
+        if (!lock.isExpired(lockTimeoutMillis)) {
+            return false;
+        }
+        return !RemoteBagContentGUI.isPageOpenBy(ownerUuid, pageNum, lock.getHolderUuid());
     }
     
     /**

@@ -12,7 +12,6 @@ import com.ultikits.ultitools.utils.XVersionUtils;
 
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
-import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.inventory.Inventory;
@@ -30,9 +29,14 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 /**
- * Tests for RemoteBagContentGUI non-open methods.
- * Tests onClick(), onClose(), buildTitle(), and saveCurrentContents() via reflection.
- * Does NOT test open() or methods that require InventoryAPI initialization.
+ * Tests for RemoteBagContentGUI methods that need neither an open inventory nor the GUI library:
+ * buildTitle(), the toolbar icon builders, onClose(), and saveCurrentContents() through reflection.
+ * <p>
+ * Click and drag behaviour is deliberately NOT here. It lives in
+ * RemoteBagContentGUIInteractionMatrixTest, which dispatches real events through the GUI library's
+ * own listener and asserts both inventories' contents afterwards -- the only way to tell "cancelled"
+ * from "allowed", since this class cannot reach the code that turns the return value into
+ * event.setCancelled(...). See the note where those cases used to sit.
  */
 @DisplayName("RemoteBagContentGUI Tests")
 class RemoteBagContentGUITest {
@@ -57,6 +61,15 @@ class RemoteBagContentGUITest {
 
         bagService = mock(RemoteBagService.class);
         lockService = mock(BagLockService.class);
+        // What a real BagLockService answers when no lock is held on the page -- the ordinary case,
+        // in which a save must go through. The save path asks the LIVE lock rather than the mode the
+        // page was constructed with, so a mock left unstubbed would answer false and every save case
+        // below would refuse for a reason that has nothing to do with what it tests. The refusal
+        // itself is asserted in SaveCurrentContents#refusesWhenTheLockIsNoLongerOurs.
+        lenient().when(lockService.mayWrite(any(), anyInt(), any())).thenReturn(true);
+        // What a real service answers for a cache it persisted. saveCurrentContents now propagates
+        // this, so an unstubbed mock would answer false and every save case would report failure.
+        lenient().when(bagService.saveBag(any())).thenReturn(true);
         config = UltiRemoteBagTestHelper.createDefaultConfig();
         mockPlugin = mock(UltiToolsPlugin.class);
         when(mockPlugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -147,124 +160,18 @@ class RemoteBagContentGUITest {
         }
     }
 
-    // ==================== onClick ====================
-
-    @Nested
-    @DisplayName("onClick")
-    class OnClick {
-
-        @Test
-        @DisplayName("Should cancel event in toolbar area (slot >= 45)")
-        void cancelsToolbarClick() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(45);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isTrue(); // true = cancel event
-        }
-
-        @Test
-        @DisplayName("Should cancel event in toolbar area (last slot)")
-        void cancelsLastSlotClick() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(53);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isTrue();
-        }
-
-        @Test
-        @DisplayName("Should allow click in content area in edit mode")
-        void allowsContentClickInEditMode() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(0);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isFalse(); // false = allow event
-        }
-
-        @Test
-        @DisplayName("Should allow click on middle content slot in edit mode")
-        void allowsMiddleSlotClickInEditMode() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(22);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isFalse();
-        }
-
-        @Test
-        @DisplayName("Should cancel click in content area in read-only mode with items")
-        void cancelsContentClickInReadOnlyMode() {
-            RemoteBagContentGUI gui = createGui(AccessMode.READ_ONLY);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(0);
-            when(event.getCurrentItem()).thenReturn(mock(ItemStack.class));
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isTrue(); // cancel event
-            verify(player).sendMessage(contains("msg_readonly_no_move"));
-        }
-
-        @Test
-        @DisplayName("Should cancel click in read-only mode with cursor item")
-        void cancelsReadOnlyWithCursor() {
-            RemoteBagContentGUI gui = createGui(AccessMode.READ_ONLY);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(0);
-            when(event.getCurrentItem()).thenReturn(null);
-            when(event.getCursor()).thenReturn(mock(ItemStack.class));
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isTrue();
-            verify(player).sendMessage(contains("msg_readonly_no_move"));
-        }
-
-        @Test
-        @DisplayName("Should cancel click in read-only mode even with no items")
-        void cancelsReadOnlyEmptySlot() {
-            RemoteBagContentGUI gui = createGui(AccessMode.READ_ONLY);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(10);
-            when(event.getCurrentItem()).thenReturn(null);
-            when(event.getCursor()).thenReturn(null);
-
-            boolean result = gui.onClick(event);
-
-            // Still cancels but no message since both are null
-            assertThat(result).isTrue();
-        }
-
-        @Test
-        @DisplayName("Should allow content slot at boundary (slot 44)")
-        void allowsContentBoundarySlot() {
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-
-            InventoryClickEvent event = mock(InventoryClickEvent.class);
-            when(event.getRawSlot()).thenReturn(44);
-
-            boolean result = gui.onClick(event);
-
-            assertThat(result).isFalse(); // content area, edit mode
-        }
-    }
+    // ==================== onClick / onDrag ====================
+    //
+    // Deliberately absent here. The cases that used to sit in this position asserted only the
+    // boolean onClick returns, reading it through the comment "true = cancel event" -- the inverse
+    // of the deployed GUI library's real contract, so they were green while a read-only viewer
+    // could genuinely take another player's item (UltiKits/UltiRemoteBag#27). Reading that return
+    // value also never runs the code that turns it into event.setCancelled(...), so no assertion on
+    // it can tell "cancelled" from "allowed".
+    //
+    // Click and drag behaviour is now asserted in RemoteBagContentGUIInteractionMatrixTest, which
+    // dispatches real events through the library's own listener and asserts both inventories'
+    // contents afterwards.
 
     // ==================== onClose ====================
 
@@ -363,6 +270,73 @@ class RemoteBagContentGUITest {
             for (int i = 0; i < 45; i++) {
                 verify(mockInventory).getItem(i);
             }
+        }
+
+        @Test
+        @DisplayName("Refuses to write, with a message, when the live lock is no longer this page's")
+        void refusesWhenTheLockIsNoLongerOurs() throws Exception {
+            // Defence in depth for the lost update in pull request #34's gate-1 review: this page was
+            // constructed in EDIT mode, but the live lock now says READ_ONLY, i.e. somebody else holds
+            // the page. Writing would overwrite their committed edits with a snapshot taken before
+            // they existed. The primary protection is that a lock can no longer expire while its page
+            // is open, so this state should be unreachable; this asserts the guard behind it.
+            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
+            when(lockService.mayWrite(ownerUuid, 1, playerUuid)).thenReturn(false);
+
+            Inventory mockInventory = mock(Inventory.class);
+            setInventory(gui, mockInventory);
+
+            Method saveMethod = RemoteBagContentGUI.class.getDeclaredMethod("saveCurrentContents");
+            saveMethod.setAccessible(true);
+            Object written = saveMethod.invoke(gui);
+
+            assertThat(written).as("the write must be reported as not performed").isEqualTo(false);
+            verify(bagService, never()).setBagPage(any(), anyInt(), any());
+            verify(bagService, never()).saveBag(any());
+            verify(player).sendMessage(contains("msg_save_refused_lock_taken"));
+        }
+
+        @Test
+        @DisplayName("Reports failure, with a message, when the persistence write did not land")
+        void reportsFailureWhenThePersistenceWriteFails() throws Exception {
+            // saveBag returns false when an update throws IllegalAccessException: the edit is in the
+            // cache and not in the database, so it is lost on the next restart. Discarding that result
+            // and reporting success is the same defect as reporting a save with an empty cache, one
+            // layer in -- raised as a P2 on pull request #34's second external review round.
+            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
+            when(lockService.mayWrite(ownerUuid, 1, playerUuid)).thenReturn(true);
+            when(bagService.saveBag(ownerUuid)).thenReturn(false);
+
+            Inventory mockInventory = mock(Inventory.class);
+            setInventory(gui, mockInventory);
+
+            Method saveMethod = RemoteBagContentGUI.class.getDeclaredMethod("saveCurrentContents");
+            saveMethod.setAccessible(true);
+            Object written = saveMethod.invoke(gui);
+
+            assertThat(written).as("a failed write must not be reported as performed").isEqualTo(false);
+            verify(player).sendMessage(contains("msg_save_failed"));
+            verify(player, never()).sendMessage(contains("msg_bag_saved"));
+        }
+
+        @Test
+        @DisplayName("Still writes when no lock is held at all, which is the ordinary case")
+        void stillWritesWhenNobodyHoldsTheLock() throws Exception {
+            // mayWrite answers true when the map holds no lock for the page -- the lock expired and
+            // nobody took it. A guard that refused there would silently stop persisting every normal
+            // session, so this is the control that the guard above is not that.
+            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
+            when(lockService.mayWrite(ownerUuid, 1, playerUuid)).thenReturn(true);
+
+            Inventory mockInventory = mock(Inventory.class);
+            setInventory(gui, mockInventory);
+
+            Method saveMethod = RemoteBagContentGUI.class.getDeclaredMethod("saveCurrentContents");
+            saveMethod.setAccessible(true);
+            Object written = saveMethod.invoke(gui);
+
+            assertThat(written).isEqualTo(true);
+            verify(bagService).saveBag(ownerUuid);
         }
     }
 
