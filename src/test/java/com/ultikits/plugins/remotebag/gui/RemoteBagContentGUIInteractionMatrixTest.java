@@ -31,7 +31,9 @@ import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -71,10 +73,22 @@ import static org.mockito.Mockito.mock;
  * applies it. That harness is the reason every refusal case has an {@link AccessMode#EDIT} twin
  * running the identical harness path and asserting that the item <em>did</em> move: if the harness
  * were inert, or if the event never reached the library, every EDIT twin would fail. A refusal
- * assertion therefore cannot pass because nothing happened.
+ * assertion therefore cannot pass because nothing happened. Every case in the {@code ReadOnly} class
+ * has that twin, the two player-side effects included — {@code MOVE_TO_OTHER_INVENTORY} from the
+ * viewer's own side and {@code COLLECT_TO_CURSOR}.
  * <p>
- * No case below asserts a chat message. Message presence is precisely the evidence that UAT
- * accepted while the item was being duplicated.
+ * No case below asserts a chat message as its WHOLE verdict; message presence is precisely the
+ * evidence UAT accepted while the item was being duplicated. Two drag cases assert a message in
+ * ADDITION to the inventory contents, because a cancelled drag runs no icon action and moves nothing,
+ * so without one "refused" and "the build is broken" are the same observation.
+ * <p>
+ * Every drag below spans at least two slots. A one-slot quick-craft is not a drag on a real server:
+ * with {@code carried.getCount()} items on the cursor, vanilla registers a hovered slot only while
+ * {@code carried.getCount() > quickcraftSlots.size()}, and on completion a single registered slot is
+ * re-dispatched as a {@code PICKUP} click with no {@link InventoryDragEvent} constructed at all
+ * (measured in {@code AbstractContainerMenu#doClick}, {@code paper-1.21.11.jar}). The dragged stack is
+ * therefore sized to the number of slots, and shrinking either back to one would make the case
+ * describe a state no server can produce.
  */
 @DisplayName("RemoteBagContentGUI interaction matrix (mode x interaction)")
 class RemoteBagContentGUIInteractionMatrixTest {
@@ -87,6 +101,19 @@ class RemoteBagContentGUIInteractionMatrixTest {
     private static final int TOOLBAR_SAVE_SLOT = 49;
     /** First raw slot of the viewer's own inventory in a 54-slot view. */
     private static final int OWN_INVENTORY_SLOT = 54;
+    /**
+     * The viewer's own inventory index that {@link #OWN_INVENTORY_SLOT} addresses.
+     * <p>
+     * {@code InventoryView#convertSlot(54)} is 9 on both MockBukkit's {@code InventoryViewMock} and
+     * CraftBukkit, so this is the index a real server would touch. It is spelled out because
+     * {@code InventoryViewMock#getItem(54)} does NOT go through {@code convertSlot} — it subtracts
+     * the top size and indexes the bottom inventory directly, giving slot 0 — so a harness that
+     * addressed the player side through the VIEW would line up with MockBukkit and miss on a real
+     * server. {@link #applyVanillaEffect(InventoryClickEvent)} therefore addresses player-side slots
+     * through {@code event.getSlot()} against the player's own inventory. No raw slot in a 54-slot
+     * view makes the two mappings agree, so there is no constant to pick instead.
+     */
+    private static final int OWN_INVENTORY_INDEX = 9;
     /** Hotbar index used by the number-key swap cases. */
     private static final int HOTBAR_INDEX = 3;
 
@@ -178,27 +205,53 @@ class RemoteBagContentGUIInteractionMatrixTest {
             assertViewerHoldsNoDiamond();
             assertThat(viewer.getInventory().getItem(HOTBAR_INDEX))
                     .as("the viewer's own hotbar item must not have been swapped away")
-                    .isNotNull();
+                    .isEqualTo(new ItemStack(Material.DIRT));
         }
 
         @Test
-        @DisplayName("A drag of the viewer's own item over content slots puts nothing into the bag")
+        @DisplayName("A drag of the viewer's own item over content slots puts nothing into the bag, and says why")
         void dragCannotInsertItem() {
             RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
 
-            InventoryDragEvent event = dragEmeraldOver(gui, CONTENT_SLOT_2);
+            InventoryDragEvent event = dragEmeraldOver(gui, CONTENT_SLOT, CONTENT_SLOT_2);
 
             assertThat(event.isCancelled()).as("read-only drag must be cancelled").isTrue();
-            assertThat(gui.getInventory().getItem(CONTENT_SLOT_2))
-                    .as("nothing may be dragged into a read-only bag")
-                    .isNull();
+            assertBagUnchangedByADrag(gui);
+            // In addition to the contents, not instead of them: a cancelled drag produces no other
+            // feedback whatsoever, so silence would be indistinguishable from a broken build.
+            assertThat(messagesSentToViewer())
+                    .as("a refused drag has to tell the viewer why")
+                    .contains("msg_readonly_no_move");
+        }
+
+        @Test
+        @DisplayName("A drag confined to the viewer's own inventory is allowed, as clicks there are")
+        void dragWithinOwnInventoryIsNotBlocked() {
+            // Read-only guards the bag, not the viewer's own inventory -- the same policy the click
+            // path implements in ownInventoryPickupIsNotBlocked. Refusing the whole event on mode
+            // alone stopped an administrator rearranging their OWN inventory while looking at somebody
+            // else's bag, and stopped it silently.
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
+
+            InventoryDragEvent event = dragEmeraldOver(gui, OWN_INVENTORY_SLOT, OWN_INVENTORY_SLOT + 1);
+
+            // The library sets the cancel flag on EVERY drag from this method's return value, and the
+            // library's own default returns "cancel", so an uncancelled drag can only mean onDrag
+            // answered ALLOW -- this is a positive observation, not an absence.
+            assertThat(event.isCancelled())
+                    .as("a drag that never touches the bag window must not be cancelled")
+                    .isFalse();
+            assertBagUnchangedByADrag(gui);
+            assertThat(messagesSentToViewer())
+                    .as("and nothing was refused, so nothing is announced")
+                    .isEmpty();
         }
 
         @Test
         @DisplayName("A shift-click from the viewer's own inventory does not insert into the bag")
         void shiftClickFromOwnInventoryCannotInsert() {
             RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
-            viewer.getInventory().setItem(0, new ItemStack(Material.EMERALD));
+            viewer.getInventory().setItem(OWN_INVENTORY_INDEX, new ItemStack(Material.EMERALD));
 
             InventoryClickEvent event = click(gui, OWN_INVENTORY_SLOT, ClickType.SHIFT_LEFT,
                     InventoryAction.MOVE_TO_OTHER_INVENTORY);
@@ -250,7 +303,7 @@ class RemoteBagContentGUIInteractionMatrixTest {
         @DisplayName("The viewer may still handle items inside their own inventory")
         void ownInventoryPickupIsNotBlocked() {
             RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
-            viewer.getInventory().setItem(0, new ItemStack(Material.EMERALD));
+            viewer.getInventory().setItem(OWN_INVENTORY_INDEX, new ItemStack(Material.EMERALD));
 
             InventoryClickEvent event = click(gui, OWN_INVENTORY_SLOT, ClickType.LEFT,
                     InventoryAction.PICKUP_ALL);
@@ -311,16 +364,66 @@ class RemoteBagContentGUIInteractionMatrixTest {
         }
 
         @Test
-        @DisplayName("A drag places the viewer's item into a content slot")
+        @DisplayName("A drag spreads the viewer's stack across two content slots")
         void dragInsertsItem() {
             RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+            // Slot 0 holds the stored diamond, so drag across two EMPTY content slots: a real drag
+            // never includes a slot whose contents cannot quick-replace the carried stack.
+            gui.getInventory().setItem(CONTENT_SLOT_2, null);
 
-            InventoryDragEvent event = dragEmeraldOver(gui, CONTENT_SLOT_2);
+            InventoryDragEvent event = dragEmeraldOver(gui, CONTENT_SLOT_2, CONTENT_SLOT_2 + 1);
 
             assertThat(event.isCancelled()).as("edit-mode content drag must be allowed").isFalse();
             assertThat(gui.getInventory().getItem(CONTENT_SLOT_2))
-                    .as("the dragged emerald reached the content slot")
-                    .isNotNull();
+                    .as("the dragged stack reached the first content slot")
+                    .isEqualTo(new ItemStack(Material.EMERALD));
+            assertThat(gui.getInventory().getItem(CONTENT_SLOT_2 + 1))
+                    .as("and the second -- which is what distinguishes a drag from a click")
+                    .isEqualTo(new ItemStack(Material.EMERALD));
+        }
+
+        @Test
+        @DisplayName("A shift-click from the viewer's own inventory inserts into the bag")
+        void shiftClickFromOwnInventoryInserts() {
+            // The EDIT twin of shiftClickFromOwnInventoryCannotInsert: without it, the harness's
+            // player-side MOVE_TO_OTHER_INVENTORY effect is never proven to move anything, so that
+            // refusal case could pass against an inert harness.
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+            viewer.getInventory().setItem(OWN_INVENTORY_INDEX, new ItemStack(Material.EMERALD));
+
+            InventoryClickEvent event = click(gui, OWN_INVENTORY_SLOT, ClickType.SHIFT_LEFT,
+                    InventoryAction.MOVE_TO_OTHER_INVENTORY);
+
+            assertThat(event.isCancelled())
+                    .as("an edit-mode shift-click from the player side must be allowed")
+                    .isFalse();
+            assertThat(gui.getInventory().contains(Material.EMERALD))
+                    .as("the bag gained the viewer's emerald")
+                    .isTrue();
+            assertThat(viewer.getInventory().getItem(OWN_INVENTORY_INDEX))
+                    .as("and it left the viewer's own inventory")
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("A double-click collect pulls a stored item onto the cursor")
+        void collectToCursorTakesItem() {
+            // The EDIT twin of collectToCursorCannotTakeItem, for the same reason: it proves the
+            // harness's COLLECT_TO_CURSOR effect really sweeps the bag.
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+
+            InventoryClickEvent event = click(gui, OWN_INVENTORY_SLOT, ClickType.DOUBLE_CLICK,
+                    InventoryAction.COLLECT_TO_CURSOR);
+
+            assertThat(event.isCancelled())
+                    .as("an edit-mode collect-to-cursor must be allowed")
+                    .isFalse();
+            assertThat(viewer.getItemOnCursor().getType())
+                    .as("the bag's diamond was swept onto the cursor")
+                    .isEqualTo(Material.DIAMOND);
+            assertThat(gui.getInventory().getItem(CONTENT_SLOT))
+                    .as("and left the bag")
+                    .isNull();
         }
 
         @Test
@@ -339,9 +442,16 @@ class RemoteBagContentGUIInteractionMatrixTest {
         }
 
         @Test
-        @DisplayName("A drag that reaches into the toolbar row is refused outright")
+        @DisplayName("A drag that reaches into the toolbar row is refused outright, and says why")
         void dragOverToolbarIsRefused() {
+            // The constructed event is deliberately broader than vanilla: every toolbar slot holds a
+            // named glass pane or a sunflower, none of which stacks with an EMERALD, so
+            // canItemQuickReplace/mayPlace exclude slot 49 from a real drag's getRawSlots(). The guard
+            // is still load-bearing -- a player carrying an anvil-renamed pane whose components match a
+            // filler exactly would satisfy isSameItemSameComponents -- so this case proves the branch,
+            // not a production scenario, and must not be deleted as unreachable.
             RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+            gui.getInventory().setItem(CONTENT_SLOT_2, null);
             ItemStack saveIcon = gui.getInventory().getItem(TOOLBAR_SAVE_SLOT);
 
             InventoryDragEvent event = dragEmeraldOver(gui, CONTENT_SLOT_2, TOOLBAR_SAVE_SLOT);
@@ -355,6 +465,22 @@ class RemoteBagContentGUIInteractionMatrixTest {
             assertThat(gui.getInventory().getItem(CONTENT_SLOT_2))
                     .as("no part of a refused drag may be applied")
                     .isNull();
+            assertThat(messagesSentToViewer())
+                    .as("in addition to the contents: a cancelled drag has no other feedback")
+                    .contains("msg_cannot_drag_toolbar");
+        }
+
+        @Test
+        @DisplayName("A drag confined to the viewer's own inventory is allowed in edit mode too")
+        void dragWithinOwnInventoryIsNotBlocked() {
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+
+            InventoryDragEvent event = dragEmeraldOver(gui, OWN_INVENTORY_SLOT, OWN_INVENTORY_SLOT + 1);
+
+            assertThat(event.isCancelled())
+                    .as("a drag that never touches the bag window must not be cancelled")
+                    .isFalse();
+            assertThat(messagesSentToViewer()).isEmpty();
         }
     }
 
@@ -434,20 +560,31 @@ class RemoteBagContentGUIInteractionMatrixTest {
         int rawSlot = event.getRawSlot();
         switch (event.getAction()) {
             case PICKUP_ALL: {
-                ItemStack picked = view.getItem(rawSlot);
-                view.setItem(rawSlot, null);
-                viewer.setItemOnCursor(picked);
+                if (rawSlot < view.getTopInventory().getSize()) {
+                    viewer.setItemOnCursor(view.getItem(rawSlot));
+                    view.setItem(rawSlot, null);
+                } else {
+                    viewer.setItemOnCursor(viewer.getInventory().getItem(event.getSlot()));
+                    viewer.getInventory().setItem(event.getSlot(), null);
+                }
                 break;
             }
             case MOVE_TO_OTHER_INVENTORY: {
-                ItemStack moved = view.getItem(rawSlot);
+                boolean fromBag = rawSlot < view.getTopInventory().getSize();
+                ItemStack moved = fromBag
+                        ? view.getItem(rawSlot)
+                        : viewer.getInventory().getItem(event.getSlot());
                 if (moved == null) {
                     break;
                 }
-                view.setItem(rawSlot, null);
-                if (rawSlot < view.getTopInventory().getSize()) {
+                if (fromBag) {
+                    view.setItem(rawSlot, null);
                     viewer.getInventory().addItem(moved);
                 } else {
+                    // Player-side slots are addressed through getSlot(), not through the view: see
+                    // OWN_INVENTORY_INDEX for why the view's raw-slot mapping differs between
+                    // MockBukkit and a real server.
+                    viewer.getInventory().setItem(event.getSlot(), null);
                     view.getTopInventory().addItem(moved);
                 }
                 break;
@@ -495,6 +632,31 @@ class RemoteBagContentGUIInteractionMatrixTest {
         assertThat(gui.getInventory().getItem(CONTENT_SLOT))
                 .as("the stored diamond must still be in the bag")
                 .isEqualTo(new ItemStack(Material.DIAMOND));
+    }
+
+    /**
+     * Every chat line the page sent since the last read, drained from MockBukkit's message queue and
+     * joined. {@code mockPlugin.i18n} echoes its key, so a line is identified by the key that produced
+     * it; the lines also carry a {@link org.bukkit.ChatColor} prefix, which is why this is a string to
+     * search rather than a list to match elements against.
+     */
+    private String messagesSentToViewer() {
+        List<String> messages = new ArrayList<>();
+        String next;
+        while ((next = viewer.nextMessage()) != null) {
+            messages.add(next);
+        }
+        return String.join("\n", messages);
+    }
+
+    /** No content slot may have changed: slot 0 keeps its diamond and nothing else holds anything. */
+    private void assertBagUnchangedByADrag(RemoteBagContentGUI gui) {
+        assertBagStillHoldsTheDiamond(gui);
+        for (int slot = 1; slot < 45; slot++) {
+            assertThat(gui.getInventory().getItem(slot))
+                    .as("content slot %d must be untouched by a refused drag", slot)
+                    .isNull();
+        }
     }
 
     private void assertViewerHoldsNoDiamond() {

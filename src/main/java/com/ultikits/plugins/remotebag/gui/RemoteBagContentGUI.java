@@ -459,8 +459,16 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * <p>
      * Handles an inventory drag. A drag is not a click and reaches this class through a separate
      * library entry point, which this page previously did not override at all — leaving every drag
-     * refused, including in edit mode. Read-only drags stay refused; edit-mode drags are allowed
-     * unless they reach into the toolbar row, which would overwrite a button with an item.
+     * refused, including in edit mode.
+     * <p>
+     * The refusal is scoped to THIS page's window, mirroring {@link #onClick}: read-only guards the
+     * bag, not the viewer's own inventory, so an administrator looking at somebody else's bag can
+     * still right-drag a stack among slots of their own inventory. Refusing the whole event on mode
+     * alone took that away, and took it away silently.
+     * <p>
+     * Every refusal this method performs says so. There is no other feedback for a cancelled drag —
+     * no icon action runs, nothing moves — so a silent refusal is indistinguishable from a broken
+     * build, which is exactly the reading that let UltiKits/UltiRemoteBag#27 sit open.
      * <p>
      * Unlike a click, the library applies this method's answer to the whole drag unconditionally:
      * there is no per-slot fallback, so a drag spanning the content area and the toolbar has to be
@@ -471,17 +479,37 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     @Override
     public boolean onDrag(InventoryDragEvent event) {
-        if (accessMode == AccessMode.READ_ONLY) {
-            return CANCEL;
-        }
-
         for (int rawSlot : event.getRawSlots()) {
-            if (rawSlot >= CONTENT_SIZE && rawSlot < getSize()) {
+            boolean insideBagWindow = rawSlot >= 0 && rawSlot < getSize();
+            if (!insideBagWindow) {
+                // The viewer's own inventory is theirs in either mode.
+                continue;
+            }
+
+            if (accessMode == AccessMode.READ_ONLY) {
+                // In read-only the whole window is guarded, toolbar included, and "read-only" is the
+                // reason for all of it.
+                announceDragRefusal("msg_readonly_no_move");
+                return CANCEL;
+            }
+
+            if (rawSlot >= CONTENT_SIZE) {
+                announceDragRefusal("msg_cannot_drag_toolbar");
                 return CANCEL;
             }
         }
 
         return ALLOW;
+    }
+
+    /**
+     * Tells the viewer why a drag was refused, and plays the error sound.
+     *
+     * @param messageKey the i18n key naming the reason
+     */
+    private void announceDragRefusal(String messageKey) {
+        SoundUtil.playErrorSound(player, config);
+        player.sendMessage(ChatColor.RED + plugin.i18n(messageKey));
     }
 
     /**
