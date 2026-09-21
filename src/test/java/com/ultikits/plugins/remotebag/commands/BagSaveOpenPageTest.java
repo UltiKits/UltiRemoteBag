@@ -258,6 +258,43 @@ class BagSaveOpenPageTest {
     }
 
     @Test
+    @DisplayName("With nothing cached at all, /bag save says so instead of confirming a save")
+    void savingWithAnEmptyCacheReportsThatNothingWasSaved() {
+        // The real service, not a stub: saveBag returns false for a player with no cached pages -- a
+        // fresh login that has not opened a page -- and the command printed bag_saved_manually anyway,
+        // which is what made the ultiremotebag.bag.save row's "or run this from a fresh login"
+        // precondition assert against correct code (gate-1 review, WR-05). A mocked service cannot
+        // pin this: the behaviour under test is the service's own answer.
+        assertThat(store.rows()).as("precondition: the store is empty").isEmpty();
+
+        command.saveBag(player);
+
+        String messages = messagesSentTo(player);
+        assertThat(messages)
+                .as("the command must not claim a save it did not perform")
+                .contains("msg_nothing_to_save")
+                .doesNotContain("bag_saved_manually");
+        assertThat(store.rows())
+                .as("and it really wrote nothing, so the message is not merely pessimistic")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("Control: with a page cached, the same command does confirm the save")
+    void savingWithACachedPageConfirmsTheSave() {
+        // Without this, the case above could pass because the command never reports success at all.
+        ItemStack[] cached = new ItemStack[45];
+        cached[CONTENT_SLOT] = new ItemStack(Material.DIAMOND);
+        bagService.setBagPage(player.getUniqueId(), PAGE, cached);
+
+        command.saveBag(player);
+
+        assertThat(messagesSentTo(player))
+                .as("control: a real save is still confirmed")
+                .contains("bag_saved_manually");
+    }
+
+    @Test
     @DisplayName("With no page open, /bag save still persists what the cache already holds")
     void savingWithNoPageOpenStillPersistsTheCache() {
         ItemStack[] cached = new ItemStack[45];
@@ -269,6 +306,16 @@ class BagSaveOpenPageTest {
         assertThat(store.storedContents(player.getUniqueId().toString(), PAGE))
                 .as("control: this harness's /bag save really does write a row")
                 .contains("minecraft:diamond");
+    }
+
+    /** Every chat line sent to this player since the last read, joined; i18n echoes its key. */
+    private String messagesSentTo(PlayerMock target) {
+        StringBuilder all = new StringBuilder();
+        String next;
+        while ((next = target.nextMessage()) != null) {
+            all.append(next).append('\n');
+        }
+        return all.toString();
     }
 
     private RemoteBagContentGUI openEditPage() {
