@@ -42,6 +42,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the whole page. This does not change how many rows the GUI shows — it still
   shows and saves 45 slots whatever `rows_per_page` holds, which is still open as
   UltiKits/UltiRemoteBag#24 (UltiKits/UltiRemoteBag#24).
+- An administrator no longer takes an edit lock from an owner who has the page open, however long that
+  owner idles. `lock.timeout_seconds` reclaims a lock whose holder's session ended without releasing
+  it; it is not a lease a present holder has to renew. Previously the lock was handed over once the
+  configured timeout elapsed even though the owner was still looking at the page, and the owner's next
+  save then wrote a snapshot taken before the administrator existed over the row — destroying whatever
+  the administrator had added, or restoring an item the administrator had taken out so that it existed
+  twice. The administrator is now told why their view is read-only instead of being downgraded
+  silently (UltiKits/UltiRemoteBag#34).
+- `/bag save` now reports only a save it actually performed. With nothing cached to save — a fresh
+  login that has not opened a page — it says so instead of confirming a write that did not happen, and
+  it no longer persists every cached page twice when it flushed an open page (UltiKits/UltiRemoteBag#34).
 - `/ul reload UltiRemoteBag` 现在会重载本模块的配置并刷新其语言文件；此前本模块替换了框架的重载步骤，两者都不会发生，
   修改 `config/remotebag.yml` 后只有重启才会生效（UltiKits/UltiRemoteBag#12）。
 - 通过 `/upm uninstall UltiRemoteBag` 卸载本模块时仍会先保存所有已缓存的背包；之后本模块的命令现在会被真正移除，
@@ -63,6 +74,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   丢失。所存页面中单个无法读取的条目（非数字、负数，或超出 `rows_per_page` 自身 1-6 取值所能寻址的 54 个槽位）现在只会被跳过，
   并输出一条指明页码与键名的 `WARNING`，而不再让整页作废。此改动不改变界面显示的行数——无论 `rows_per_page` 为何值，界面仍显示并保存 45 个槽位，
   这一点仍未解决（UltiKits/UltiRemoteBag#24）。
+- 管理员不再从正打开该页的所有者手中夺取编辑锁，无论所有者空闲多久。`lock.timeout_seconds` 用于回收持有者会话
+  异常结束而未释放的锁，并非持有者在场时仍需续期的租约。此前只要配置的超时时间到达，即使所有者仍在查看该页，锁
+  也会被转交，而所有者随后的保存会把管理员出现之前的快照写回该行——销毁管理员放入的物品，或把管理员取出的物品
+  还原，导致其存在两份。现在管理员会被告知其视图为何是只读，而不再被静默降级（UltiKits/UltiRemoteBag#34）。
+- `/bag save` 现在只在确实完成保存时才如此报告。当没有任何缓存内容可保存时（例如刚登录且尚未打开过背包页），
+  它会明确说明，而不再确认一次并未发生的写入；并且在刷新了打开的页面后，不再把每个缓存页重复保存两次
+  （UltiKits/UltiRemoteBag#34）。
 
 ### Removed
 
