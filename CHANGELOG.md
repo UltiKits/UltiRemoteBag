@@ -50,6 +50,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the administrator had added, or restoring an item the administrator had taken out so that it existed
   twice. The administrator is now told why their view is read-only instead of being downgraded
   silently (UltiKits/UltiRemoteBag#34).
+- The read-only Refresh button now clears a slot the owner has emptied since you opened the view.
+  Previously it drew only what was stored and left everything else as it was, so a refreshed view
+  could keep showing an item the owner had already taken out (UltiKits/UltiRemoteBag#34).
+- A bag page no longer overrides another plugin's decision to cancel a click or a drag. Previously
+  editing your own page cleared a cancellation an anti-cheat or region plugin had already set
+  (UltiKits/UltiRemoteBag#34).
+- A hand-edited or foreign-written stored page whose slot key is written `+5` or `05` no longer
+  silently drops an item: such a key parses to the same slot as its plain form and one of the two
+  items disappeared with no warning. It is now skipped with the same warning as any other unreadable
+  key, and those warnings now carry this module's own log prefix like every other line it emits
+  (UltiKits/UltiRemoteBag#34).
 - A drag confined to your own inventory is no longer refused while you are viewing somebody else's
   bag read-only. Read-only guards the bag, not your own inventory, which is already how clicking
   behaves. And a drag that IS refused now says why, in both modes, instead of failing silently
@@ -82,6 +93,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   异常结束而未释放的锁，并非持有者在场时仍需续期的租约。此前只要配置的超时时间到达，即使所有者仍在查看该页，锁
   也会被转交，而所有者随后的保存会把管理员出现之前的快照写回该行——销毁管理员放入的物品，或把管理员取出的物品
   还原，导致其存在两份。现在管理员会被告知其视图为何是只读，而不再被静默降级（UltiKits/UltiRemoteBag#34）。
+- 只读模式下的刷新按钮现在会清空所有者在你打开视图后已取空的槽位。此前它只绘制已存储的内容，其余槽位保持原样，
+  因此刷新后的视图可能仍显示所有者早已取走的物品（UltiKits/UltiRemoteBag#34）。
+- 背包页不再覆盖其他插件取消点击或拖拽的决定。此前编辑自己的背包页会清除反作弊或领地插件已设置的取消标记
+  （UltiKits/UltiRemoteBag#34）。
+- 手工编辑或由外部写入的存档页中，写成 `+5` 或 `05` 的槽位键不再静默丢弃物品：这类键会解析成与其普通形式相同的
+  槽位，导致两个物品中的一个无声消失。现在它会与其他无法读取的键一样被跳过并给出警告，且这些警告会带上本模块自身
+  的日志前缀，与它输出的其他每一行一致（UltiKits/UltiRemoteBag#34）。
 - 以只读方式查看他人背包时，完全在自己背包内进行的拖拽不再被拒绝：只读保护的是背包本身，而不是查看者自己的
   背包——点击操作原本就是如此。并且被拒绝的拖拽现在会在两种模式下都说明原因，而不再静默失败
   （UltiKits/UltiRemoteBag#34）。
