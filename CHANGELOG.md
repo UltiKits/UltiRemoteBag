@@ -29,6 +29,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The toolbar icons on the bottom row of a bag page (Back, Refresh, Save, the mode indicator, the
   fillers and Close) can no longer be picked up as items, in either mode; clicking one still
   performs its action (UltiKits/UltiRemoteBag#27).
+- `/bag save` now stores an item placed into a bag page that is still open. Previously it saved
+  only what had already reached the plugin's cache — which happens when the page's own Save button
+  is clicked, or when it is closed in edit mode — so an item placed and then saved with `/bag save`
+  was reported as saved and then lost on the next restart (UltiKits/UltiRemoteBag#22).
 - `/ul reload UltiRemoteBag` 现在会重载本模块的配置并刷新其语言文件；此前本模块替换了框架的重载步骤，两者都不会发生，
   修改 `config/remotebag.yml` 后只有重启才会生效（UltiKits/UltiRemoteBag#12）。
 - 通过 `/upm uninstall UltiRemoteBag` 卸载本模块时仍会先保存所有已缓存的背包；之后本模块的命令现在会被真正移除，
@@ -42,6 +46,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   （UltiKits/UltiRemoteBag#27）。
 - 背包页底行的工具栏图标（返回、刷新、保存、模式指示、填充格与关闭）在两种模式下都不再能被当作物品拿走；
   点击它们仍会执行各自的功能（UltiKits/UltiRemoteBag#27）。
+- `/bag save` 现在会保存放入仍处于打开状态的背包页中的物品。此前它只保存已经进入插件缓存的内容（点击该页
+  自身的保存按钮，或在编辑模式下关闭该页时才会进入缓存），因此放入物品后立刻执行 `/bag save`，会收到已保存
+  的提示，但该物品会在下次重启后丢失（UltiKits/UltiRemoteBag#22）。
 
 ### Removed
 
