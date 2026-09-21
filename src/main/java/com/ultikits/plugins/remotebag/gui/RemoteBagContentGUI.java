@@ -454,6 +454,16 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return CANCEL;
         }
 
+        // Two vanilla actions are not confined to the slot they were clicked on: COLLECT_TO_CURSOR
+        // sweeps every slot of both inventories, and a shift-click from the player's side scans the
+        // whole top inventory for somewhere to put the stack. Both therefore reach raw slots 45-53,
+        // which the guard above cannot see because it only knows where the click STARTED.
+        if (wouldReachAToolbarIcon(event)) {
+            SoundUtil.playErrorSound(player, config);
+            player.sendMessage(ChatColor.RED + plugin.i18n("msg_toolbar_item_conflict"));
+            return CANCEL;
+        }
+
         // Edit mode: the content area and the viewer's own inventory behave like a chest -- but only
         // as far as nobody else has already said no. The library turns ALLOW into
         // event.setCancelled(false), which CLEARS a cancellation an earlier handler set rather than
@@ -462,6 +472,61 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         // or region plugin at LOWEST/LOW/earlier-NORMAL. Deciding for this page is ours; reversing
         // somebody else's decision is not.
         return event.isCancelled() ? CANCEL : ALLOW;
+    }
+
+    /**
+     * Whether this click is one of the two multi-slot actions AND carries an item that matches a
+     * toolbar icon, so vanilla would reach into the toolbar row while applying it.
+     * <p>
+     * The library's contract is one boolean for the whole click, so a multi-slot action cannot be
+     * allowed "except for slots 45-53" — it is allowed entirely or refused entirely. Refusing it is
+     * the safe half, and it only bites when the player is holding something that matches a button.
+     * <p>
+     * The exposure is real rather than theoretical for this module in particular: before
+     * UltiKits/UltiRemoteBag#27 the toolbar icons COULD be picked up out of the page, so a server
+     * upgrading from that version may have players holding genuine copies of them. With a matching
+     * item on the cursor, a double-click anywhere in the window collects the icon out of the toolbar;
+     * the toolbar is rebuilt from scratch by {@code setupToolbar} on the next open and
+     * {@link #saveCurrentContents} only ever serialises slots 0-44, so the collected copy is pure
+     * duplication. The shift-click direction loses instead: the stack merges into a toolbar slot and
+     * is gone when the page closes.
+     * <p>
+     * {@link ItemStack#isSimilar} is the Bukkit equivalent of the comparison vanilla uses to decide
+     * both of these (type plus metadata, ignoring stack size), so this matches what the server would
+     * actually do rather than approximating it.
+     *
+     * @param event the click being considered
+     * @return true if the action would let vanilla touch a toolbar icon
+     */
+    private boolean wouldReachAToolbarIcon(InventoryClickEvent event) {
+        ItemStack subject;
+        switch (event.getAction()) {
+            case COLLECT_TO_CURSOR:
+                subject = isRealItem(event.getCursor()) ? event.getCursor() : event.getCurrentItem();
+                break;
+            case MOVE_TO_OTHER_INVENTORY:
+                if (event.getRawSlot() >= 0 && event.getRawSlot() < getSize()) {
+                    // Shift-clicking OUT of this window moves into the player's inventory, which has
+                    // no toolbar to reach.
+                    return false;
+                }
+                subject = event.getCurrentItem();
+                break;
+            default:
+                return false;
+        }
+
+        if (!isRealItem(subject)) {
+            return false;
+        }
+
+        for (int slot = CONTENT_SIZE; slot < getSize(); slot++) {
+            ItemStack icon = getInventory().getItem(slot);
+            if (icon != null && icon.isSimilar(subject)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

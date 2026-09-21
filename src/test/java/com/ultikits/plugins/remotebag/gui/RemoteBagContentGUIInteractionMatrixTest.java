@@ -553,6 +553,79 @@ class RemoteBagContentGUIInteractionMatrixTest {
         }
 
         @Test
+        @DisplayName("A double-click cannot collect a toolbar icon out of the page in edit mode")
+        void collectToCursorCannotSweepTheToolbar() {
+            // COLLECT_TO_CURSOR is not confined to the slot it was clicked on: vanilla sweeps every
+            // slot of the top inventory, raw 45-53 included, which the toolbar guard cannot see
+            // because it only knows where the click STARTED. With a matching item on the cursor the
+            // icon is collected out of the toolbar; setupToolbar rebuilds it on the next open and
+            // saveCurrentContents only serialises slots 0-44, so the collected copy is duplication
+            // (second external review round on pull request #34). A player can hold a genuine copy:
+            // before UltiKits/UltiRemoteBag#27 these icons could be picked up out of the page.
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+            ItemStack toolbarIcon = gui.getInventory().getItem(TOOLBAR_SAVE_SLOT);
+            assertThat(toolbarIcon).as("precondition: the toolbar renders an icon to collect").isNotNull();
+            viewer.setItemOnCursor(toolbarIcon.clone());
+
+            InventoryClickEvent event = click(gui, CONTENT_SLOT_2, ClickType.DOUBLE_CLICK,
+                    InventoryAction.COLLECT_TO_CURSOR);
+
+            assertThat(event.isCancelled())
+                    .as("a sweep that would reach the toolbar must be cancelled outright")
+                    .isTrue();
+            assertThat(gui.getInventory().getItem(TOOLBAR_SAVE_SLOT))
+                    .as("the icon must still be in the toolbar")
+                    .isEqualTo(toolbarIcon);
+            assertThat(messagesSentToViewer()).contains("msg_toolbar_item_conflict");
+        }
+
+        @Test
+        @DisplayName("Control: a double-click carrying an ordinary item is still allowed in edit mode")
+        void collectToCursorIsStillAllowedForAnOrdinaryItem() {
+            // Without this, the case above could pass because edit mode refuses every collect.
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+            viewer.setItemOnCursor(new ItemStack(Material.DIAMOND));
+
+            InventoryClickEvent event = click(gui, CONTENT_SLOT_2, ClickType.DOUBLE_CLICK,
+                    InventoryAction.COLLECT_TO_CURSOR);
+
+            assertThat(event.isCancelled())
+                    .as("an item that matches no button sweeps as it always did")
+                    .isFalse();
+            assertThat(gui.getInventory().getItem(CONTENT_SLOT))
+                    .as("and it really swept the bag's matching diamond")
+                    .isNull();
+        }
+
+        @Test
+        @DisplayName("A shift-click of an item matching a toolbar icon cannot merge into the toolbar")
+        void shiftClickCannotMergeIntoTheToolbar() {
+            // The other multi-slot action, and the loss direction rather than the duplication one:
+            // vanilla scans the whole top inventory for somewhere to put the stack, so it merges into
+            // a matching toolbar slot, and that slot is never serialised -- the item is gone on close.
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+            ItemStack toolbarIcon = gui.getInventory().getItem(TOOLBAR_SAVE_SLOT);
+            // Placed and read through the VIEW, not through the player's inventory. Production reads
+            // event.getCurrentItem(), which is view.getItem(rawSlot); addressing the same slot through
+            // the inventory would miss it under MockBukkit's raw-slot mapping (see
+            // OWN_INVENTORY_INDEX) and the case would pass for the wrong reason on a real server.
+            viewer.getOpenInventory().setItem(OWN_INVENTORY_SLOT, toolbarIcon.clone());
+
+            InventoryClickEvent event = click(gui, OWN_INVENTORY_SLOT, ClickType.SHIFT_LEFT,
+                    InventoryAction.MOVE_TO_OTHER_INVENTORY);
+
+            assertThat(event.isCancelled())
+                    .as("a shift-click that would merge into a button must be cancelled")
+                    .isTrue();
+            assertThat(viewer.getOpenInventory().getItem(OWN_INVENTORY_SLOT))
+                    .as("the player's copy stays theirs")
+                    .isEqualTo(toolbarIcon);
+            assertThat(gui.getInventory().getItem(TOOLBAR_SAVE_SLOT))
+                    .as("and the toolbar is untouched")
+                    .isEqualTo(toolbarIcon);
+        }
+
+        @Test
         @DisplayName("Refresh clears a slot the owner has emptied since the page opened")
         void refreshClearsAVacatedSlot() {
             // The read-only Refresh button is loadBagContents()'s only other caller, and it wrote only
@@ -723,12 +796,20 @@ class RemoteBagContentGUIInteractionMatrixTest {
                 break;
             }
             case COLLECT_TO_CURSOR: {
-                // Vanilla sweeps matching stacks from both inventories onto the cursor. Only the
-                // bag side matters to these cases, so that is what is modelled.
+                // Vanilla sweeps stacks SIMILAR to the one on the cursor out of every slot of the top
+                // inventory -- the toolbar row included, which is the whole point of the cases that
+                // use this. Matching by similarity rather than "first non-air" is what makes a
+                // toolbar-icon collection distinguishable from an ordinary one.
+                ItemStack onCursor = viewer.getItemOnCursor();
                 Inventory top = view.getTopInventory();
                 for (int slot = 0; slot < top.getSize(); slot++) {
                     ItemStack candidate = top.getItem(slot);
-                    if (candidate != null && candidate.getType() != Material.AIR) {
+                    if (candidate == null || candidate.getType() == Material.AIR) {
+                        continue;
+                    }
+                    boolean matches = onCursor == null || onCursor.getType() == Material.AIR
+                            || onCursor.isSimilar(candidate);
+                    if (matches) {
                         top.setItem(slot, null);
                         viewer.setItemOnCursor(candidate);
                         break;
