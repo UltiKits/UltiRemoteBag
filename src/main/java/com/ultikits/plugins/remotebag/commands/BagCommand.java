@@ -99,9 +99,16 @@ public class BagCommand extends BaseCommandExecutor {
     
     /**
      * 手动保存背包
+     * <p>
+     * Persists the sender's bag pages. An item placed into a content page that is still open has
+     * not reached the service cache yet -- only the page's own Save button and its edit-mode close
+     * do that copy -- so the open page is flushed first. Without that, this command reported
+     * `bag_saved_manually` while the just-placed item was never written, and it was lost on the
+     * next restart (UltiKits/UltiRemoteBag#22).
      */
     @CmdMapping(format = "save")
     public void saveBag(@CmdSender Player player) {
+        RemoteBagContentGUI.flushOpenEditPage(player);
         bagService.saveBag(player.getUniqueId());
         player.sendMessage(ChatColor.GREEN + i18n("bag_saved_manually"));
     }

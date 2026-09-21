@@ -10,7 +10,9 @@ import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.abstracts.gui.BaseInventoryPage;
 import com.ultikits.ultitools.entities.Colors;
 import com.ultikits.ultitools.utils.XVersionUtils;
+import mc.obliviate.inventory.Gui;
 import mc.obliviate.inventory.Icon;
+import mc.obliviate.inventory.InventoryAPI;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -534,6 +536,45 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         }
     }
     
+    /**
+     * 将该玩家当前打开的编辑模式内容页写入背包服务并持久化
+     * <p>
+     * Persists the content page {@code viewer} currently has open, if it is one of these pages and
+     * it is in edit mode. Returns whether anything was written, so a caller can tell "there was
+     * nothing open" from "the open page was flushed".
+     * <p>
+     * The open page is resolved through {@link InventoryAPI#getPlayersCurrentGui(Player)} — the same
+     * player-to-page map the GUI library's listener consults to decide which page receives a click,
+     * so this cannot disagree with what the player is actually looking at. Because the lookup is
+     * keyed by the viewer, it can only ever reach that viewer's own page; the identity check below
+     * states that invariant rather than relying on it silently.
+     * <p>
+     * A read-only page is deliberately skipped: its live inventory is another player's bag being
+     * looked at, and writing it back would let a viewer's stale view overwrite the owner's page.
+     *
+     * @param viewer 玩家 / the player whose open page should be flushed
+     * @return true if an open edit-mode page was written
+     */
+    public static boolean flushOpenEditPage(Player viewer) {
+        if (viewer == null || InventoryAPI.getInstance() == null) {
+            return false;
+        }
+
+        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
+        if (!(current instanceof RemoteBagContentGUI)) {
+            return false;
+        }
+
+        RemoteBagContentGUI page = (RemoteBagContentGUI) current;
+        if (page.accessMode != AccessMode.EDIT
+                || !viewer.getUniqueId().equals(page.player.getUniqueId())) {
+            return false;
+        }
+
+        page.saveCurrentContents();
+        return true;
+    }
+
     /**
      * 保存当前 GUI 中的内容到背包服务
      */
