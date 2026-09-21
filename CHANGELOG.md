@@ -50,6 +50,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the administrator had added, or restoring an item the administrator had taken out so that it existed
   twice. The administrator is now told why their view is read-only instead of being downgraded
   silently (UltiKits/UltiRemoteBag#34).
+- A save whose database write fails now says so instead of confirming a save. The page's own Save
+  button, `/bag save` and closing the page in edit mode all reported success whenever the copy into
+  memory succeeded, even when the write to the database did not, so an edit that existed only in
+  memory was reported as stored and then lost on the next restart. "Nothing to save" and "the save
+  failed" are also told apart now, because they ask different things of the operator
+  (UltiKits/UltiRemoteBag#34).
 - The read-only Refresh button now clears a slot the owner has emptied since you opened the view.
   Previously it drew only what was stored and left everything else as it was, so a refreshed view
   could keep showing an item the owner had already taken out (UltiKits/UltiRemoteBag#34).
@@ -93,6 +99,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   异常结束而未释放的锁，并非持有者在场时仍需续期的租约。此前只要配置的超时时间到达，即使所有者仍在查看该页，锁
   也会被转交，而所有者随后的保存会把管理员出现之前的快照写回该行——销毁管理员放入的物品，或把管理员取出的物品
   还原，导致其存在两份。现在管理员会被告知其视图为何是只读，而不再被静默降级（UltiKits/UltiRemoteBag#34）。
+- 数据库写入失败的保存现在会明确报错，而不再确认保存成功。此前只要写入内存缓存成功，页面自身的保存按钮、
+  `/bag save` 以及在编辑模式下关闭页面都会报告成功，即使数据库写入并未成功，因此仅存在于内存中的改动会被
+  报告为已保存，并在下次重启后丢失。现在也会区分「没有需要保存的内容」与「保存失败」，因为二者要求操作者
+  采取的行动不同（UltiKits/UltiRemoteBag#34）。
 - 只读模式下的刷新按钮现在会清空所有者在你打开视图后已取空的槽位。此前它只绘制已存储的内容，其余槽位保持原样，
   因此刷新后的视图可能仍显示所有者早已取走的物品（UltiKits/UltiRemoteBag#34）。
 - 背包页不再覆盖其他插件取消点击或拖拽的决定。此前编辑自己的背包页会清除反作弊或领地插件已设置的取消标记
