@@ -43,7 +43,7 @@ public class UltiRemoteBag extends UltiToolsPlugin {
     }
 
     @Override
-    public void unregisterSelf() {
+    protected void onUnregister() {
         // 保存所有背包数据
         RemoteBagService bagService = getContext().getBean(RemoteBagService.class);
         if (bagService != null) {
@@ -51,11 +51,6 @@ public class UltiRemoteBag extends UltiToolsPlugin {
         }
 
         getLogger().info("UltiRemoteBag has been disabled!");
-    }
-
-    @Override
-    public void reloadSelf() {
-        getLogger().info("UltiRemoteBag configuration reloaded!");
     }
 
     @Override

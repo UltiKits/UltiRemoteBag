@@ -7,6 +7,7 @@ import com.ultikits.ultitools.context.SimpleContainer;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
 
 import org.junit.jupiter.api.*;
+import org.mockito.InOrder;
 
 import java.util.List;
 
@@ -119,14 +120,14 @@ class UltiRemoteBagTest {
         }
     }
 
-    // ==================== unregisterSelf ====================
+    // ==================== onUnregister (UltiKits/UltiRemoteBag#12) ====================
 
     @Nested
-    @DisplayName("unregisterSelf")
-    class UnregisterSelf {
+    @DisplayName("onUnregister")
+    class OnUnregister {
 
         @Test
-        @DisplayName("Should log message when service is null")
+        @DisplayName("Should log the disabled line when the RemoteBagService bean is null")
         void logMessageWhenServiceNull() throws Exception {
             UltiRemoteBag plugin = mock(UltiRemoteBag.class);
             PluginLogger logger = mock(PluginLogger.class);
@@ -136,16 +137,16 @@ class UltiRemoteBagTest {
             when(plugin.getContext()).thenReturn(mockContext);
             when(mockContext.getBean(any(Class.class))).thenReturn(null);
 
-            doCallRealMethod().when(plugin).unregisterSelf();
+            doCallRealMethod().when(plugin).onUnregister();
 
-            plugin.unregisterSelf();
+            plugin.onUnregister();
 
             verify(logger).info("UltiRemoteBag has been disabled!");
         }
 
         @Test
-        @DisplayName("Should save all bags when service available")
-        void savesAllBagsWhenServiceAvailable() throws Exception {
+        @DisplayName("Should save all bags exactly once, before logging the disabled line")
+        void savesAllBagsExactlyOnceBeforeLogging() throws Exception {
             UltiRemoteBag plugin = mock(UltiRemoteBag.class);
             PluginLogger logger = mock(PluginLogger.class);
             when(plugin.getLogger()).thenReturn(logger);
@@ -156,28 +157,26 @@ class UltiRemoteBagTest {
             RemoteBagService bagService = mock(RemoteBagService.class);
             when(mockContext.getBean(RemoteBagService.class)).thenReturn(bagService);
 
-            doCallRealMethod().when(plugin).unregisterSelf();
+            doCallRealMethod().when(plugin).onUnregister();
 
-            plugin.unregisterSelf();
+            plugin.onUnregister();
 
-            verify(bagService).saveAllBags();
-            verify(logger).info("UltiRemoteBag has been disabled!");
+            InOrder inOrder = inOrder(bagService, logger);
+            inOrder.verify(bagService, times(1)).saveAllBags();
+            inOrder.verify(logger).info("UltiRemoteBag has been disabled!");
+            verify(bagService, times(1)).saveAllBags();
         }
     }
 
-    // ==================== reloadSelf ====================
+    // ==================== reload (UltiKits/UltiRemoteBag#12) ====================
 
     @Test
-    @DisplayName("reloadSelf should log message")
-    void reloadSelf() throws Exception {
-        UltiRemoteBag plugin = mock(UltiRemoteBag.class);
-        PluginLogger logger = mock(PluginLogger.class);
-        when(plugin.getLogger()).thenReturn(logger);
-        doCallRealMethod().when(plugin).reloadSelf();
-
-        plugin.reloadSelf();
-
-        verify(logger).info("UltiRemoteBag configuration reloaded!");
+    @DisplayName("Should declare no reload hook of its own - the framework's final reloadSelf() does all reload work")
+    void declaresNoReloadHook() {
+        assertThatThrownBy(() -> UltiRemoteBag.class.getDeclaredMethod("onReload"))
+                .isInstanceOf(NoSuchMethodException.class);
+        assertThatThrownBy(() -> UltiRemoteBag.class.getDeclaredMethod("reloadSelf"))
+                .isInstanceOf(NoSuchMethodException.class);
     }
 
     // ==================== supported ====================
