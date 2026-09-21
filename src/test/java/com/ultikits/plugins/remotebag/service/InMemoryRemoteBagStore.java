@@ -29,8 +29,20 @@ public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
 
     private final List<RemoteBagData> rows = new ArrayList<>();
     private int nextId = 1;
+    private int updateCount;
 
     /** The stored rows, in insertion order. */
+    /**
+     * How many times a row has been updated. A caller that persists the same page twice in one
+     * command is invisible in the stored contents -- the second write stores the same bytes -- so
+     * counting is the only way to see it.
+     *
+     * @return the number of {@link #update(RemoteBagData)} calls since construction
+     */
+    public int updateCount() {
+        return updateCount;
+    }
+
     public List<RemoteBagData> rows() {
         return Collections.unmodifiableList(rows);
     }
@@ -104,6 +116,7 @@ public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
     public void update(RemoteBagData obj) {
         // The service mutates the very instance getAll(...) handed back, so the row is already
         // current; this records that the write happened for tests that care about the row identity.
+        updateCount++;
         if (!rows.contains(obj)) {
             rows.add(obj);
         }

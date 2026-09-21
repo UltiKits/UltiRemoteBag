@@ -122,6 +122,31 @@ class BagSaveOpenPageTest {
     }
 
     @Test
+    @DisplayName("A flushing /bag save persists each page once, not twice")
+    void aFlushingSaveDoesNotPersistEveryPageTwice() {
+        // flushOpenEditPage -> saveCurrentContents already ends in saveBag(ownerUuid), and the command
+        // then called saveBag(player) again. For a sender whose own page was flushed those are the same
+        // UUID, so every cached page was re-queried, re-serialized and re-updated a second time and
+        // last_updated was written twice (gate-1 review, IN-09). Invisible in the stored contents --
+        // the second write stores the same bytes -- so the store counts its updates.
+        RemoteBagContentGUI page = openEditPage();
+        page.getInventory().setItem(CONTENT_SLOT, new ItemStack(Material.DIAMOND));
+        // An existing row, so the write takes the update branch rather than the insert branch.
+        bagService.setBagPage(player.getUniqueId(), PAGE, new ItemStack[45]);
+        bagService.saveBag(player.getUniqueId());
+        int updatesBefore = store.updateCount();
+
+        command.saveBag(player);
+
+        assertThat(store.updateCount() - updatesBefore)
+                .as("one /bag save must update the page's row once")
+                .isEqualTo(1);
+        assertThat(store.storedContents(player.getUniqueId().toString(), PAGE))
+                .as("control: the one update it did perform is the flush, so the item really landed")
+                .contains("minecraft:diamond");
+    }
+
+    @Test
     @DisplayName("The stored page deserializes back into the same slot after the cache is dropped")
     void theFlushedPageSurvivesACacheDrop() {
         RemoteBagContentGUI page = openEditPage();
