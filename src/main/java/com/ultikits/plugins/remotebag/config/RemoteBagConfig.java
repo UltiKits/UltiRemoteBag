@@ -28,9 +28,25 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     @ConfigEntry(path = "max_pages", comment = "Maximum number of bag pages a player can have")
     private int maxPages = 10;
 
-    @Range(min = 1, max = 6)
+    /**
+     * The largest {@code rows_per_page} any legal configuration may hold.
+     * <p>
+     * A compile-time constant rather than a literal in the {@link Range} below, because
+     * {@code RemoteBagService} bounds its page allocation by this key's ceiling and used to restate
+     * that derivation as its own literal {@code 54}. Nothing linked the two, so widening this range
+     * would silently have turned that allocation guard into a load-time item-discard: every stored
+     * slot index between the old ceiling and the new one would become legal for the GUI to write and
+     * illegal for the loader to read. Referencing one constant makes the two numbers unable to
+     * diverge, which no test can achieve.
+     */
+    public static final int MAX_ROWS_PER_PAGE = 6;
+
+    /** Slots in one inventory row. Fixed by Minecraft, named so the arithmetic is not a literal. */
+    public static final int SLOTS_PER_ROW = 9;
+
+    @Range(min = 1, max = MAX_ROWS_PER_PAGE)
     @ConfigEntry(path = "rows_per_page", comment = "Number of rows per page (1-6, each row = 9 slots)")
-    private int rowsPerPage = 6;
+    private int rowsPerPage = MAX_ROWS_PER_PAGE;
     
     @NotEmpty
     @ConfigEntry(path = "gui_title", comment = "Title of the bag GUI")

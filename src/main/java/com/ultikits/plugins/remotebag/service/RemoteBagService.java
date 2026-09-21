@@ -36,8 +36,18 @@ public class RemoteBagService {
     private final Map<UUID, Map<Integer, ItemStack[]>> bagCache = new ConcurrentHashMap<>();
 
     /**
-     * Largest page any legal configuration can address: {@code rows_per_page} is validated
-     * {@code @Range(min = 1, max = 6)} and each row is 9 slots.
+     * Largest page any legal configuration can address, derived from the config key that bounds it
+     * rather than restated: {@code rows_per_page} is validated
+     * {@code @Range(min = 1, max = }{@link RemoteBagConfig#MAX_ROWS_PER_PAGE}{@code )} and each row is
+     * {@link RemoteBagConfig#SLOTS_PER_ROW} slots.
+     * <p>
+     * It is computed from those two constants, not written as {@code 54}, so the ceiling and the range
+     * it comes from cannot drift apart. As a literal in this file it was a hand-copied derivation of a
+     * range living in another class with nothing linking them: widening {@code rows_per_page} to allow
+     * a double chest would have left every stored index between the old ceiling and the new one legal
+     * for the GUI to write and illegal for this loader to read — skipped with a warning and dropped by
+     * the next save, which is the item loss UltiKits/UltiRemoteBag#24 was filed for, with a log line
+     * instead of an exception. Nothing in the build would have broken to warn about it.
      * <p>
      * A stored slot index is data, and {@link #deserializeItems(String, int)} sizes the page from the
      * highest one it finds, so without this ceiling a corrupt or hand-edited row could turn its own
@@ -45,7 +55,8 @@ public class RemoteBagService {
      * megabytes, and the resulting {@link OutOfMemoryError} is an {@link Error}, so the
      * {@code catch (Exception)} around the deserializer would not contain it.
      */
-    private static final int MAX_PAGE_SLOTS = 54;
+    private static final int MAX_PAGE_SLOTS =
+            RemoteBagConfig.MAX_ROWS_PER_PAGE * RemoteBagConfig.SLOTS_PER_ROW;
 
     public RemoteBagService(UltiToolsPlugin plugin, RemoteBagConfig config) {
         this.plugin = plugin;
@@ -245,6 +256,16 @@ public class RemoteBagService {
                     warnSkippedSlot(pageNumber, key, "negative slot index");
                     continue;
                 }
+                if (!key.equals(Integer.toString(slot))) {
+                    // Integer.parseInt accepts a signed or padded key, so items.'+5', items.'05' and
+                    // items.' 5' all parse to 5 and collide with items.'5' on one map entry -- the
+                    // second put wins and the first item is gone with no warning at all, the only
+                    // path here that discarded an entry silently. Not reachable from serializeItems,
+                    // which writes plain decimal indices, so it takes a hand-edited or
+                    // foreign-written row to produce.
+                    warnSkippedSlot(pageNumber, key, "not a canonical slot number");
+                    continue;
+                }
                 if (slot >= MAX_PAGE_SLOTS) {
                     warnSkippedSlot(pageNumber, key,
                             "slot beyond the largest addressable page of " + MAX_PAGE_SLOTS + " slots");
@@ -260,17 +281,18 @@ public class RemoteBagService {
             }
             return items;
         } catch (Exception e) {
-            java.util.logging.Logger.getLogger(RemoteBagService.class.getName())
-                    .log(java.util.logging.Level.WARNING, "Failed to deserialize bag items", e);
+            // The module's own logger, not an inline java.util.logging one: every other line this
+            // module emits carries the framework's [UltiTools] [UltiRemoteBag] prefix, and a checklist
+            // row looks for this exact text, so an unprefixed line is a line a tester cannot match.
+            plugin.getLogger().warn(e, "Failed to deserialize bag items");
             return new ItemStack[config.getRowsPerPage() * 9];
         }
     }
 
     private void warnSkippedSlot(int pageNumber, String key, String reason) {
-        java.util.logging.Logger.getLogger(RemoteBagService.class.getName())
-                .log(java.util.logging.Level.WARNING,
-                        "Skipping unreadable slot in bag page {0}: key ''{1}'' ({2}); the rest of the page is kept",
-                        new Object[]{pageNumber, key, reason});
+        plugin.getLogger().warn(String.format(
+                "Skipping unreadable slot in bag page %d: key '%s' (%s); the rest of the page is kept",
+                pageNumber, key, reason));
     }
 
     /**

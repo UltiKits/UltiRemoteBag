@@ -145,16 +145,23 @@ class RemoteBagDeserializationTest {
     }
 
     @Test
-    @DisplayName("An absurd slot index is skipped instead of sizing an array from it")
+    @DisplayName("An out-of-range slot index is skipped instead of sizing an array from it")
     void anAbsurdSlotIndexDoesNotDriveTheAllocation() {
         // Sizing the array from the highest stored index makes that index an allocation request from
         // untrusted stored data: a hand-edited row carrying items.100000000 would ask for an array of
         // hundreds of megabytes, and the resulting OutOfMemoryError is an Error, so the surrounding
         // catch (Exception) would not contain it. Raised as a P2 on pull request #34; the fixed-size
-        // allocation this replaced could not do that. rows_per_page is @Range(min = 1, max = 6), so 54
-        // slots is the largest page any legal configuration can address.
+        // allocation this replaced could not do that.
+        //
+        // The index is 1,000 rather than 100,000,000 deliberately. The assertion is the INVARIANT --
+        // the resulting array's length against the bound -- not the symptom, because whether an
+        // allocation actually throws depends on the heap while the defect does not. With an index
+        // large enough to exhaust the heap, removing the bound would throw OutOfMemoryError inside the
+        // shared Surefire fork instead of failing this one test, so the mutation proof's contents
+        // would depend on -Xmx and could destabilise every other class in the fork.
+        // aSlotJustBeyondTheCeilingIsSkipped below pins the same invariant one index past the bound.
         YamlConfiguration yaml = new YamlConfiguration();
-        yaml.set("items.100000000", new ItemStack(Material.DIAMOND));
+        yaml.set("items.1000", new ItemStack(Material.DIAMOND));
         yaml.set("items.2", new ItemStack(Material.EMERALD));
         store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
 
@@ -168,6 +175,92 @@ class RemoteBagDeserializationTest {
         assertThat(page[2])
                 .as("the addressable item still loads")
                 .isEqualTo(new ItemStack(Material.EMERALD));
+    }
+
+    @Test
+    @DisplayName("Slot 54 -- the first index the bound must reject -- is rejected")
+    void theFirstOutOfRangeIndexIsRejected() {
+        // Slot 53 is asserted kept below and slot 1000 above, which an off-by-one in the comparison
+        // (> instead of >=) would satisfy both of. 54 is the one index that distinguishes them.
+        lenient().when(config.getRowsPerPage()).thenReturn(1);
+        store.seed(playerUuid.toString(), PAGE, yamlWith(54, new ItemStack(Material.DIAMOND)));
+
+        service.loadBagIfNeeded(playerUuid);
+        ItemStack[] page = service.getBagPage(playerUuid, PAGE);
+
+        assertThat(page).isNotNull();
+        assertThat(page.length)
+                .as("54 is one past the largest addressable slot, so it must not size the page")
+                .isLessThanOrEqualTo(54);
+    }
+
+    @Test
+    @DisplayName("A slot just beyond the ceiling is skipped without a large allocation")
+    void aSlotJustBeyondTheCeilingIsSkipped() {
+        // Detectable with a 61-element array at worst, so the bound's absence is observable in a
+        // mutation run whatever the heap is.
+        lenient().when(config.getRowsPerPage()).thenReturn(1);
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items.60", new ItemStack(Material.DIAMOND));
+        yaml.set("items.2", new ItemStack(Material.EMERALD));
+        store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
+
+        service.loadBagIfNeeded(playerUuid);
+        ItemStack[] page = service.getBagPage(playerUuid, PAGE);
+
+        assertThat(page.length)
+                .as("the page is sized by the ceiling, not by the stored key")
+                .isLessThanOrEqualTo(54);
+        assertThat(page[2])
+                .as("the addressable item still loads")
+                .isEqualTo(new ItemStack(Material.EMERALD));
+    }
+
+    @Test
+    @DisplayName("A signed slot key is rejected rather than silently colliding with its plain form")
+    void aNonCanonicalKeyDoesNotCollideWithItsPlainForm() {
+        // Integer.parseInt("+5") is 5, so items.'+5' and items.'5' used to land on one map entry: the
+        // second put won and the first item disappeared with no warning, the only path in the
+        // deserializer that discarded an entry silently (pull request #34 gate-1 review, IN-10).
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items.5", new ItemStack(Material.DIAMOND));
+        yaml.set("items.+5", new ItemStack(Material.EMERALD));
+        String seeded = yaml.saveToString();
+        assertThat(yaml.getConfigurationSection("items").getKeys(false))
+                .as("precondition: both keys really exist side by side -- if YAML folded '+5' into '5' "
+                        + "there would be no collision here to reject")
+                .contains("5", "+5");
+        store.seed(playerUuid.toString(), PAGE, seeded);
+
+        service.loadBagIfNeeded(playerUuid);
+        ItemStack[] page = service.getBagPage(playerUuid, PAGE);
+
+        assertThat(page[5])
+                .as("the canonical key's item is the one that survives, not whichever was iterated last")
+                .isEqualTo(new ItemStack(Material.DIAMOND));
+        assertThat(page)
+                .as("and the non-canonical key contributed nothing anywhere in the page")
+                .doesNotContain(new ItemStack(Material.EMERALD));
+    }
+
+    @Test
+    @DisplayName("A zero-padded slot key is rejected for the same reason")
+    void aPaddedKeyIsAlsoRejected() {
+        // The sibling of the case above, from the same defect class: '05' parses to 5 too. Fixing only
+        // the reported instance would have left this one.
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items.7", new ItemStack(Material.DIAMOND));
+        yaml.set("items.07", new ItemStack(Material.EMERALD));
+        assertThat(yaml.getConfigurationSection("items").getKeys(false))
+                .as("precondition: both keys really exist side by side")
+                .contains("7", "07");
+        store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
+
+        service.loadBagIfNeeded(playerUuid);
+        ItemStack[] page = service.getBagPage(playerUuid, PAGE);
+
+        assertThat(page[7]).isEqualTo(new ItemStack(Material.DIAMOND));
+        assertThat(page).doesNotContain(new ItemStack(Material.EMERALD));
     }
 
     @Test
