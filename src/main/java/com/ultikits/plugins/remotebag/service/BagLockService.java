@@ -1,5 +1,6 @@
 package com.ultikits.plugins.remotebag.service;
 
+import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.BagLockInfo;
 import com.ultikits.plugins.remotebag.entity.BagOpenResult;
 import com.ultikits.plugins.remotebag.enums.AccessMode;
@@ -37,6 +38,14 @@ public class BagLockService {
 
     @Autowired
     private UltiToolsPlugin plugin;
+
+    /**
+     * Read live on every notification rather than copied into a field at load, so an operator who
+     * edits {@code lock.notify_readonly_viewers} and runs {@code /ul reload UltiRemoteBag} gets the
+     * new value without a restart: the framework re-initialises this same bean in place.
+     */
+    @Autowired
+    private RemoteBagConfig config;
 
     /**
      * 锁存储: "ownerUUID:pageNum" -> LockInfo
@@ -381,8 +390,22 @@ public class BagLockService {
     
     /**
      * 通知只读模式的管理员
+     * <p>
+     * Gated by {@code lock.notify_readonly_viewers}, which until
+     * <a href="https://github.com/UltiKits/UltiRemoteBag/issues/19">UltiRemoteBag#19</a> was
+     * declared and read by nothing. The declared default is {@code true}, which is what this method
+     * did unconditionally before, so turning the key off is an operator's choice rather than a
+     * change that arrives with the upgrade.
+     * <p>
+     * The read-only session itself is still recorded either way: the setting decides whether the
+     * viewer is TOLD that the owner is back, not whether the module keeps track of them. Skipping
+     * the bookkeeping would also stop the viewer being notified by anything added later, which is
+     * more than the key promises.
      */
     private void notifyReadOnlyAdmins(String key, String ownerName) {
+        if (!config.isNotifyReadonlyViewers()) {
+            return;
+        }
         Set<UUID> sessions = readOnlySessions.get(key);
         if (sessions != null && !sessions.isEmpty()) {
             for (UUID adminUuid : sessions) {

@@ -87,6 +87,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   honoured. The declared default is unchanged at `true`, which is what every server has been doing,
   so no server's behaviour changes until its operator turns it off. The page's lock is released on
   close either way (UltiKits/UltiRemoteBag#18).
+- `lock.notify_readonly_viewers` now decides whether an administrator viewing a bag read-only is
+  told when the owner starts using it again. Previously the line was sent whatever the setting
+  said, so `lock.notify_readonly_viewers: false` did nothing; now it is honoured. The declared
+  default is unchanged at `true`, which is what every server has been doing, so no server's
+  behaviour changes until its operator turns it off. The setting is read each time rather than at
+  startup, so `/ul reload UltiRemoteBag` applies a change without a restart
+  (UltiKits/UltiRemoteBag#19).
 - `/ul reload UltiRemoteBag` 现在会重载本模块的配置并刷新其语言文件；此前本模块替换了框架的重载步骤，两者都不会发生，
   修改 `config/remotebag.yml` 后只有重启才会生效（UltiKits/UltiRemoteBag#12）。
 - 通过 `/upm uninstall UltiRemoteBag` 卸载本模块时仍会先保存所有已缓存的背包；之后本模块的命令现在会被真正移除，
@@ -138,6 +145,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `save_on_close: false` 毫无作用；现在它会被遵守。声明的默认值仍为 `true`，也就是所有服务器一直在做的事，
   因此在运维主动关掉它之前，没有任何服务器的行为会变化。无论哪种情况，关闭时该页的锁都会被释放
   （UltiKits/UltiRemoteBag#18）。
+- `lock.notify_readonly_viewers` 现在真的决定以只读方式查看背包的管理员，是否会在所有者重新使用时收到提示。
+  此前无论该设置为何都会发送该提示，`lock.notify_readonly_viewers: false` 毫无作用；现在它会被遵守。声明的默认值
+  仍为 `true`，也就是所有服务器一直在做的事，因此在运维主动关掉它之前，没有任何服务器的行为会变化。
+  该设置每次通知时实时读取而非在启动时缓存，因此 `/ul reload UltiRemoteBag` 无需重启即可生效（UltiKits/UltiRemoteBag#19）。
 
 ### Removed
 
