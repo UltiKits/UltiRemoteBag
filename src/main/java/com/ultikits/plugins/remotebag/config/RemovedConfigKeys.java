@@ -50,6 +50,13 @@ public final class RemovedConfigKeys {
             {"messages.page_locked",
                     "asking for a page you may not open answers with this module's language files, "
                             + "key 'page_out_of_range' (UltiKits/UltiRemoteBag#16)"},
+            {"rows_per_page",
+                    "a bag page holds a fixed 45 slots; the setting was removed rather than "
+                            + "documented because it did not decide that in either direction -- it "
+                            + "was the denominator of the main menu's 'Slots Used' line, which at "
+                            + "its own default read 45/54 for a full page, and "
+                            + "UltiKits/UltiRemoteBag#38 records making capacity genuinely "
+                            + "configurable (UltiKits/UltiRemoteBag#24)"},
             {"save_on_close",
                     "closing a bag page in edit mode always saves it, which is what this module has "
                             + "always done; the switch was removed rather than wired because turning "

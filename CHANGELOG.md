@@ -39,9 +39,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   every item on that page was silently lost. A single unreadable entry in a stored page (a
   non-numeric or negative slot key, or one beyond the 54 slots that `rows_per_page`'s own 1-6 range
   makes addressable) is now skipped with a `WARNING` naming the page and the key, instead of costing
-  the whole page. This does not change how many rows the GUI shows — it still
-  shows and saves 45 slots whatever `rows_per_page` holds, which is deliberate; see the `Changed`
-  entry below for what that setting does and does not promise (UltiKits/UltiRemoteBag#24).
+  the whole page. The GUI has always shown and saved 45 slots, and
+  `rows_per_page` has since been removed entirely, so a page's capacity is now that fixed 45 and
+  nothing claims otherwise; see the `Changed` and `Removed` entries below
+  (UltiKits/UltiRemoteBag#24).
 - An administrator no longer takes an edit lock from an owner who has the page open, however long that
   owner idles. `lock.timeout_seconds` reclaims a lock whose holder's session ended without releasing
   it; it is not a lease a present holder has to renew. Previously the lock was handed over once the
@@ -108,8 +109,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 当 `rows_per_page` 被设为小于 5 时，加载背包页不再会销毁该页。读取时会按照所存槽位实际需要的大小还原，
   因此从内容界面较高槽位保存的物品能够保留；此前加载会数组越界，该失败被静默吞掉，该页中的所有物品都会悄无声息地
   丢失。所存页面中单个无法读取的条目（非数字、负数，或超出 `rows_per_page` 自身 1-6 取值所能寻址的 54 个槽位）现在只会被跳过，
-  并输出一条指明页码与键名的 `WARNING`，而不再让整页作废。此改动不改变界面显示的行数——无论 `rows_per_page` 为何值，界面仍显示并保存 45 个槽位，
-  这是有意为之；该设置到底承诺了什么、没承诺什么，见下文 `Changed` 条目（UltiKits/UltiRemoteBag#24）。
+  并输出一条指明页码与键名的 `WARNING`，而不再让整页作废。界面一直显示并保存 45 个槽位，而 `rows_per_page` 已被整个移除，
+  因此一页的容量就是这固定的 45 格，也再没有任何地方声称其他数字；见下文 `Changed`
+  与 `Removed` 条目（UltiKits/UltiRemoteBag#24）。
 - 管理员不再从正打开该页的所有者手中夺取编辑锁，无论所有者空闲多久。`lock.timeout_seconds` 用于回收持有者会话
   异常结束而未释放的锁，并非持有者在场时仍需续期的租约。此前只要配置的超时时间到达，即使所有者仍在查看该页，锁
   也会被转交，而所有者随后的保存会把管理员出现之前的快照写回该行——销毁管理员放入的物品，或把管理员取出的物品
@@ -143,17 +145,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- `rows_per_page` now says what it does. It governs a bag page's storage capacity — how much fits
-  on a page — and not the size of the window, which is always 45 slots. Its behaviour, its name
-  and its range are unchanged, and nothing an operator has set changes value or meaning; only the
-  setting's own comment, and the documentation describing it, were too wide. A freshly written
-  `config/remotebag.yml` carries the corrected comment; an existing file keeps the comment it was
-  written with, because the framework only writes a comment for a key it is adding
-  (UltiKits/UltiRemoteBag#24).
-- `rows_per_page` 现在名实相符。它管的是背包页的存储容量——一页能装多少——而不是窗口有多大，
-  窗口始终为 45 个槽位。它的行为、名称与取值范围均未改变，运维已设定的值不变也不改义；
-  过宽的只是该设置自身的注释与描述它的文档。新生成的 `config/remotebag.yml` 会带上更正后的注释；
-  现有文件保留写入时的注释，因为框架只会为它新增的键写注释（UltiKits/UltiRemoteBag#24）。
+- The main menu's `Slots Used: x/y` line now reports a page's real capacity. A full page reads
+  `Slots Used: 45/45`. It used to read `Slots Used: 45/54` at the shipped settings — promising nine
+  slots a player could never fill — and `Slots Used: 45/18` on a server that had lowered
+  `rows_per_page`, reporting more used than the page was said to hold. The denominator was that
+  setting; a page's capacity has always been a fixed 45 (UltiKits/UltiRemoteBag#24).
+- 主界面的 `Slots Used: x/y` 那一行现在报的是背包页的真实容量，装满一页显示 `Slots Used: 45/45`。
+  此前在出厂设置下它显示 `Slots Used: 45/54`——承诺了九个玩家永远填不上的槽位——而在调低了
+  `rows_per_page` 的服务器上显示 `Slots Used: 45/18`，即已用数超过它声称的容量。分母原本就是那个设置；
+  而一页的容量一直是固定的 45 格（UltiKits/UltiRemoteBag#24）。
 
 ### Removed
 
@@ -192,6 +192,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   inventory, and nothing handed it back. Wanting a page that only saves on demand is reasonable and
   is recorded as UltiKits/UltiRemoteBag#37, with the constraint that any implementation must return
   the window's contents when it declines to save (UltiKits/UltiRemoteBag#18).
+- `rows_per_page` has been removed; it can be deleted from existing files. A bag page holds a fixed
+  45 slots, and nothing an operator could set ever changed that. The setting was a floor on the
+  array a page is loaded with, the size of a newly created or cleared page, and the denominator of
+  the `Slots Used` line — never a cap, and never the size of the window, which the code fixes at
+  45 in both directions. Its only visible effect was that denominator, and it was wrong: see the
+  `Changed` entry above. Nothing an operator has stored is affected, because what a page holds does
+  not change. Making capacity genuinely configurable is wanted and is recorded as
+  UltiKits/UltiRemoteBag#38 (UltiKits/UltiRemoteBag#24).
 - 移除了本模块自身的"配置已重载"控制台日志行；UltiTools 6.3.0 会为每个模块输出一行重载日志。
 - `auto_save_interval` 从来没有生效，现已移除；可从现有配置文件中删除。它声称设定定时自动保存的周期，
   而该任务无论该值为何都固定为 300 秒；该任务一并移除：对背包页的每一次写入都已在同一动作中持久化，
@@ -211,6 +219,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   设为关闭时，玩家拖进窗口的物品会被销毁——它已经离开了玩家自己的背包，而没有任何路径把它退回。
   想要一个只在手动时保存的页面是合理的，已记在 UltiKits/UltiRemoteBag#37，并附上约束：任何实现在不保存时
   必须把窗口内容退还给玩家（UltiKits/UltiRemoteBag#18）。
+- `rows_per_page` 已移除；可从现有配置文件中删除。一个背包页固定为 45 格，运维能设的任何值
+  都从未改变这一点。该设置是加载页面时数组尺寸的下限、新建或清空页面的尺寸，以及 `Slots Used`
+  那一行的分母——从来不是上限，也从来不是窗口大小，窗口在两个方向上都被代码固定为 45。
+  它唯一可见的效果就是那个分母，而那个分母是错的，见上文 `Changed` 条目。运维已存的任何东西
+  都不受影响，因为一页能装多少并未改变。想要真正可配置的容量是合理的，已记在
+  UltiKits/UltiRemoteBag#38（UltiKits/UltiRemoteBag#24）。
 - 若服务器的 `config/remotebag.yml` 中仍留有上述任何一个被移除的设置，现在启动时会逐键输出一条警告，
   点名模块、文件与该键，并说明该设置的职责转到了哪里。从代码中删键并不会从任何人的文件中删键，
   若无此警告，改过其中一个设置的运维将完全看不到任何移除的痕迹

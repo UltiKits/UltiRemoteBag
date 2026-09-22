@@ -35,27 +35,18 @@ public class RemoteBagService {
     private final Map<UUID, Map<Integer, ItemStack[]>> bagCache = new ConcurrentHashMap<>();
 
     /**
-     * Largest page any legal configuration can address, derived from the config key that bounds it
-     * rather than restated: {@code rows_per_page} is validated
-     * {@code @Range(min = 1, max = }{@link RemoteBagConfig#MAX_ROWS_PER_PAGE}{@code )} and each row is
-     * {@link RemoteBagConfig#SLOTS_PER_ROW} slots.
-     * <p>
-     * It is computed from those two constants, not written as {@code 54}, so the ceiling and the range
-     * it comes from cannot drift apart. As a literal in this file it was a hand-copied derivation of a
-     * range living in another class with nothing linking them: widening {@code rows_per_page} to allow
-     * a double chest would have left every stored index between the old ceiling and the new one legal
-     * for the GUI to write and illegal for this loader to read — skipped with a warning and dropped by
-     * the next save, which is the item loss UltiKits/UltiRemoteBag#24 was filed for, with a log line
-     * instead of an exception. Nothing in the build would have broken to warn about it.
-     * <p>
-     * A stored slot index is data, and {@link #deserializeItems(String, int)} sizes the page from the
-     * highest one it finds, so without this ceiling a corrupt or hand-edited row could turn its own
-     * key into an allocation request — {@code items.100000000} asking for an array of hundreds of
-     * megabytes, and the resulting {@link OutOfMemoryError} is an {@link Error}, so the
-     * {@code catch (Exception)} around the deserializer would not contain it.
+     * How much one bag page holds. Fixed, and the same constant the content window sizes itself from,
+     * so the two cannot disagree — they did while {@code rows_per_page} existed, which is why
+     * UltiKits/UltiRemoteBag#24 ended in that key being deleted.
      */
-    private static final int MAX_PAGE_SLOTS =
-            RemoteBagConfig.MAX_ROWS_PER_PAGE * RemoteBagConfig.SLOTS_PER_ROW;
+    private static final int PAGE_CAPACITY = RemoteBagConfig.PAGE_CAPACITY;
+
+    /**
+     * The highest slot index this loader will read, exclusive. See
+     * {@link RemoteBagConfig#MAX_ADDRESSABLE_SLOTS} for why the band above {@link #PAGE_CAPACITY} is
+     * still read and what happens to an item found in it.
+     */
+    private static final int MAX_PAGE_SLOTS = RemoteBagConfig.MAX_ADDRESSABLE_SLOTS;
 
     public RemoteBagService(UltiToolsPlugin plugin, RemoteBagConfig config) {
         this.plugin = plugin;
@@ -219,21 +210,23 @@ public class RemoteBagService {
      * Deserialize items from YAML string.
      * <p>
      * The returned array is sized to hold every slot index the stored page actually uses, which can
-     * exceed {@code rows_per_page * 9}: the content GUI exposes and saves 45 slots whatever
-     * {@code rows_per_page} holds, so a server configured below 5 rows stores indices the configured
-     * size cannot address. Writing such an index into an array sized from the config used to throw
-     * {@link ArrayIndexOutOfBoundsException}, which was caught and turned into an empty page — every
-     * item on that page silently destroyed on load (UltiKits/UltiRemoteBag#24).
+     * exceed {@link #PAGE_CAPACITY}. That used to happen in normal play: the array was sized from
+     * {@code rows_per_page} while the content GUI exposed and saved 45 slots regardless of it, so a
+     * server below 5 rows stored indices its own configured size could not address. Writing such an
+     * index threw {@link ArrayIndexOutOfBoundsException}, which was caught and turned into an empty
+     * page — every item on it silently destroyed on load (UltiKits/UltiRemoteBag#24).
      * <p>
-     * A single unreadable entry — a non-numeric key, a negative index, or an index beyond
+     * {@code rows_per_page} has since been deleted and capacity is fixed, so nothing this module
+     * writes can exceed it any more; the grow path remains for the 45-53 band, which only a
+     * hand-edited or foreign-written row can hold. An item found there is loaded but is invisible in
+     * the 45-slot window and is dropped by the first save of that page, so such a row should be
+     * repaired before the page is opened — see {@link RemoteBagConfig#MAX_ADDRESSABLE_SLOTS}.
+     * <p>
+     * A single unreadable entry — a non-numeric key, a negative index, or an index at or beyond
      * {@link #MAX_PAGE_SLOTS} — is skipped with a warning naming the page and the key instead of
      * costing the whole page. The ceiling is applied before any array is allocated, so no stored key
-     * can size the allocation. Whether a smaller {@code rows_per_page} ought to shrink the displayed
-     * page is no longer an open question: the maintainer's 2026-09-22 decision on
-     * UltiKits/UltiRemoteBag#24 is that the key governs storage capacity only -- how much fits on a
-     * page, not how large the window is -- and that the declaration was corrected rather than the
-     * behaviour, so the 45-slot window is deliberate. This method's contract is unchanged and is
-     * what makes that safe: loading never loses a stored item, whatever the key holds.
+     * can size the allocation. This method's contract is unchanged: loading never loses a stored
+     * item.
      *
      * @param data       stored YAML, may be null or empty
      * @param pageNumber the page this data belongs to, for the warning messages
@@ -241,7 +234,7 @@ public class RemoteBagService {
      */
     private ItemStack[] deserializeItems(String data, int pageNumber) {
         if (data == null || data.isEmpty()) {
-            return new ItemStack[config.getRowsPerPage() * 9];
+            return new ItemStack[PAGE_CAPACITY];
         }
 
         try {
@@ -249,7 +242,7 @@ public class RemoteBagService {
             yaml.loadFromString(data);
 
             if (!yaml.isConfigurationSection("items")) {
-                return new ItemStack[config.getRowsPerPage() * 9];
+                return new ItemStack[PAGE_CAPACITY];
             }
 
             Set<String> keys = yaml.getConfigurationSection("items").getKeys(false);
@@ -286,7 +279,7 @@ public class RemoteBagService {
                 highestSlot = Math.max(highestSlot, slot);
             }
 
-            ItemStack[] items = new ItemStack[Math.max(config.getRowsPerPage() * 9, highestSlot + 1)];
+            ItemStack[] items = new ItemStack[Math.max(PAGE_CAPACITY, highestSlot + 1)];
             for (Map.Entry<Integer, String> entry : slots.entrySet()) {
                 items[entry.getKey()] = yaml.getItemStack("items." + entry.getValue());
             }
@@ -296,7 +289,7 @@ public class RemoteBagService {
             // module emits carries the framework's [UltiTools] [UltiRemoteBag] prefix, and a checklist
             // row looks for this exact text, so an unprefixed line is a line a tester cannot match.
             plugin.getLogger().warn(e, "Failed to deserialize bag items");
-            return new ItemStack[config.getRowsPerPage() * 9];
+            return new ItemStack[PAGE_CAPACITY];
         }
     }
 
@@ -451,7 +444,7 @@ public class RemoteBagService {
         }
         
         // 创建空的背包页
-        ItemStack[] emptyContents = new ItemStack[config.getRowsPerPage() * 9];
+        ItemStack[] emptyContents = new ItemStack[PAGE_CAPACITY];
         setBagPage(playerUuid, nextPage, emptyContents);
 
         // 保存到数据库，失败时回滚缓存
@@ -483,7 +476,7 @@ public class RemoteBagService {
                 : Collections.max(existingPages) + 1;
         
         // 创建空的背包页
-        ItemStack[] emptyContents = new ItemStack[config.getRowsPerPage() * 9];
+        ItemStack[] emptyContents = new ItemStack[PAGE_CAPACITY];
         setBagPage(playerUuid, nextPage, emptyContents);
 
         // 保存到数据库，失败时回滚缓存
@@ -545,7 +538,7 @@ public class RemoteBagService {
         }
         
         // 创建空的内容
-        ItemStack[] emptyContents = new ItemStack[config.getRowsPerPage() * 9];
+        ItemStack[] emptyContents = new ItemStack[PAGE_CAPACITY];
         ItemStack[] oldContents = pages.get(page);
         setBagPage(playerUuid, page, emptyContents);
 

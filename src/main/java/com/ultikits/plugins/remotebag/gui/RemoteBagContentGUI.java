@@ -62,8 +62,13 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     
     /**
      * 内容区域槽位数（前 5 行 = 45 槽）
+     * <p>
+     * Read from {@link RemoteBagConfig#PAGE_CAPACITY} rather than written as {@code 45}, so the
+     * window's size, the array the service allocates for a page, and the denominator of the main
+     * GUI's "Slots Used" lore are one number. They were three derivations of two different things
+     * until UltiKits/UltiRemoteBag#24, and they disagreed on screen.
      */
-    private static final int CONTENT_SIZE = 45;
+    private static final int CONTENT_SIZE = RemoteBagConfig.PAGE_CAPACITY;
 
     /**
      * Return value of {@link #onClick}/{@link #onDrag} that REFUSES the interaction.
