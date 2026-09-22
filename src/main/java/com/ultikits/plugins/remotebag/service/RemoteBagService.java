@@ -3,7 +3,6 @@ package com.ultikits.plugins.remotebag.service;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.RemoteBagData;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
-import com.ultikits.ultitools.annotations.Scheduled;
 import com.ultikits.ultitools.annotations.Service;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.utils.EconomyUtils;
@@ -70,16 +69,6 @@ public class RemoteBagService {
         this.dataOperator = plugin.getDataOperator(RemoteBagData.class);
     }
 
-    /**
-     * Auto-save all bags task.
-     * Runs every 300 seconds (6000 ticks) if auto-save is enabled in config.
-     * Note: Period is fixed at 300 seconds. Adjust config.auto_save_interval to 300 or disable (0).
-     */
-    @Scheduled(period = 6000) // 300 seconds * 20 ticks = 6000 ticks
-    public void autoSaveTask() {
-        saveAllBags();
-    }
-    
     /**
      * Get number of pages a player has access to.
      */

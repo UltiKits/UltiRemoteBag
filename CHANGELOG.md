@@ -134,4 +134,46 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Removed the module's own 'configuration reloaded' console line; UltiTools 6.3.0 logs one reload
   line per module.
+- `auto_save_interval` never took effect and has been removed; it can be deleted from existing
+  files. It named the period of a scheduled auto-save while the task ran on a fixed 300 seconds
+  whatever the setting said, and that task is removed with it: every write to a bag page already
+  persists it in the same action, so the task had nothing to catch. One real effect goes with it --
+  when a database write failed, the task's next run retried it. Quitting and unloading the module
+  still retry it, so the edit is not lost; it is written later rather than within five minutes
+  (UltiKits/UltiRemoteBag#13, UltiKits/UltiRemoteBag#23).
+- `gui_title` never took effect and has been removed; it can be deleted from existing files. A bag
+  page's title comes from this module's language files, key `bag_name` -- which is why an English
+  server already shows an English title and editing this setting changed nothing
+  (UltiKits/UltiRemoteBag#14).
+- `messages.no_permission` never took effect and has been removed; it can be deleted from existing
+  files. A permission refusal comes from UltiTools' own translated message, so it already follows
+  the server's `language` setting (UltiKits/UltiRemoteBag#15).
+- `messages.page_locked` never took effect and has been removed; it can be deleted from existing
+  files. Asking for a page you may not open is answered from this module's language files, key
+  `page_out_of_range`; the page limit that refusal reports is the permission-derived one, so it is
+  the same situation this setting described (UltiKits/UltiRemoteBag#16).
+- `messages.bag_saved` never took effect and has been removed; it can be deleted from existing
+  files. `/bag save` confirms with this module's language files, key `bag_saved_manually`
+  (UltiKits/UltiRemoteBag#17).
+- A server whose `config/remotebag.yml` still holds one of those five settings now logs one warning
+  per key at startup, naming the module, the file and the key, and saying where that setting's job
+  went instead. Removing a key from the code does not remove it from anybody's file, so without
+  this an operator who had edited one of the five would see no trace of the removal at all
+  (UltiKits/UltiRemoteBag#13, #14, #15, #16, #17, #23).
 - 移除了本模块自身的"配置已重载"控制台日志行；UltiTools 6.3.0 会为每个模块输出一行重载日志。
+- `auto_save_interval` 从来没有生效，现已移除；可从现有配置文件中删除。它声称设定定时自动保存的周期，
+  而该任务无论该值为何都固定为 300 秒；该任务一并移除：对背包页的每一次写入都已在同一动作中持久化，
+  它无事可做。随之消失的一个真实效果：数据库写入失败时，该任务的下一次运行会重试。玩家退出与模块卸载
+  仍会重试，因此该修改不会丢失，只是写入时机不再是五分钟之内（UltiKits/UltiRemoteBag#13、UltiKits/UltiRemoteBag#23）。
+- `gui_title` 从来没有生效，现已移除；可从现有配置文件中删除。背包页的标题来自本模块的语言文件（键 `bag_name`）——
+  这也是英文服务器本来就显示英文标题、修改该设置毫无效果的原因（UltiKits/UltiRemoteBag#14）。
+- `messages.no_permission` 从来没有生效，现已移除；可从现有配置文件中删除。权限拒绝由 UltiTools 自身的已翻译消息给出，
+  本来就会跟随服务器的 `language` 设置（UltiKits/UltiRemoteBag#15）。
+- `messages.page_locked` 从来没有生效，现已移除；可从现有配置文件中删除。请求一个无权打开的页面由本模块的语言文件
+  回答（键 `page_out_of_range`）；该拒绝所报的页数上限就是按权限推导出来的那个，因此与该设置所描述的是同一情形
+  （UltiKits/UltiRemoteBag#16）。
+- `messages.bag_saved` 从来没有生效，现已移除；可从现有配置文件中删除。`/bag save` 的确认消息来自本模块的
+  语言文件（键 `bag_saved_manually`）（UltiKits/UltiRemoteBag#17）。
+- 若服务器的 `config/remotebag.yml` 中仍留有上述五个设置之一，现在启动时会逐键输出一条警告，点名模块、文件与该键，
+  并说明该设置的职责转到了哪里。从代码中删键并不会从任何人的文件中删键，若无此警告，改过这五个设置
+  之一的运维将完全看不到任何移除的痕迹（UltiKits/UltiRemoteBag#13、#14、#15、#16、#17、#23）。

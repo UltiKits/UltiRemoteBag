@@ -47,10 +47,6 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     @Range(min = 1, max = MAX_ROWS_PER_PAGE)
     @ConfigEntry(path = "rows_per_page", comment = "Number of rows per page (1-6, each row = 9 slots)")
     private int rowsPerPage = MAX_ROWS_PER_PAGE;
-    
-    @NotEmpty
-    @ConfigEntry(path = "gui_title", comment = "Title of the bag GUI")
-    private String guiTitle = "&6远程背包 &7第 {PAGE}/{MAX} 页";
 
     @ConfigEntry(path = "permission_based_pages", comment = "Enable permission-based page limits")
     private boolean permissionBasedPages = true;
@@ -59,24 +55,8 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     @ConfigEntry(path = "permission_prefix", comment = "Permission prefix for page limits (e.g., ultibag.pages.3)")
     private String permissionPrefix = "ultibag.pages.";
 
-    @Range(min = 0, max = 3600)
-    @ConfigEntry(path = "auto_save_interval", comment = "Auto save interval in seconds (0 to disable)")
-    private int autoSaveInterval = 300;
-    
     @ConfigEntry(path = "save_on_close", comment = "Save bag when player closes the GUI")
     private boolean saveOnClose = true;
-    
-    @NotEmpty
-    @ConfigEntry(path = "messages.no_permission", comment = "No permission message")
-    private String noPermissionMessage = "&c你没有权限使用远程背包！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.page_locked", comment = "Page locked message")
-    private String pageLockedMessage = "&c你没有权限访问第 {PAGE} 页！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.bag_saved", comment = "Bag saved message")
-    private String bagSavedMessage = "&a远程背包已保存！";
 
     // ==================== 经济设置 ====================
 
