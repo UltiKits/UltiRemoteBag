@@ -179,8 +179,18 @@ class RemoteBagContentGUITest {
     @DisplayName("onClose")
     class OnClose {
 
+        /**
+         * Closing an edit-mode page writes it, with nothing in the configuration able to stop it.
+         * <p>
+         * The configuration mock deliberately stubs NOTHING about closing. `save_on_close` was
+         * briefly wired to gate this call and the maintainer reversed that on 2026-09-23
+         * (UltiKits/UltiRemoteBag#18): the off branch had no way to hand the window's contents back,
+         * so turning it off destroyed whatever the player had dragged in. With the key deleted, any
+         * future re-introduction of a gate would have to read something, and reading anything off
+         * this unstubbed mock answers false, which this case fails on.
+         */
         @Test
-        @DisplayName("Should save and release lock in edit mode")
+        @DisplayName("Should save and release lock in edit mode, with no setting able to prevent it")
         void savesAndReleasesInEditMode() {
             RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
 
@@ -195,36 +205,6 @@ class RemoteBagContentGUITest {
             verify(bagService).setBagPage(eq(ownerUuid), eq(1), any(ItemStack[].class));
             verify(bagService).saveBag(ownerUuid);
             // Verify lock release
-            verify(lockService).release(ownerUuid, 1, playerUuid);
-        }
-
-        @Test
-        @DisplayName("Should save on close in edit mode when save_on_close is true")
-        void savesOnCloseWhenSaveOnCloseIsTrue() {
-            when(config.isSaveOnClose()).thenReturn(true);
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-            setInventory(gui, mock(Inventory.class));
-
-            gui.onClose(mock(InventoryCloseEvent.class));
-
-            verify(bagService).setBagPage(eq(ownerUuid), eq(1), any(ItemStack[].class));
-            verify(bagService).saveBag(ownerUuid);
-            verify(lockService).release(ownerUuid, 1, playerUuid);
-        }
-
-        @Test
-        @DisplayName("Should not save on close in edit mode when save_on_close is false")
-        void doesNotSaveOnCloseWhenSaveOnCloseIsFalse() {
-            when(config.isSaveOnClose()).thenReturn(false);
-            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
-            setInventory(gui, mock(Inventory.class));
-
-            gui.onClose(mock(InventoryCloseEvent.class));
-
-            // The setting governs the save and nothing else: the lock still has to be released, or
-            // closing a page with save_on_close: false would leave it locked until the timeout.
-            verify(bagService, never()).setBagPage(any(), anyInt(), any());
-            verify(bagService, never()).saveBag(any());
             verify(lockService).release(ownerUuid, 1, playerUuid);
         }
 

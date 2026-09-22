@@ -80,7 +80,6 @@ public final class UltiRemoteBagTestHelper {
         lenient().when(config.getRowsPerPage()).thenReturn(6);
         lenient().when(config.isPermissionBasedPages()).thenReturn(true);
         lenient().when(config.getPermissionPrefix()).thenReturn("ultibag.pages.");
-        lenient().when(config.isSaveOnClose()).thenReturn(true);
         lenient().when(config.isEconomyEnabled()).thenReturn(true);
         lenient().when(config.getBasePrice()).thenReturn(10000);
         lenient().when(config.isPriceIncreaseEnabled()).thenReturn(true);

@@ -48,13 +48,6 @@ class RemoteBagConfigTest {
         }
 
         @Test
-        @DisplayName("Should have save on close enabled by default")
-        void saveOnClose() {
-            RemoteBagConfig config = createRealConfig();
-            assertThat(config.isSaveOnClose()).isTrue();
-        }
-
-        @Test
         @DisplayName("Should have economy enabled by default")
         void economyEnabled() {
             RemoteBagConfig config = createRealConfig();
@@ -146,14 +139,6 @@ class RemoteBagConfigTest {
             RemoteBagConfig config = createRealConfig();
             config.setPermissionPrefix("bag.pages.");
             assertThat(config.getPermissionPrefix()).isEqualTo("bag.pages.");
-        }
-
-        @Test
-        @DisplayName("Should update save on close")
-        void setSaveOnClose() {
-            RemoteBagConfig config = createRealConfig();
-            config.setSaveOnClose(false);
-            assertThat(config.isSaveOnClose()).isFalse();
         }
 
         @Test
