@@ -24,17 +24,18 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 /**
- * Loading a stored bag page whose slot indices do not fit the array that {@code rows_per_page}
- * would size (<a href="https://github.com/UltiKits/UltiRemoteBag/issues/24">UltiRemoteBag#24</a>,
- * the data-loss half).
+ * Loading a stored bag page whose slot indices do not fit the array the loader would size for it
+ * (<a href="https://github.com/UltiKits/UltiRemoteBag/issues/24">UltiRemoteBag#24</a>).
  *
- * <p>{@code RemoteBagContentGUI} exposes and saves 45 slots regardless of {@code rows_per_page},
- * so a server running {@code rows_per_page: 1} stores slot indices up to 44 and then, on the next
- * load, allocated a 9-element array and wrote index 40 into it. The
+ * <p>History, because it is what these cases are guarding: the array used to be sized from
+ * {@code rows_per_page}, while {@code RemoteBagContentGUI} exposed and saved 45 slots regardless of
+ * it. A server running {@code rows_per_page: 1} stored indices up to 44 and then, on the next load,
+ * allocated a 9-element array and wrote index 40 into it. The
  * {@code ArrayIndexOutOfBoundsException} was caught, logged and swallowed, and the page came back
- * empty — every item on it gone. Whether a smaller {@code rows_per_page} should shrink the page at
- * all is a separate, open question; these cases only pin down that loading never destroys a stored
- * page.
+ * empty — every item on it gone. {@code rows_per_page} has since been deleted outright and page
+ * capacity is the fixed {@code RemoteBagConfig#PAGE_CAPACITY}, so that particular mismatch cannot
+ * recur; what these cases still pin is the invariant that outlived it — loading never destroys a
+ * stored page, and no stored key can size the allocation.
  *
  * <h2>What makes a vacuous pass impossible here</h2>
  * The service is real and its store is a real {@link InMemoryRemoteBagStore} seeded with YAML in
@@ -44,7 +45,7 @@ import static org.mockito.Mockito.verify;
  * {@code getBagPage} rather than checking that no exception was thrown. A swallowed failure returns
  * an empty page, which is exactly what the assertions reject.
  */
-@DisplayName("Loading a stored page under a small rows_per_page (UltiRemoteBag#24)")
+@DisplayName("Loading a stored page whose indices exceed the page capacity (UltiRemoteBag#24)")
 class RemoteBagDeserializationTest {
 
     private static final int PAGE = 1;
@@ -80,10 +81,12 @@ class RemoteBagDeserializationTest {
     }
 
     @Test
-    @DisplayName("An item stored at slot 40 survives a load with rows_per_page = 1")
-    void slotBeyondConfiguredRowsIsNotDiscarded() {
-        lenient().when(config.getRowsPerPage()).thenReturn(1);
-        store.seed(playerUuid.toString(), PAGE, yamlWith(40, new ItemStack(Material.DIAMOND)));
+    @DisplayName("An item stored past the page capacity survives the load")
+    void slotBeyondThePageCapacityIsNotDiscarded() {
+        // 50 is past PAGE_CAPACITY (45) and inside the loader's legacy tolerance band, so this is
+        // the grow path. Slot 40 -- the index this case used while rows_per_page: 1 sized the array
+        // at 9 -- is now inside the fixed capacity and would exercise nothing.
+        store.seed(playerUuid.toString(), PAGE, yamlWith(50, new ItemStack(Material.DIAMOND)));
 
         service.loadBagIfNeeded(playerUuid);
         ItemStack[] page = service.getBagPage(playerUuid, PAGE);
@@ -91,28 +94,27 @@ class RemoteBagDeserializationTest {
         assertThat(page).isNotNull();
         assertThat(page.length)
                 .as("the array has to be long enough to hold the stored index")
-                .isGreaterThan(40);
-        assertThat(page[40])
-                .as("the diamond stored at slot 40 came back")
+                .isGreaterThan(50);
+        assertThat(page[50])
+                .as("the diamond stored at slot 50 came back")
                 .isEqualTo(new ItemStack(Material.DIAMOND));
     }
 
     @Test
-    @DisplayName("Items below the configured size survive alongside one beyond it")
+    @DisplayName("Items inside the capacity survive alongside one beyond it")
     void oneOutOfRangeSlotDoesNotDiscardTheRestOfThePage() {
-        lenient().when(config.getRowsPerPage()).thenReturn(1);
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("items.0", new ItemStack(Material.EMERALD));
-        yaml.set("items.40", new ItemStack(Material.DIAMOND));
+        yaml.set("items.50", new ItemStack(Material.DIAMOND));
         store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
 
         service.loadBagIfNeeded(playerUuid);
         ItemStack[] page = service.getBagPage(playerUuid, PAGE);
 
         assertThat(page[0])
-                .as("the in-range emerald must not be lost because a later index was out of range")
+                .as("the in-capacity emerald must not be lost because a later index was beyond it")
                 .isEqualTo(new ItemStack(Material.EMERALD));
-        assertThat(page[40]).isEqualTo(new ItemStack(Material.DIAMOND));
+        assertThat(page[50]).isEqualTo(new ItemStack(Material.DIAMOND));
     }
 
     @Test
@@ -198,7 +200,7 @@ class RemoteBagDeserializationTest {
 
         assertThat(page).isNotNull();
         assertThat(page.length)
-                .as("no stored key may size the page beyond what a legal rows_per_page can address")
+                .as("no stored key may size the page beyond the loader's tolerance band")
                 .isLessThanOrEqualTo(54);
         assertThat(page[2])
                 .as("the addressable item still loads")
@@ -210,7 +212,6 @@ class RemoteBagDeserializationTest {
     void theFirstOutOfRangeIndexIsRejected() {
         // Slot 53 is asserted kept below and slot 1000 above, which an off-by-one in the comparison
         // (> instead of >=) would satisfy both of. 54 is the one index that distinguishes them.
-        lenient().when(config.getRowsPerPage()).thenReturn(1);
         store.seed(playerUuid.toString(), PAGE, yamlWith(54, new ItemStack(Material.DIAMOND)));
 
         service.loadBagIfNeeded(playerUuid);
@@ -227,7 +228,6 @@ class RemoteBagDeserializationTest {
     void aSlotJustBeyondTheCeilingIsSkipped() {
         // Detectable with a 61-element array at worst, so the bound's absence is observable in a
         // mutation run whatever the heap is.
-        lenient().when(config.getRowsPerPage()).thenReturn(1);
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("items.60", new ItemStack(Material.DIAMOND));
         yaml.set("items.2", new ItemStack(Material.EMERALD));
@@ -292,9 +292,8 @@ class RemoteBagDeserializationTest {
     }
 
     @Test
-    @DisplayName("A slot inside the largest legal page still survives a small rows_per_page")
+    @DisplayName("A slot inside the loader's tolerance band still survives")
     void aSlotWithinTheLargestLegalPageIsKept() {
-        lenient().when(config.getRowsPerPage()).thenReturn(1);
         store.seed(playerUuid.toString(), PAGE, yamlWith(53, new ItemStack(Material.DIAMOND)));
 
         service.loadBagIfNeeded(playerUuid);
@@ -306,17 +305,17 @@ class RemoteBagDeserializationTest {
     }
 
     @Test
-    @DisplayName("A page stored entirely within rows_per_page still loads at the configured size")
+    @DisplayName("A page stored entirely inside the capacity loads at exactly the capacity")
     void anInRangePageKeepsTheConfiguredSize() {
-        lenient().when(config.getRowsPerPage()).thenReturn(6);
         store.seed(playerUuid.toString(), PAGE, yamlWith(3, new ItemStack(Material.DIAMOND)));
 
         service.loadBagIfNeeded(playerUuid);
         ItemStack[] page = service.getBagPage(playerUuid, PAGE);
 
         assertThat(page.length)
-                .as("control: with every index in range the array is still rows_per_page * 9")
-                .isEqualTo(54);
+                .as("control: with every index inside the capacity the array is exactly the "
+                        + "capacity, so the grow path above is a grow and not the default")
+                .isEqualTo(45);
         assertThat(page[3]).isEqualTo(new ItemStack(Material.DIAMOND));
     }
 

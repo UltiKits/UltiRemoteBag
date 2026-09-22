@@ -27,13 +27,6 @@ class RemoteBagConfigTest {
         }
 
         @Test
-        @DisplayName("Should have rows per page = 6")
-        void rowsPerPage() {
-            RemoteBagConfig config = createRealConfig();
-            assertThat(config.getRowsPerPage()).isEqualTo(6);
-        }
-
-        @Test
         @DisplayName("Should have permission based pages enabled by default")
         void permissionBasedPages() {
             RemoteBagConfig config = createRealConfig();
@@ -115,14 +108,6 @@ class RemoteBagConfigTest {
             RemoteBagConfig config = createRealConfig();
             config.setMaxPages(20);
             assertThat(config.getMaxPages()).isEqualTo(20);
-        }
-
-        @Test
-        @DisplayName("Should update rows per page")
-        void setRowsPerPage() {
-            RemoteBagConfig config = createRealConfig();
-            config.setRowsPerPage(3);
-            assertThat(config.getRowsPerPage()).isEqualTo(3);
         }
 
         @Test

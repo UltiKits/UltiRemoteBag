@@ -209,7 +209,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("setBagPage should store in cache")
         void setBagPageStoresInCache() {
-            ItemStack[] contents = new ItemStack[54];
+            ItemStack[] contents = new ItemStack[45];
             service.setBagPage(playerUuid, 1, contents);
 
             ItemStack[] result = service.getBagPage(playerUuid, 1);
@@ -219,8 +219,8 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("setBagPage should handle multiple pages")
         void setBagPageMultiplePages() {
-            ItemStack[] page1 = new ItemStack[54];
-            ItemStack[] page2 = new ItemStack[54];
+            ItemStack[] page1 = new ItemStack[45];
+            ItemStack[] page2 = new ItemStack[45];
 
             service.setBagPage(playerUuid, 1, page1);
             service.setBagPage(playerUuid, 2, page2);
@@ -232,7 +232,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("clearCache should remove player data")
         void clearCacheRemoves() {
-            ItemStack[] contents = new ItemStack[54];
+            ItemStack[] contents = new ItemStack[45];
             service.setBagPage(playerUuid, 1, contents);
 
             service.clearCache(playerUuid);
@@ -243,8 +243,8 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("setBagPage should overwrite existing page")
         void setBagPageOverwrites() {
-            ItemStack[] original = new ItemStack[54];
-            ItemStack[] replacement = new ItemStack[54];
+            ItemStack[] original = new ItemStack[45];
+            ItemStack[] replacement = new ItemStack[45];
 
             service.setBagPage(playerUuid, 1, original);
             service.setBagPage(playerUuid, 1, replacement);
@@ -255,7 +255,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("getBagPage should return null for non-existent page of cached player")
         void getBagPageNonExistentPage() {
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
 
             ItemStack[] result = service.getBagPage(playerUuid, 99);
             assertThat(result).isNull();
@@ -265,8 +265,8 @@ class RemoteBagServiceTest {
         @DisplayName("clearCache should not affect other players")
         void clearCacheDoesNotAffectOthers() {
             UUID otherUuid = UUID.randomUUID();
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
-            service.setBagPage(otherUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            service.setBagPage(otherUuid, 1, new ItemStack[45]);
 
             service.clearCache(playerUuid);
 
@@ -297,7 +297,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should count all items in stacks")
         void countsAllItems() {
-            ItemStack[] contents = new ItemStack[54];
+            ItemStack[] contents = new ItemStack[45];
             contents[0] = new ItemStack(Material.STONE, 64);
             contents[1] = new ItemStack(Material.DIRT, 32);
             contents[2] = null;
@@ -310,7 +310,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should ignore air and null items")
         void ignoresAirAndNull() {
-            ItemStack[] contents = new ItemStack[54];
+            ItemStack[] contents = new ItemStack[45];
             contents[0] = new ItemStack(Material.STONE, 10);
             contents[1] = new ItemStack(Material.AIR, 5);
             contents[2] = null;
@@ -323,7 +323,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return 0 for empty page (all null)")
         void returnsZeroForEmptyPage() {
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
 
             assertThat(service.getItemCount(playerUuid, 1)).isZero();
         }
@@ -331,7 +331,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should count items with amount of 1")
         void countsItemsWithAmountOne() {
-            ItemStack[] contents = new ItemStack[54];
+            ItemStack[] contents = new ItemStack[45];
             contents[0] = new ItemStack(Material.DIAMOND_SWORD, 1);
             contents[1] = new ItemStack(Material.DIAMOND_PICKAXE, 1);
 
@@ -343,14 +343,14 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should count across many slots")
         void countsAcrossManySlots() {
-            ItemStack[] contents = new ItemStack[54];
-            for (int i = 0; i < 54; i++) {
+            ItemStack[] contents = new ItemStack[45];
+            for (int i = 0; i < 45; i++) {
                 contents[i] = new ItemStack(Material.STONE, 1);
             }
 
             service.setBagPage(playerUuid, 1, contents);
 
-            assertThat(service.getItemCount(playerUuid, 1)).isEqualTo(54);
+            assertThat(service.getItemCount(playerUuid, 1)).isEqualTo(45);
         }
     }
 
@@ -369,7 +369,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should count occupied slots")
         void countsOccupiedSlots() {
-            ItemStack[] contents = new ItemStack[54];
+            ItemStack[] contents = new ItemStack[45];
             contents[0] = new ItemStack(Material.STONE, 64);
             contents[1] = new ItemStack(Material.DIRT, 1);
             contents[2] = null;
@@ -382,7 +382,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should ignore air and null items")
         void ignoresAirAndNull() {
-            ItemStack[] contents = new ItemStack[54];
+            ItemStack[] contents = new ItemStack[45];
             contents[0] = new ItemStack(Material.STONE, 10);
             contents[1] = new ItemStack(Material.AIR, 5);
             contents[2] = null;
@@ -395,7 +395,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return 0 for empty page")
         void returnsZeroForEmptyPage() {
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
 
             assertThat(service.getStackCount(playerUuid, 1)).isZero();
         }
@@ -403,14 +403,14 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should count full inventory correctly")
         void countsFullInventory() {
-            ItemStack[] contents = new ItemStack[54];
-            for (int i = 0; i < 54; i++) {
+            ItemStack[] contents = new ItemStack[45];
+            for (int i = 0; i < 45; i++) {
                 contents[i] = new ItemStack(Material.STONE, 64);
             }
 
             service.setBagPage(playerUuid, 1, contents);
 
-            assertThat(service.getStackCount(playerUuid, 1)).isEqualTo(54);
+            assertThat(service.getStackCount(playerUuid, 1)).isEqualTo(45);
         }
     }
 
@@ -566,7 +566,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should not load when already in cache")
         void skipWhenInCache() {
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
 
             service.loadBagIfNeeded(playerUuid);
 
@@ -608,7 +608,7 @@ class RemoteBagServiceTest {
 
             ItemStack[] page = service.getBagPage(playerUuid, 1);
             assertThat(page).isNotNull();
-            assertThat(page.length).isEqualTo(54); // 6 rows * 9
+            assertThat(page.length).isEqualTo(45); // the fixed page capacity
         }
 
         @Test
@@ -621,7 +621,7 @@ class RemoteBagServiceTest {
 
             ItemStack[] page = service.getBagPage(playerUuid, 1);
             assertThat(page).isNotNull();
-            assertThat(page.length).isEqualTo(54);
+            assertThat(page.length).isEqualTo(45);
         }
 
         @Test
@@ -659,7 +659,7 @@ class RemoteBagServiceTest {
         void insertsNewData() {
             when(mockQuery.list()).thenReturn(Collections.emptyList());
 
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
             service.saveBag(playerUuid);
 
             verify(dataOperator).insert(any(RemoteBagData.class));
@@ -671,7 +671,7 @@ class RemoteBagServiceTest {
             RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
             when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
 
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
             service.saveBag(playerUuid);
 
             verify(dataOperator).update(any(RemoteBagData.class));
@@ -682,8 +682,8 @@ class RemoteBagServiceTest {
         void savesMultiplePages() {
             when(mockQuery.list()).thenReturn(Collections.emptyList());
 
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
-            service.setBagPage(playerUuid, 2, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            service.setBagPage(playerUuid, 2, new ItemStack[45]);
             service.saveBag(playerUuid);
 
             verify(dataOperator, times(2)).insert(any(RemoteBagData.class));
@@ -696,7 +696,7 @@ class RemoteBagServiceTest {
             when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
             doThrow(new IllegalAccessException("Test error")).when(dataOperator).update(any(RemoteBagData.class));
 
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
 
             // Should not throw, should log error instead
             assertThatCode(() -> service.saveBag(playerUuid)).doesNotThrowAnyException();
@@ -717,8 +717,8 @@ class RemoteBagServiceTest {
 
             when(mockQuery.list()).thenReturn(Collections.emptyList());
 
-            service.setBagPage(uuid1, 1, new ItemStack[54]);
-            service.setBagPage(uuid2, 1, new ItemStack[54]);
+            service.setBagPage(uuid1, 1, new ItemStack[45]);
+            service.setBagPage(uuid2, 1, new ItemStack[45]);
 
             service.saveAllBags();
 
@@ -989,8 +989,8 @@ class RemoteBagServiceTest {
             when(config.getMaxPages()).thenReturn(2);
 
             // Pre-populate cache with 2 pages so nextBagNum = 3 > maxPages=2
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
-            service.setBagPage(playerUuid, 2, new ItemStack[54]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            service.setBagPage(playerUuid, 2, new ItemStack[45]);
 
             boolean result = service.purchaseBag(player);
 
@@ -1078,8 +1078,8 @@ class RemoteBagServiceTest {
                 when(config.getMaxPages()).thenReturn(2);
 
                 // Pre-populate cache with 2 pages
-                service.setBagPage(playerUuid, 1, new ItemStack[54]);
-                service.setBagPage(playerUuid, 2, new ItemStack[54]);
+                service.setBagPage(playerUuid, 1, new ItemStack[45]);
+                service.setBagPage(playerUuid, 2, new ItemStack[45]);
 
                 boolean result = service.purchaseBag(player);
 
@@ -1108,7 +1108,7 @@ class RemoteBagServiceTest {
             ItemStack[] result = (ItemStack[]) deserialize.invoke(service, (String) null, 1);
 
             assertThat(result).isNotNull();
-            assertThat(result.length).isEqualTo(54); // 6 rows * 9
+            assertThat(result.length).isEqualTo(45); // the fixed page capacity
         }
 
         @Test
@@ -1121,7 +1121,7 @@ class RemoteBagServiceTest {
             ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "", 1);
 
             assertThat(result).isNotNull();
-            assertThat(result.length).isEqualTo(54);
+            assertThat(result.length).isEqualTo(45);
         }
 
         @Test
@@ -1136,7 +1136,7 @@ class RemoteBagServiceTest {
 
             // Should return empty array (exception caught)
             assertThat(result).isNotNull();
-            assertThat(result.length).isEqualTo(54);
+            assertThat(result.length).isEqualTo(45);
         }
 
         @Test
@@ -1150,7 +1150,7 @@ class RemoteBagServiceTest {
             ItemStack[] result = (ItemStack[]) deserialize.invoke(service, "other_key: value\n", 1);
 
             assertThat(result).isNotNull();
-            assertThat(result.length).isEqualTo(54);
+            assertThat(result.length).isEqualTo(45);
             // All slots should be null
             for (ItemStack item : result) {
                 assertThat(item).isNull();
@@ -1178,7 +1178,7 @@ class RemoteBagServiceTest {
             // carry passed on ANY throwable, including one from the reflection call itself, so it
             // could not tell "the keys were iterated" from "nothing ran at all".
             assertThat(result).isNotNull();
-            assertThat(result.length).isEqualTo(54);
+            assertThat(result.length).isEqualTo(45);
             assertThat(result[0]).isNull();
             assertThat(result[5]).isNull();
         }
@@ -1207,7 +1207,7 @@ class RemoteBagServiceTest {
             Method serialize = RemoteBagService.class.getDeclaredMethod("serializeItems", ItemStack[].class);
             serialize.setAccessible(true);
 
-            String result = (String) serialize.invoke(service, (Object) new ItemStack[54]);
+            String result = (String) serialize.invoke(service, (Object) new ItemStack[45]);
 
             // Empty YAML config with no items set should produce empty or minimal output
             assertThat(result).isNotNull();
@@ -1263,7 +1263,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("saveBag with items should serialize items")
         void saveBagWithItems() {
-            ItemStack[] contents = new ItemStack[54];
+            ItemStack[] contents = new ItemStack[45];
             // Use mock ItemStack to avoid Bukkit.server requirement
             contents[0] = mock(ItemStack.class);
 
@@ -1279,9 +1279,9 @@ class RemoteBagServiceTest {
         @DisplayName("getPlayerBagPages should return sorted pages from cache")
         void getPlayerBagPagesSortedFromCache() {
             // Manually set pages in non-sorted order
-            service.setBagPage(playerUuid, 5, new ItemStack[54]);
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
-            service.setBagPage(playerUuid, 3, new ItemStack[54]);
+            service.setBagPage(playerUuid, 5, new ItemStack[45]);
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            service.setBagPage(playerUuid, 3, new ItemStack[45]);
 
             List<Integer> pages = service.getPlayerBagPages(playerUuid);
 
