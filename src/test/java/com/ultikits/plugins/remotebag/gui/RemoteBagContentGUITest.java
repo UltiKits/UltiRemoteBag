@@ -199,6 +199,36 @@ class RemoteBagContentGUITest {
         }
 
         @Test
+        @DisplayName("Should save on close in edit mode when save_on_close is true")
+        void savesOnCloseWhenSaveOnCloseIsTrue() {
+            when(config.isSaveOnClose()).thenReturn(true);
+            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
+            setInventory(gui, mock(Inventory.class));
+
+            gui.onClose(mock(InventoryCloseEvent.class));
+
+            verify(bagService).setBagPage(eq(ownerUuid), eq(1), any(ItemStack[].class));
+            verify(bagService).saveBag(ownerUuid);
+            verify(lockService).release(ownerUuid, 1, playerUuid);
+        }
+
+        @Test
+        @DisplayName("Should not save on close in edit mode when save_on_close is false")
+        void doesNotSaveOnCloseWhenSaveOnCloseIsFalse() {
+            when(config.isSaveOnClose()).thenReturn(false);
+            RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
+            setInventory(gui, mock(Inventory.class));
+
+            gui.onClose(mock(InventoryCloseEvent.class));
+
+            // The setting governs the save and nothing else: the lock still has to be released, or
+            // closing a page with save_on_close: false would leave it locked until the timeout.
+            verify(bagService, never()).setBagPage(any(), anyInt(), any());
+            verify(bagService, never()).saveBag(any());
+            verify(lockService).release(ownerUuid, 1, playerUuid);
+        }
+
+        @Test
         @DisplayName("Should only release lock in read-only mode (no save)")
         void onlyReleasesInReadOnlyMode() {
             RemoteBagContentGUI gui = createGui(AccessMode.READ_ONLY);
