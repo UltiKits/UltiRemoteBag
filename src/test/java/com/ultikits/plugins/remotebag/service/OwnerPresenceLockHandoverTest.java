@@ -117,6 +117,9 @@ class OwnerPresenceLockHandoverTest {
 
         lockService = new BagLockService();
         UltiRemoteBagTestHelper.setField(lockService, "plugin", mockPlugin);
+        // Tolerant: the config field arrives with UltiKits/UltiRemoteBag#19's fix. See
+        // UltiRemoteBagTestHelper#setFieldIfPresent.
+        UltiRemoteBagTestHelper.setFieldIfPresent(lockService, "config", config);
         lockService.setLockTimeout(LOCK_TIMEOUT_SECONDS);
 
         owner = server.addPlayer("Owner");

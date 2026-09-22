@@ -1,6 +1,7 @@
 package com.ultikits.plugins.remotebag.service;
 
 import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
+import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.BagLockInfo;
 import com.ultikits.plugins.remotebag.entity.BagOpenResult;
 import com.ultikits.plugins.remotebag.enums.AccessMode;
@@ -23,6 +24,7 @@ import static org.mockito.Mockito.*;
 class BagLockServiceTest {
 
     private BagLockService service;
+    private RemoteBagConfig config;
     private Player owner;
     private Player admin;
     private UUID ownerUuid;
@@ -32,16 +34,8 @@ class BagLockServiceTest {
     void setUp() throws Exception {
         UltiRemoteBagTestHelper.setUp();
 
-        service = new BagLockService();
-
-        // Inject mock plugin for i18n calls
-        UltiToolsPlugin mockPlugin = mock(UltiToolsPlugin.class);
-        when(mockPlugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
-        Field pluginField = BagLockService.class.getDeclaredField("plugin");
-        pluginField.setAccessible(true); // NOPMD
-        pluginField.set(service, mockPlugin);
-
-        service.setLockTimeout(300); // 5 minutes
+        config = UltiRemoteBagTestHelper.createDefaultConfig();
+        service = newLockService(300); // 5 minutes
 
         ownerUuid = UUID.randomUUID();
         adminUuid = UUID.randomUUID();
@@ -95,8 +89,7 @@ class BagLockServiceTest {
         @Test
         @DisplayName("Should acquire lock when admin lock expired")
         void acquiresWhenAdminLockExpired() throws Exception {
-            BagLockService expiredService = new BagLockService();
-            expiredService.setLockTimeout(1); // 1 second
+            BagLockService expiredService = newLockService(1); // 1 second
 
             expiredService.adminOpen(ownerUuid, 1, admin);
             Thread.sleep(1100); // Wait for expiration
@@ -133,41 +126,9 @@ class BagLockServiceTest {
         }
 
         @Test
-        @DisplayName("Should notify read-only admins when owner opens")
-        void notifiesReadOnlyAdmins() throws Exception {
-            // Set up Bukkit.server for Bukkit.getPlayer()
-            Server mockServer = mock(Server.class);
-            Field serverField = Bukkit.class.getDeclaredField("server");
-            serverField.setAccessible(true);
-            serverField.set(null, mockServer);
-
-            try {
-                Player onlineAdmin = UltiRemoteBagTestHelper.createMockPlayer("OnlineAdmin", adminUuid);
-                when(onlineAdmin.isOnline()).thenReturn(true);
-                when(mockServer.getPlayer(adminUuid)).thenReturn(onlineAdmin);
-
-                // Admin first opens in read-only (owner holds lock)
-                service.ownerOpen(ownerUuid, 1, owner);
-                service.adminOpen(ownerUuid, 1, admin);
-
-                // Now release owner lock and have owner re-open
-                service.release(ownerUuid, 1, ownerUuid);
-
-                // Owner re-opens - should notify admin
-                service.ownerOpen(ownerUuid, 1, owner);
-
-                // The admin was in read-only session, so notify should be triggered
-                // (We can't verify the exact message because it depends on read-only session tracking)
-            } finally {
-                serverField.set(null, null);
-            }
-        }
-
-        @Test
         @DisplayName("Should replace expired lock with new owner lock")
         void replacesExpiredLock() throws Exception {
-            BagLockService expiredService = new BagLockService();
-            expiredService.setLockTimeout(1);
+            BagLockService expiredService = newLockService(1);
 
             // Admin acquires lock
             expiredService.adminOpen(ownerUuid, 1, admin);
@@ -237,8 +198,7 @@ class BagLockServiceTest {
         @Test
         @DisplayName("Should acquire lock when expired")
         void acquiresWhenExpired() throws Exception {
-            BagLockService expiredService = new BagLockService();
-            expiredService.setLockTimeout(1); // 1 second
+            BagLockService expiredService = newLockService(1); // 1 second
 
             expiredService.adminOpen(ownerUuid, 1, admin);
             Thread.sleep(1100); // Wait for expiration
@@ -277,8 +237,7 @@ class BagLockServiceTest {
         @Test
         @DisplayName("Should acquire edit lock when owner lock expired")
         void acquiresEditWhenOwnerExpired() throws Exception {
-            BagLockService expiredService = new BagLockService();
-            expiredService.setLockTimeout(1);
+            BagLockService expiredService = newLockService(1);
 
             expiredService.ownerOpen(ownerUuid, 1, owner);
             Thread.sleep(1100);
@@ -480,8 +439,7 @@ class BagLockServiceTest {
         @Test
         @DisplayName("Should return EDIT when lock expired")
         void returnsEditWhenExpired() throws Exception {
-            BagLockService expiredService = new BagLockService();
-            expiredService.setLockTimeout(1);
+            BagLockService expiredService = newLockService(1);
 
             expiredService.ownerOpen(ownerUuid, 1, owner);
             Thread.sleep(1100);
@@ -546,8 +504,7 @@ class BagLockServiceTest {
         @Test
         @DisplayName("Should return true when lock expired")
         void returnsTrueWhenExpired() throws Exception {
-            BagLockService expiredService = new BagLockService();
-            expiredService.setLockTimeout(1);
+            BagLockService expiredService = newLockService(1);
 
             expiredService.ownerOpen(ownerUuid, 1, owner);
             Thread.sleep(1100);
@@ -602,8 +559,7 @@ class BagLockServiceTest {
         @Test
         @DisplayName("Should return empty when lock expired")
         void returnsEmptyWhenExpired() throws Exception {
-            BagLockService expiredService = new BagLockService();
-            expiredService.setLockTimeout(1);
+            BagLockService expiredService = newLockService(1);
 
             expiredService.ownerOpen(ownerUuid, 1, owner);
             Thread.sleep(1100);
@@ -660,8 +616,7 @@ class BagLockServiceTest {
         @Test
         @DisplayName("Should return false when lock expired")
         void returnsFalseWhenExpired() throws Exception {
-            BagLockService expiredService = new BagLockService();
-            expiredService.setLockTimeout(1);
+            BagLockService expiredService = newLockService(1);
 
             expiredService.ownerOpen(ownerUuid, 1, owner);
             Thread.sleep(1100);
@@ -798,5 +753,105 @@ class BagLockServiceTest {
             assertThat(service.isLocked(ownerUuid, 1)).isFalse();
             assertThat(service.isLocked(owner2Uuid, 1)).isTrue();
         }
+    }
+
+    // ==================== lock.notify_readonly_viewers (UltiRemoteBag#19) ====================
+
+    /**
+     * Whether a read-only viewer is told that the owner has started using the page, and whether
+     * {@code lock.notify_readonly_viewers} decides it.
+     *
+     * <p>Both values are exercised. A case that only asserts the declared default would pass
+     * against a service that never reads the setting at all, which is precisely the defect
+     * {@code UltiKits/UltiRemoteBag#19} reports.
+     *
+     * <p>Reaching the notification needs the full sequence, not just an owner open: an owner who
+     * re-opens a page they already hold returns early with edit mode and never gets as far as
+     * notifying. The owner has to take the lock, an administrator has to register a read-only
+     * session against it, the owner has to release it, and only then does the owner's next open
+     * fall through to the notification.
+     */
+    @Nested
+    @DisplayName("lock.notify_readonly_viewers")
+    class ReadOnlyNotification {
+
+        @Test
+        @DisplayName("Should notify a read-only viewer when the setting is on")
+        void notifiesWhenTheSettingIsOn() throws Exception {
+            when(config.isNotifyReadonlyViewers()).thenReturn(true);
+
+            Player onlineAdmin = withOnlineAdmin();
+            try {
+                ownerTakesTheLockWhileAnAdminWatches();
+
+                verify(onlineAdmin).sendMessage(contains("msg_owner_started_using"));
+            } finally {
+                clearBukkitServer();
+            }
+        }
+
+        @Test
+        @DisplayName("Should not notify a read-only viewer when the setting is off")
+        void doesNotNotifyWhenTheSettingIsOff() throws Exception {
+            when(config.isNotifyReadonlyViewers()).thenReturn(false);
+
+            Player onlineAdmin = withOnlineAdmin();
+            try {
+                ownerTakesTheLockWhileAnAdminWatches();
+
+                verify(onlineAdmin, never()).sendMessage(anyString());
+            } finally {
+                clearBukkitServer();
+            }
+        }
+
+        private Player withOnlineAdmin() throws Exception {
+            Server mockServer = mock(Server.class);
+            Field serverField = Bukkit.class.getDeclaredField("server");
+            serverField.setAccessible(true); // NOPMD
+            serverField.set(null, mockServer);
+
+            Player onlineAdmin = UltiRemoteBagTestHelper.createMockPlayer("OnlineAdmin", adminUuid);
+            when(onlineAdmin.isOnline()).thenReturn(true);
+            when(mockServer.getPlayer(adminUuid)).thenReturn(onlineAdmin);
+            return onlineAdmin;
+        }
+
+        private void clearBukkitServer() throws Exception {
+            Field serverField = Bukkit.class.getDeclaredField("server");
+            serverField.setAccessible(true); // NOPMD
+            serverField.set(null, null);
+        }
+
+        private void ownerTakesTheLockWhileAnAdminWatches() {
+            service.ownerOpen(ownerUuid, 1, owner);   // owner holds the page
+            service.adminOpen(ownerUuid, 1, admin);   // admin joins read-only, session recorded
+            service.release(ownerUuid, 1, ownerUuid); // owner closes it
+            service.ownerOpen(ownerUuid, 1, owner);   // owner comes back -- this is what notifies
+        }
+    }
+
+    /**
+     * A lock service wired the way the container wires one: a plugin for {@code i18n} and this
+     * module's configuration.
+     *
+     * <p>The configuration is injected with {@code setFieldIfPresent} rather than {@code setField}
+     * because {@code UltiKits/UltiRemoteBag#19}'s fix is what adds that field. Before it, the
+     * injection is a no-op and {@code notifyReadOnlyAdmins} runs unconditionally, which is what
+     * makes {@link ReadOnlyNotification#doesNotNotifyWhenTheSettingIsOff()} fail on the behaviour it
+     * asserts rather than on a missing field.
+     *
+     * @param timeoutSeconds the value for {@code lock.timeout_seconds}
+     * @return a ready service
+     * @throws Exception if reflection fails for a field that does exist
+     */
+    private BagLockService newLockService(int timeoutSeconds) throws Exception {
+        BagLockService created = new BagLockService();
+        UltiToolsPlugin mockPlugin = mock(UltiToolsPlugin.class);
+        lenient().when(mockPlugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        UltiRemoteBagTestHelper.setField(created, "plugin", mockPlugin);
+        UltiRemoteBagTestHelper.setFieldIfPresent(created, "config", config);
+        created.setLockTimeout(timeoutSeconds);
+        return created;
     }
 }
