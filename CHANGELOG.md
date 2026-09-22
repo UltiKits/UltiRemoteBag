@@ -82,6 +82,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/bag save` now reports only a save it actually performed. With nothing cached to save — a fresh
   login that has not opened a page — it says so instead of confirming a write that did not happen, and
   it no longer persists every cached page twice when it flushed an open page (UltiKits/UltiRemoteBag#34).
+- `save_on_close` now decides whether closing a bag page in edit mode saves it. Previously the page
+  was saved on close whatever the setting said, so `save_on_close: false` did nothing; now it is
+  honoured. The declared default is unchanged at `true`, which is what every server has been doing,
+  so no server's behaviour changes until its operator turns it off. The page's lock is released on
+  close either way (UltiKits/UltiRemoteBag#18).
 - `/ul reload UltiRemoteBag` 现在会重载本模块的配置并刷新其语言文件；此前本模块替换了框架的重载步骤，两者都不会发生，
   修改 `config/remotebag.yml` 后只有重启才会生效（UltiKits/UltiRemoteBag#12）。
 - 通过 `/upm uninstall UltiRemoteBag` 卸载本模块时仍会先保存所有已缓存的背包；之后本模块的命令现在会被真正移除，
@@ -129,6 +134,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/bag save` 现在只在确实完成保存时才如此报告。当没有任何缓存内容可保存时（例如刚登录且尚未打开过背包页），
   它会明确说明，而不再确认一次并未发生的写入；并且在刷新了打开的页面后，不再把每个缓存页重复保存两次
   （UltiKits/UltiRemoteBag#34）。
+- `save_on_close` 现在真的决定编辑模式下关闭背包页是否保存。此前无论该设置为何关闭时都会保存，
+  `save_on_close: false` 毫无作用；现在它会被遵守。声明的默认值仍为 `true`，也就是所有服务器一直在做的事，
+  因此在运维主动关掉它之前，没有任何服务器的行为会变化。无论哪种情况，关闭时该页的锁都会被释放
+  （UltiKits/UltiRemoteBag#18）。
 
 ### Removed
 
