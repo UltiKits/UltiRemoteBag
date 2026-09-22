@@ -78,10 +78,8 @@ public final class UltiRemoteBagTestHelper {
         lenient().when(config.getDefaultPages()).thenReturn(1);
         lenient().when(config.getMaxPages()).thenReturn(10);
         lenient().when(config.getRowsPerPage()).thenReturn(6);
-        lenient().when(config.getGuiTitle()).thenReturn("&6远程背包 &7第 {PAGE}/{MAX} 页");
         lenient().when(config.isPermissionBasedPages()).thenReturn(true);
         lenient().when(config.getPermissionPrefix()).thenReturn("ultibag.pages.");
-        lenient().when(config.getAutoSaveInterval()).thenReturn(300);
         lenient().when(config.isSaveOnClose()).thenReturn(true);
         lenient().when(config.isEconomyEnabled()).thenReturn(true);
         lenient().when(config.getBasePrice()).thenReturn(10000);

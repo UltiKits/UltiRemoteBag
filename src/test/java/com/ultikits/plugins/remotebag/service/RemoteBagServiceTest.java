@@ -940,36 +940,6 @@ class RemoteBagServiceTest {
         }
     }
 
-    // ==================== autoSaveTask ====================
-
-    @Nested
-    @DisplayName("autoSaveTask")
-    class AutoSaveTask {
-
-        @Test
-        @DisplayName("Should call saveAllBags")
-        void callsSaveAllBags() {
-            when(mockQuery.list()).thenReturn(Collections.emptyList());
-
-            // Add some data to cache first
-            service.setBagPage(playerUuid, 1, new ItemStack[54]);
-
-            service.autoSaveTask();
-
-            // saveAllBags iterates over cache and calls saveBag for each
-            verify(dataOperator).insert(any(RemoteBagData.class));
-        }
-
-        @Test
-        @DisplayName("Should do nothing when cache is empty")
-        void doesNothingWhenEmpty() throws Exception {
-            service.autoSaveTask();
-
-            verify(dataOperator, never()).insert(any());
-            verify(dataOperator, never()).update(any(RemoteBagData.class));
-        }
-    }
-
     // ==================== init ====================
 
     @Nested
