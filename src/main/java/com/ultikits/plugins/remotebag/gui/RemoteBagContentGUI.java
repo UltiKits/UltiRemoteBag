@@ -41,7 +41,7 @@ import java.util.UUID;
  *   <li>编辑模式：允许移动物品、保存</li>
  *   <li>只读模式：禁止移动物品（点击与拖拽均取消）、显示刷新按钮</li>
  *   <li>工具栏：返回、刷新、保存、模式指示、关闭按钮</li>
- *   <li>关闭时自动保存（编辑模式，且 {@code save_on_close} 为真）并释放锁</li>
+ *   <li>关闭时自动保存（编辑模式）并释放锁</li>
  * </ul>
  *
  * @author wisdomme
@@ -637,12 +637,13 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     public void onClose(InventoryCloseEvent event) {
         if (accessMode == AccessMode.EDIT) {
             // 编辑模式 - 保存并释放锁
-            // save_on_close governs the save and nothing else. Releasing the lock is not optional:
-            // a page closed with the setting off must still hand the lock back, or the next opener
-            // waits out lock.timeout_seconds for a page nobody is looking at.
-            if (config.isSaveOnClose()) {
-                saveCurrentContents();
-            }
+            // Unconditional, and it has to stay that way until something in this class can hand the
+            // window's contents back. Edit-mode clicks are not cancelled, so an item the player has
+            // dragged in has already left their own inventory; a close that skips this call destroys
+            // it. That is why `save_on_close` was deleted rather than wired
+            // (UltiKits/UltiRemoteBag#18), and the constraint any future switch must satisfy is
+            // recorded in UltiKits/UltiRemoteBag#37.
+            saveCurrentContents();
             lockService.release(ownerUuid, pageNum, player.getUniqueId());
             SoundUtil.playCloseSound(player, config);
         } else {

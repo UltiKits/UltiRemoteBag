@@ -50,6 +50,12 @@ public final class RemovedConfigKeys {
             {"messages.page_locked",
                     "asking for a page you may not open answers with this module's language files, "
                             + "key 'page_out_of_range' (UltiKits/UltiRemoteBag#16)"},
+            {"save_on_close",
+                    "closing a bag page in edit mode always saves it, which is what this module has "
+                            + "always done; the switch was removed rather than wired because turning "
+                            + "it off destroyed items the player had dragged into the window, and "
+                            + "UltiKits/UltiRemoteBag#37 records what an implementation would have to "
+                            + "do instead (UltiKits/UltiRemoteBag#18)"},
             {"messages.bag_saved",
                     "the '/bag save' confirmation comes from this module's language files, key "
                             + "'bag_saved_manually' (UltiKits/UltiRemoteBag#17)"},

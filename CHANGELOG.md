@@ -82,11 +82,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/bag save` now reports only a save it actually performed. With nothing cached to save — a fresh
   login that has not opened a page — it says so instead of confirming a write that did not happen, and
   it no longer persists every cached page twice when it flushed an open page (UltiKits/UltiRemoteBag#34).
-- `save_on_close` now decides whether closing a bag page in edit mode saves it. Previously the page
-  was saved on close whatever the setting said, so `save_on_close: false` did nothing; now it is
-  honoured. The declared default is unchanged at `true`, which is what every server has been doing,
-  so no server's behaviour changes until its operator turns it off. The page's lock is released on
-  close either way (UltiKits/UltiRemoteBag#18).
 - `lock.notify_readonly_viewers` now decides whether an administrator viewing a bag read-only is
   told when the owner starts using it again. Previously the line was sent whatever the setting
   said, so `lock.notify_readonly_viewers: false` did nothing; now it is honoured. The declared
@@ -141,10 +136,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/bag save` 现在只在确实完成保存时才如此报告。当没有任何缓存内容可保存时（例如刚登录且尚未打开过背包页），
   它会明确说明，而不再确认一次并未发生的写入；并且在刷新了打开的页面后，不再把每个缓存页重复保存两次
   （UltiKits/UltiRemoteBag#34）。
-- `save_on_close` 现在真的决定编辑模式下关闭背包页是否保存。此前无论该设置为何关闭时都会保存，
-  `save_on_close: false` 毫无作用；现在它会被遵守。声明的默认值仍为 `true`，也就是所有服务器一直在做的事，
-  因此在运维主动关掉它之前，没有任何服务器的行为会变化。无论哪种情况，关闭时该页的锁都会被释放
-  （UltiKits/UltiRemoteBag#18）。
 - `lock.notify_readonly_viewers` 现在真的决定以只读方式查看背包的管理员，是否会在所有者重新使用时收到提示。
   此前无论该设置为何都会发送该提示，`lock.notify_readonly_viewers: false` 毫无作用；现在它会被遵守。声明的默认值
   仍为 `true`，也就是所有服务器一直在做的事，因此在运维主动关掉它之前，没有任何服务器的行为会变化。
@@ -189,11 +180,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `messages.bag_saved` never took effect and has been removed; it can be deleted from existing
   files. `/bag save` confirms with this module's language files, key `bag_saved_manually`
   (UltiKits/UltiRemoteBag#17).
-- A server whose `config/remotebag.yml` still holds one of those five settings now logs one warning
-  per key at startup, naming the module, the file and the key, and saying where that setting's job
-  went instead. Removing a key from the code does not remove it from anybody's file, so without
-  this an operator who had edited one of the five would see no trace of the removal at all
-  (UltiKits/UltiRemoteBag#13, #14, #15, #16, #17, #23).
+- A server whose `config/remotebag.yml` still holds any of the settings removed above now logs one
+  warning per key at startup, naming the module, the file and the key, and saying where that
+  setting's job went instead. Removing a key from the code does not remove it from anybody's file,
+  so without this an operator who had edited one of them would see no trace of the removal at all
+  (UltiKits/UltiRemoteBag#13, #14, #15, #16, #17, #18, #23).
+- `save_on_close` never took effect and has been removed; it can be deleted from existing files.
+  Closing a bag page in edit mode always saves it, which is what this module has always done, so no
+  server's behaviour changes. It was briefly wired instead, and that was reversed: with the setting
+  off, an item the player had dragged into the window was destroyed — it had already left their own
+  inventory, and nothing handed it back. Wanting a page that only saves on demand is reasonable and
+  is recorded as UltiKits/UltiRemoteBag#37, with the constraint that any implementation must return
+  the window's contents when it declines to save (UltiKits/UltiRemoteBag#18).
 - 移除了本模块自身的"配置已重载"控制台日志行；UltiTools 6.3.0 会为每个模块输出一行重载日志。
 - `auto_save_interval` 从来没有生效，现已移除；可从现有配置文件中删除。它声称设定定时自动保存的周期，
   而该任务无论该值为何都固定为 300 秒；该任务一并移除：对背包页的每一次写入都已在同一动作中持久化，
@@ -208,6 +206,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   （UltiKits/UltiRemoteBag#16）。
 - `messages.bag_saved` 从来没有生效，现已移除；可从现有配置文件中删除。`/bag save` 的确认消息来自本模块的
   语言文件（键 `bag_saved_manually`）（UltiKits/UltiRemoteBag#17）。
-- 若服务器的 `config/remotebag.yml` 中仍留有上述五个设置之一，现在启动时会逐键输出一条警告，点名模块、文件与该键，
-  并说明该设置的职责转到了哪里。从代码中删键并不会从任何人的文件中删键，若无此警告，改过这五个设置
-  之一的运维将完全看不到任何移除的痕迹（UltiKits/UltiRemoteBag#13、#14、#15、#16、#17、#23）。
+- `save_on_close` 从来没有生效，现已移除；可从现有配置文件中删除。编辑模式下关闭背包页总是会保存，
+  这就是本模块一直在做的事，因此没有任何服务器的行为会变化。曾经改为把它接线，该决定已被推翻：
+  设为关闭时，玩家拖进窗口的物品会被销毁——它已经离开了玩家自己的背包，而没有任何路径把它退回。
+  想要一个只在手动时保存的页面是合理的，已记在 UltiKits/UltiRemoteBag#37，并附上约束：任何实现在不保存时
+  必须把窗口内容退还给玩家（UltiKits/UltiRemoteBag#18）。
+- 若服务器的 `config/remotebag.yml` 中仍留有上述任何一个被移除的设置，现在启动时会逐键输出一条警告，
+  点名模块、文件与该键，并说明该设置的职责转到了哪里。从代码中删键并不会从任何人的文件中删键，
+  若无此警告，改过其中一个设置的运维将完全看不到任何移除的痕迹
+  （UltiKits/UltiRemoteBag#13、#14、#15、#16、#17、#18、#23）。

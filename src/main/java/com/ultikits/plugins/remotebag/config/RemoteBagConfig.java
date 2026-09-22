@@ -69,9 +69,6 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     @ConfigEntry(path = "permission_prefix", comment = "Permission prefix for page limits (e.g., ultibag.pages.3)")
     private String permissionPrefix = "ultibag.pages.";
 
-    @ConfigEntry(path = "save_on_close", comment = "Save bag when player closes the GUI")
-    private boolean saveOnClose = true;
-
     // ==================== 经济设置 ====================
 
     @ConfigEntry(path = "economy.enabled", comment = "是否启用购买背包功能（需要 Vault）")
