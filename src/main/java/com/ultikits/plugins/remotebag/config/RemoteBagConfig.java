@@ -44,8 +44,22 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     /** Slots in one inventory row. Fixed by Minecraft, named so the arithmetic is not a literal. */
     public static final int SLOTS_PER_ROW = 9;
 
+    /**
+     * How much one bag page holds, in rows of {@link #SLOTS_PER_ROW} slots.
+     * <p>
+     * Storage capacity only. It decides how much fits on a page, not how large the window is: the
+     * content GUI always shows and saves its 45 slots whatever this holds. That is settled, not an
+     * omission -- the maintainer's 2026-09-22 decision on
+     * <a href="https://github.com/UltiKits/UltiRemoteBag/issues/24">UltiRemoteBag#24</a> kept this
+     * key's behaviour and its name and corrected the declaration instead, because the behaviour is
+     * right and only the promise was too wide. Renaming it would orphan every operator's current
+     * value for a cosmetic gain.
+     */
     @Range(min = 1, max = MAX_ROWS_PER_PAGE)
-    @ConfigEntry(path = "rows_per_page", comment = "Number of rows per page (1-6, each row = 9 slots)")
+    @ConfigEntry(path = "rows_per_page",
+            comment = "How much one bag page holds, in rows of 9 slots (1-6). Storage capacity only: "
+                    + "it decides how much fits on a page, not how large the window is -- the bag "
+                    + "window always shows 45 slots.")
     private int rowsPerPage = MAX_ROWS_PER_PAGE;
 
     @ConfigEntry(path = "permission_based_pages", comment = "Enable permission-based page limits")

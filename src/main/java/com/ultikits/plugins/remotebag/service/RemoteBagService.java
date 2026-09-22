@@ -228,9 +228,12 @@ public class RemoteBagService {
      * A single unreadable entry — a non-numeric key, a negative index, or an index beyond
      * {@link #MAX_PAGE_SLOTS} — is skipped with a warning naming the page and the key instead of
      * costing the whole page. The ceiling is applied before any array is allocated, so no stored key
-     * can size the allocation. Whether a smaller
-     * {@code rows_per_page} ought to shrink the displayed page at all is a separate open question;
-     * this method's contract is only that loading never loses a stored item.
+     * can size the allocation. Whether a smaller {@code rows_per_page} ought to shrink the displayed
+     * page is no longer an open question: the maintainer's 2026-09-22 decision on
+     * UltiKits/UltiRemoteBag#24 is that the key governs storage capacity only -- how much fits on a
+     * page, not how large the window is -- and that the declaration was corrected rather than the
+     * behaviour, so the 45-slot window is deliberate. This method's contract is unchanged and is
+     * what makes that safe: loading never loses a stored item, whatever the key holds.
      *
      * @param data       stored YAML, may be null or empty
      * @param pageNumber the page this data belongs to, for the warning messages

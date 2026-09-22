@@ -40,8 +40,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   non-numeric or negative slot key, or one beyond the 54 slots that `rows_per_page`'s own 1-6 range
   makes addressable) is now skipped with a `WARNING` naming the page and the key, instead of costing
   the whole page. This does not change how many rows the GUI shows — it still
-  shows and saves 45 slots whatever `rows_per_page` holds, which is still open as
-  UltiKits/UltiRemoteBag#24 (UltiKits/UltiRemoteBag#24).
+  shows and saves 45 slots whatever `rows_per_page` holds, which is deliberate; see the `Changed`
+  entry below for what that setting does and does not promise (UltiKits/UltiRemoteBag#24).
 - An administrator no longer takes an edit lock from an owner who has the page open, however long that
   owner idles. `lock.timeout_seconds` reclaims a lock whose holder's session ended without releasing
   it; it is not a lease a present holder has to renew. Previously the lock was handed over once the
@@ -114,7 +114,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   因此从内容界面较高槽位保存的物品能够保留；此前加载会数组越界，该失败被静默吞掉，该页中的所有物品都会悄无声息地
   丢失。所存页面中单个无法读取的条目（非数字、负数，或超出 `rows_per_page` 自身 1-6 取值所能寻址的 54 个槽位）现在只会被跳过，
   并输出一条指明页码与键名的 `WARNING`，而不再让整页作废。此改动不改变界面显示的行数——无论 `rows_per_page` 为何值，界面仍显示并保存 45 个槽位，
-  这一点仍未解决（UltiKits/UltiRemoteBag#24）。
+  这是有意为之；该设置到底承诺了什么、没承诺什么，见下文 `Changed` 条目（UltiKits/UltiRemoteBag#24）。
 - 管理员不再从正打开该页的所有者手中夺取编辑锁，无论所有者空闲多久。`lock.timeout_seconds` 用于回收持有者会话
   异常结束而未释放的锁，并非持有者在场时仍需续期的租约。此前只要配置的超时时间到达，即使所有者仍在查看该页，锁
   也会被转交，而所有者随后的保存会把管理员出现之前的快照写回该行——销毁管理员放入的物品，或把管理员取出的物品
@@ -149,6 +149,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   此前无论该设置为何都会发送该提示，`lock.notify_readonly_viewers: false` 毫无作用；现在它会被遵守。声明的默认值
   仍为 `true`，也就是所有服务器一直在做的事，因此在运维主动关掉它之前，没有任何服务器的行为会变化。
   该设置每次通知时实时读取而非在启动时缓存，因此 `/ul reload UltiRemoteBag` 无需重启即可生效（UltiKits/UltiRemoteBag#19）。
+
+### Changed
+
+- `rows_per_page` now says what it does. It governs a bag page's storage capacity — how much fits
+  on a page — and not the size of the window, which is always 45 slots. Its behaviour, its name
+  and its range are unchanged, and nothing an operator has set changes value or meaning; only the
+  setting's own comment, and the documentation describing it, were too wide. A freshly written
+  `config/remotebag.yml` carries the corrected comment; an existing file keeps the comment it was
+  written with, because the framework only writes a comment for a key it is adding
+  (UltiKits/UltiRemoteBag#24).
+- `rows_per_page` 现在名实相符。它管的是背包页的存储容量——一页能装多少——而不是窗口有多大，
+  窗口始终为 45 个槽位。它的行为、名称与取值范围均未改变，运维已设定的值不变也不改义；
+  过宽的只是该设置自身的注释与描述它的文档。新生成的 `config/remotebag.yml` 会带上更正后的注释；
+  现有文件保留写入时的注释，因为框架只会为它新增的键写注释（UltiKits/UltiRemoteBag#24）。
 
 ### Removed
 
