@@ -153,7 +153,8 @@ framework's `Module 'UltiRemoteBag' reloaded.` line. Before the migration this m
 `reloadSelf()` with a log-only override, so neither the configuration nor the language catalogue was
 reloaded; that override and its `UltiRemoteBag configuration reloaded!` console line were removed.
 Keys applied only once at boot (`lock.timeout_seconds`, read by `UltiRemoteBag#registerSelf`) still
-need a restart. `/ul reload` and `/upm uninstall` are the framework's own commands, not `@CmdMapping`
+need a restart — `lock.notify_readonly_viewers` is read live and its sibling in the same `lock.`
+block is not, an asymmetry tracked as `UltiKits/UltiRemoteBag#39`. `/ul reload` and `/upm uninstall` are the framework's own commands, not `@CmdMapping`
 sites in this repository, so no `command`-Kind row is added for either. All three rows below are
 framework-invoked and therefore `event`-Kind — the third, `ultiremotebag.lifecycle.removed-key-warning`,
 is not a lifecycle hook at all but the module's own load-time report, and sits here because load,

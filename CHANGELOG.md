@@ -37,9 +37,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   back at whatever size its stored slots need, so an item saved from one of the content GUI's
   higher slots survives; previously the load threw out of bounds, the failure was swallowed, and
   every item on that page was silently lost. A single unreadable entry in a stored page (a
-  non-numeric or negative slot key, or one beyond the 54 slots that `rows_per_page`'s own 1-6 range
-  makes addressable) is now skipped with a `WARNING` naming the page and the key, instead of costing
-  the whole page. The GUI has always shown and saved 45 slots, and
+  non-numeric or negative slot key, or one at or beyond slot 54) is now skipped with a `WARNING`
+  naming the page and the key, instead of costing the whole page. Slots 45 to 53 are read but are
+  not shown: the window holds 45, so an item stored in that band is invisible and is deleted by the
+  first save of that page. Nothing this module writes can land there — it saves exactly 45 slots —
+  so only a hand-edited or foreign-written row can hold one, and such a row should be repaired
+  before the page is opened. The GUI has always shown and saved 45 slots, and
   `rows_per_page` has since been removed entirely, so a page's capacity is now that fixed 45 and
   nothing claims otherwise; see the `Changed` and `Removed` entries below
   (UltiKits/UltiRemoteBag#24).
@@ -88,7 +91,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   said, so `lock.notify_readonly_viewers: false` did nothing; now it is honoured. The declared
   default is unchanged at `true`, which is what every server has been doing, so no server's
   behaviour changes until its operator turns it off. The setting is read each time rather than at
-  startup, so `/ul reload UltiRemoteBag` applies a change without a restart
+  startup, so `/ul reload UltiRemoteBag` applies a change without a restart. Its neighbour
+  `lock.timeout_seconds` is NOT like that — it is still copied once when the module loads and needs
+  a full restart, which is unchanged behaviour and is tracked as UltiKits/UltiRemoteBag#39
   (UltiKits/UltiRemoteBag#19).
 - `/ul reload UltiRemoteBag` 现在会重载本模块的配置并刷新其语言文件；此前本模块替换了框架的重载步骤，两者都不会发生，
   修改 `config/remotebag.yml` 后只有重启才会生效（UltiKits/UltiRemoteBag#12）。
@@ -108,8 +113,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   的提示，但该物品会在下次重启后丢失（UltiKits/UltiRemoteBag#22）。
 - 当 `rows_per_page` 被设为小于 5 时，加载背包页不再会销毁该页。读取时会按照所存槽位实际需要的大小还原，
   因此从内容界面较高槽位保存的物品能够保留；此前加载会数组越界，该失败被静默吞掉，该页中的所有物品都会悄无声息地
-  丢失。所存页面中单个无法读取的条目（非数字、负数，或超出 `rows_per_page` 自身 1-6 取值所能寻址的 54 个槽位）现在只会被跳过，
-  并输出一条指明页码与键名的 `WARNING`，而不再让整页作废。界面一直显示并保存 45 个槽位，而 `rows_per_page` 已被整个移除，
+  丢失。所存页面中单个无法读取的条目（非数字、负数，或等于及超过第 54 格）现在只会被跳过，
+  并输出一条指明页码与键名的 `WARNING`，而不再让整页作废。第 45 至 53 格会被读取但不会被显示：
+  窗口只有 45 格，因此存在该区间的物品不可见，并会在该页的第一次保存时被删除。本模块写入的任何
+  内容都不会落在那里——它恰好保存 45 格——因此只有手改或由外部写入的行才会带有这样的条目，
+  这样的行应在打开该页之前修复。界面一直显示并保存 45 个槽位，而 `rows_per_page` 已被整个移除，
   因此一页的容量就是这固定的 45 格，也再没有任何地方声称其他数字；见下文 `Changed`
   与 `Removed` 条目（UltiKits/UltiRemoteBag#24）。
 - 管理员不再从正打开该页的所有者手中夺取编辑锁，无论所有者空闲多久。`lock.timeout_seconds` 用于回收持有者会话
@@ -141,7 +149,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `lock.notify_readonly_viewers` 现在真的决定以只读方式查看背包的管理员，是否会在所有者重新使用时收到提示。
   此前无论该设置为何都会发送该提示，`lock.notify_readonly_viewers: false` 毫无作用；现在它会被遵守。声明的默认值
   仍为 `true`，也就是所有服务器一直在做的事，因此在运维主动关掉它之前，没有任何服务器的行为会变化。
-  该设置每次通知时实时读取而非在启动时缓存，因此 `/ul reload UltiRemoteBag` 无需重启即可生效（UltiKits/UltiRemoteBag#19）。
+  该设置每次通知时实时读取而非在启动时缓存，因此 `/ul reload UltiRemoteBag` 无需重启即可生效。同一区块的
+  `lock.timeout_seconds` 并非如此——它仍在模块加载时被拷贝一次，需要完整重启；这是未变的行为，
+  已作为 UltiKits/UltiRemoteBag#39 跟踪（UltiKits/UltiRemoteBag#19）。
 
 ### Changed
 
@@ -164,7 +174,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   whatever the setting said, and that task is removed with it: every write to a bag page already
   persists it in the same action, so the task had nothing to catch. One real effect goes with it --
   when a database write failed, the task's next run retried it. Quitting and unloading the module
-  still retry it, so the edit is not lost; it is written later rather than within five minutes
+  still retry it, so on any clean stop the edit is still written — later than before, at the next
+  quit or unload rather than within five minutes. It is not a retry in every case: if the server is
+  killed, loses power, or is otherwise stopped without running those paths while a failed write is
+  still only in memory, that edit is now lost where the five-minute retry would probably have
+  caught it. One more observable effect goes with the task, for anyone watching the database from
+  outside: it used to rewrite `last_updated` on every cached page every 300 seconds whether or not
+  the page had changed, so an idle player's row kept ticking. It now only moves when the page is
+  actually written. Nothing in this module reads the column, so there is no functional consequence,
+  but a tool using it as a liveness signal will see it stop advancing
   (UltiKits/UltiRemoteBag#13, UltiKits/UltiRemoteBag#23).
 - `gui_title` never took effect and has been removed; it can be deleted from existing files. A bag
   page's title comes from this module's language files, key `bag_name` -- which is why an English
@@ -176,7 +194,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `messages.page_locked` never took effect and has been removed; it can be deleted from existing
   files. Asking for a page you may not open is answered from this module's language files, key
   `page_out_of_range`; the page limit that refusal reports is the permission-derived one, so it is
-  the same situation this setting described (UltiKits/UltiRemoteBag#16).
+  the same situation this setting described, and it is already translated. If what you were trying
+  to change is the line shown when somebody **else** is holding the page, that is a different
+  message: it is a hardcoded Chinese literal in the code, follows no language setting, and is
+  tracked as UltiKits/UltiRemoteBag#20 — still open, and not fixed by this removal
+  (UltiKits/UltiRemoteBag#16).
 - `messages.bag_saved` never took effect and has been removed; it can be deleted from existing
   files. `/bag save` confirms with this module's language files, key `bag_saved_manually`
   (UltiKits/UltiRemoteBag#17).
@@ -204,13 +226,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `auto_save_interval` 从来没有生效，现已移除；可从现有配置文件中删除。它声称设定定时自动保存的周期，
   而该任务无论该值为何都固定为 300 秒；该任务一并移除：对背包页的每一次写入都已在同一动作中持久化，
   它无事可做。随之消失的一个真实效果：数据库写入失败时，该任务的下一次运行会重试。玩家退出与模块卸载
-  仍会重试，因此该修改不会丢失，只是写入时机不再是五分钟之内（UltiKits/UltiRemoteBag#13、UltiKits/UltiRemoteBag#23）。
+  仍会重试，因此在任何一次正常停机下该修改仍会被写入，只是时机延后到下一次退出或卸载，而不再是五分钟之内。
+  这并非在所有情形下都会重试：若服务器被强行终止、断电，或以其他方式在未走那两条路径的情况下停止，
+  而一次失败的写入当时只存在内存中，那次修改就会丢失——而五分钟的重试很可能会赶上它。
+  还有一个可观察效果一并消失，对从外部监看数据库的人而言：该任务原本每 300 秒就会把每个缓存页的
+  `last_updated` 重写一遍，无论内容是否变化，因此空闲玩家的行也一直在跳。现在它只在页面真的被写入时才变。
+  本模块没有任何地方读取该列，因此没有功能影响，但把它当作活跃信号的外部工具会发现它不再前进
+  （UltiKits/UltiRemoteBag#13、UltiKits/UltiRemoteBag#23）。
 - `gui_title` 从来没有生效，现已移除；可从现有配置文件中删除。背包页的标题来自本模块的语言文件（键 `bag_name`）——
   这也是英文服务器本来就显示英文标题、修改该设置毫无效果的原因（UltiKits/UltiRemoteBag#14）。
 - `messages.no_permission` 从来没有生效，现已移除；可从现有配置文件中删除。权限拒绝由 UltiTools 自身的已翻译消息给出，
   本来就会跟随服务器的 `language` 设置（UltiKits/UltiRemoteBag#15）。
 - `messages.page_locked` 从来没有生效，现已移除；可从现有配置文件中删除。请求一个无权打开的页面由本模块的语言文件
-  回答（键 `page_out_of_range`）；该拒绝所报的页数上限就是按权限推导出来的那个，因此与该设置所描述的是同一情形
+  回答（键 `page_out_of_range`）；该拒绝所报的页数上限就是按权限推导出来的那个，因此与该设置所描述的是同一情形，
+  且已经是翻译过的。若你想改的是**别人**正持有该页时显示的那一行，那是另一条消息：它是代码里写死的
+  中文字面量，不跟随任何语言设置，已作为 UltiKits/UltiRemoteBag#20 单独跟踪——仍未关闭，也不会因本次移除而修复
   （UltiKits/UltiRemoteBag#16）。
 - `messages.bag_saved` 从来没有生效，现已移除；可从现有配置文件中删除。`/bag save` 的确认消息来自本模块的
   语言文件（键 `bag_saved_manually`）（UltiKits/UltiRemoteBag#17）。

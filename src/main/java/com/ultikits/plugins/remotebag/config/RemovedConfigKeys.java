@@ -49,7 +49,12 @@ public final class RemovedConfigKeys {
                             + "(UltiKits/UltiRemoteBag#15)"},
             {"messages.page_locked",
                     "asking for a page you may not open answers with this module's language files, "
-                            + "key 'page_out_of_range' (UltiKits/UltiRemoteBag#16)"},
+                            + "key 'page_out_of_range', which is already translated. If what you "
+                            + "were trying to change is the line shown when somebody ELSE is "
+                            + "holding the page, that one is still a hardcoded Chinese literal in "
+                            + "the code and follows no language setting; it is not this key and is "
+                            + "tracked separately as UltiKits/UltiRemoteBag#20 "
+                            + "(UltiKits/UltiRemoteBag#16)"},
             {"rows_per_page",
                     "a bag page holds a fixed 45 slots; the setting was removed rather than "
                             + "documented because it did not decide that in either direction -- it "
