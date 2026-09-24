@@ -77,12 +77,8 @@ public final class UltiRemoteBagTestHelper {
         RemoteBagConfig config = mock(RemoteBagConfig.class);
         lenient().when(config.getDefaultPages()).thenReturn(1);
         lenient().when(config.getMaxPages()).thenReturn(10);
-        lenient().when(config.getRowsPerPage()).thenReturn(6);
-        lenient().when(config.getGuiTitle()).thenReturn("&6远程背包 &7第 {PAGE}/{MAX} 页");
         lenient().when(config.isPermissionBasedPages()).thenReturn(true);
         lenient().when(config.getPermissionPrefix()).thenReturn("ultibag.pages.");
-        lenient().when(config.getAutoSaveInterval()).thenReturn(300);
-        lenient().when(config.isSaveOnClose()).thenReturn(true);
         lenient().when(config.isEconomyEnabled()).thenReturn(true);
         lenient().when(config.getBasePrice()).thenReturn(10000);
         lenient().when(config.isPriceIncreaseEnabled()).thenReturn(true);
@@ -134,6 +130,30 @@ public final class UltiRemoteBagTestHelper {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    /**
+     * Sets a private field if the class declares one by that name, and does nothing if it does not.
+     * <p>
+     * Deliberately tolerant, for exactly one purpose: a case that pins NEW behaviour driven by a new
+     * injected collaborator has to compile and RUN against the tree before that collaborator exists,
+     * or its red run proves only that a field is missing. With this, the red run injects nothing, the
+     * production code takes its old unconditional path, and the case fails on the BEHAVIOUR it
+     * asserts. Use {@link #setField(Object, String, Object)} everywhere else -- a silent no-op is the
+     * wrong default for a field that is supposed to be there.
+     *
+     * @param target    the instance to write to
+     * @param fieldName the declared field name
+     * @param value     the value to set
+     * @throws Exception if the field exists and cannot be written
+     */
+    public static void setFieldIfPresent(Object target, String fieldName, Object value)
+            throws Exception {
+        try {
+            setField(target, fieldName, value);
+        } catch (NoSuchFieldException absentBeforeTheFix) {
+            // Intentionally ignored -- see this method's javadoc.
+        }
     }
 
     /**

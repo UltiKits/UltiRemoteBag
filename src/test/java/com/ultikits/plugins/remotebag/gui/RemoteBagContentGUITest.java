@@ -179,8 +179,18 @@ class RemoteBagContentGUITest {
     @DisplayName("onClose")
     class OnClose {
 
+        /**
+         * Closing an edit-mode page writes it, with nothing in the configuration able to stop it.
+         * <p>
+         * The configuration mock deliberately stubs NOTHING about closing. `save_on_close` was
+         * briefly wired to gate this call and the maintainer reversed that on 2026-09-23
+         * (UltiKits/UltiRemoteBag#18): the off branch had no way to hand the window's contents back,
+         * so turning it off destroyed whatever the player had dragged in. With the key deleted, any
+         * future re-introduction of a gate would have to read something, and reading anything off
+         * this unstubbed mock answers false, which this case fails on.
+         */
         @Test
-        @DisplayName("Should save and release lock in edit mode")
+        @DisplayName("Should save and release lock in edit mode, with no setting able to prevent it")
         void savesAndReleasesInEditMode() {
             RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
 

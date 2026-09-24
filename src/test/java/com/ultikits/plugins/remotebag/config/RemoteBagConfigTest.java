@@ -27,13 +27,6 @@ class RemoteBagConfigTest {
         }
 
         @Test
-        @DisplayName("Should have rows per page = 6")
-        void rowsPerPage() {
-            RemoteBagConfig config = createRealConfig();
-            assertThat(config.getRowsPerPage()).isEqualTo(6);
-        }
-
-        @Test
         @DisplayName("Should have permission based pages enabled by default")
         void permissionBasedPages() {
             RemoteBagConfig config = createRealConfig();
@@ -45,20 +38,6 @@ class RemoteBagConfigTest {
         void permissionPrefix() {
             RemoteBagConfig config = createRealConfig();
             assertThat(config.getPermissionPrefix()).isEqualTo("ultibag.pages.");
-        }
-
-        @Test
-        @DisplayName("Should have auto save interval = 300 seconds")
-        void autoSaveInterval() {
-            RemoteBagConfig config = createRealConfig();
-            assertThat(config.getAutoSaveInterval()).isEqualTo(300);
-        }
-
-        @Test
-        @DisplayName("Should have save on close enabled by default")
-        void saveOnClose() {
-            RemoteBagConfig config = createRealConfig();
-            assertThat(config.isSaveOnClose()).isTrue();
         }
 
         @Test
@@ -132,14 +111,6 @@ class RemoteBagConfigTest {
         }
 
         @Test
-        @DisplayName("Should update rows per page")
-        void setRowsPerPage() {
-            RemoteBagConfig config = createRealConfig();
-            config.setRowsPerPage(3);
-            assertThat(config.getRowsPerPage()).isEqualTo(3);
-        }
-
-        @Test
         @DisplayName("Should update permission based pages")
         void setPermissionBasedPages() {
             RemoteBagConfig config = createRealConfig();
@@ -153,22 +124,6 @@ class RemoteBagConfigTest {
             RemoteBagConfig config = createRealConfig();
             config.setPermissionPrefix("bag.pages.");
             assertThat(config.getPermissionPrefix()).isEqualTo("bag.pages.");
-        }
-
-        @Test
-        @DisplayName("Should update auto save interval")
-        void setAutoSaveInterval() {
-            RemoteBagConfig config = createRealConfig();
-            config.setAutoSaveInterval(600);
-            assertThat(config.getAutoSaveInterval()).isEqualTo(600);
-        }
-
-        @Test
-        @DisplayName("Should update save on close")
-        void setSaveOnClose() {
-            RemoteBagConfig config = createRealConfig();
-            config.setSaveOnClose(false);
-            assertThat(config.isSaveOnClose()).isFalse();
         }
 
         @Test
@@ -229,32 +184,6 @@ class RemoteBagConfigTest {
     }
 
     @Nested
-    @DisplayName("Message Defaults")
-    class MessageDefaults {
-
-        @Test
-        @DisplayName("Should have default no permission message")
-        void noPermissionMessage() {
-            RemoteBagConfig config = createRealConfig();
-            assertThat(config.getNoPermissionMessage()).contains("没有权限");
-        }
-
-        @Test
-        @DisplayName("Should have default page locked message")
-        void pageLockedMessage() {
-            RemoteBagConfig config = createRealConfig();
-            assertThat(config.getPageLockedMessage()).contains("{PAGE}");
-        }
-
-        @Test
-        @DisplayName("Should have default bag saved message")
-        void bagSavedMessage() {
-            RemoteBagConfig config = createRealConfig();
-            assertThat(config.getBagSavedMessage()).contains("保存");
-        }
-    }
-
-    @Nested
     @DisplayName("Sound Defaults")
     class SoundDefaults {
 
@@ -298,35 +227,6 @@ class RemoteBagConfigTest {
         void soundPitch() {
             RemoteBagConfig config = createRealConfig();
             assertThat(config.getSoundPitch()).isEqualTo(1.0);
-        }
-    }
-
-    @Nested
-    @DisplayName("Message Setters")
-    class MessageSetters {
-
-        @Test
-        @DisplayName("Should update no permission message")
-        void setNoPermissionMessage() {
-            RemoteBagConfig config = createRealConfig();
-            config.setNoPermissionMessage("&cNo Permission!");
-            assertThat(config.getNoPermissionMessage()).isEqualTo("&cNo Permission!");
-        }
-
-        @Test
-        @DisplayName("Should update page locked message")
-        void setPageLockedMessage() {
-            RemoteBagConfig config = createRealConfig();
-            config.setPageLockedMessage("&cLocked!");
-            assertThat(config.getPageLockedMessage()).isEqualTo("&cLocked!");
-        }
-
-        @Test
-        @DisplayName("Should update bag saved message")
-        void setBagSavedMessage() {
-            RemoteBagConfig config = createRealConfig();
-            config.setBagSavedMessage("&aSaved!");
-            assertThat(config.getBagSavedMessage()).isEqualTo("&aSaved!");
         }
     }
 
@@ -380,27 +280,6 @@ class RemoteBagConfigTest {
             RemoteBagConfig config = createRealConfig();
             config.setSoundPitch(1.5);
             assertThat(config.getSoundPitch()).isEqualTo(1.5);
-        }
-    }
-
-    @Nested
-    @DisplayName("GUI Title")
-    class GuiTitleTests {
-
-        @Test
-        @DisplayName("Should have default GUI title with placeholders")
-        void defaultGuiTitle() {
-            RemoteBagConfig config = createRealConfig();
-            assertThat(config.getGuiTitle()).contains("{PAGE}");
-            assertThat(config.getGuiTitle()).contains("{MAX}");
-        }
-
-        @Test
-        @DisplayName("Should update GUI title")
-        void setGuiTitle() {
-            RemoteBagConfig config = createRealConfig();
-            config.setGuiTitle("&bCustom Title");
-            assertThat(config.getGuiTitle()).isEqualTo("&bCustom Title");
         }
     }
 

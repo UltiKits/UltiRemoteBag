@@ -90,6 +90,9 @@ class BagSaveOpenPageTest {
         // real service is what keeps these cases about /bag save rather than about the stub.
         lockService = new BagLockService();
         UltiRemoteBagTestHelper.setField(lockService, "plugin", mockPlugin);
+        // Tolerant: the config field arrives with UltiKits/UltiRemoteBag#19's fix. See
+        // UltiRemoteBagTestHelper#setFieldIfPresent.
+        UltiRemoteBagTestHelper.setFieldIfPresent(lockService, "config", config);
         command = new BagCommand(mockPlugin, bagService, lockService, config);
 
         player = server.addPlayer("Owner");

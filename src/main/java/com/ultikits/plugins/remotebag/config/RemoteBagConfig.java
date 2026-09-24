@@ -28,29 +28,47 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     @ConfigEntry(path = "max_pages", comment = "Maximum number of bag pages a player can have")
     private int maxPages = 10;
 
-    /**
-     * The largest {@code rows_per_page} any legal configuration may hold.
-     * <p>
-     * A compile-time constant rather than a literal in the {@link Range} below, because
-     * {@code RemoteBagService} bounds its page allocation by this key's ceiling and used to restate
-     * that derivation as its own literal {@code 54}. Nothing linked the two, so widening this range
-     * would silently have turned that allocation guard into a load-time item-discard: every stored
-     * slot index between the old ceiling and the new one would become legal for the GUI to write and
-     * illegal for the loader to read. Referencing one constant makes the two numbers unable to
-     * diverge, which no test can achieve.
-     */
-    public static final int MAX_ROWS_PER_PAGE = 6;
-
     /** Slots in one inventory row. Fixed by Minecraft, named so the arithmetic is not a literal. */
     public static final int SLOTS_PER_ROW = 9;
 
-    @Range(min = 1, max = MAX_ROWS_PER_PAGE)
-    @ConfigEntry(path = "rows_per_page", comment = "Number of rows per page (1-6, each row = 9 slots)")
-    private int rowsPerPage = MAX_ROWS_PER_PAGE;
-    
-    @NotEmpty
-    @ConfigEntry(path = "gui_title", comment = "Title of the bag GUI")
-    private String guiTitle = "&6远程背包 &7第 {PAGE}/{MAX} 页";
+    /**
+     * How much one bag page holds, in slots. Fixed, and not configurable.
+     * <p>
+     * The single source for the three places that used to derive it separately: the content
+     * window's own size, the array the service allocates for a created, cleared or empty page, and
+     * the denominator of the main GUI's "Slots Used" lore. They were a window constant and two
+     * readings of {@code rows_per_page}, and they disagreed -- at the shipped {@code 6} a full page
+     * rendered {@code 45/54}, promising nine slots that could never be filled, and at {@code 2} it
+     * rendered {@code 45/18}. That is why
+     * <a href="https://github.com/UltiKits/UltiRemoteBag/issues/24">UltiRemoteBag#24</a> ended in
+     * the key being deleted rather than its documentation narrowed: the displayed number was itself
+     * promising a capacity that did not exist, so correcting only the declaration would have moved
+     * the lie into the documentation and left it on screen.
+     * <p>
+     * Making capacity genuinely configurable is wanted and is recorded as
+     * <a href="https://github.com/UltiKits/UltiRemoteBag/issues/38">UltiRemoteBag#38</a>; it needs a
+     * variable-height window and a rule for items already stored beyond a shrunken page, neither of
+     * which the deleted key had.
+     */
+    public static final int PAGE_CAPACITY = 5 * SLOTS_PER_ROW;
+
+    /**
+     * The highest slot index the loader will read out of a stored page, exclusive.
+     * <p>
+     * One row above {@link #PAGE_CAPACITY}, which is the largest page the deleted
+     * {@code rows_per_page: 6} could once address. Nothing in this module has ever written above
+     * index 44 -- {@code RemoteBagContentGUI} saves exactly {@link #PAGE_CAPACITY} slots -- so the
+     * band 45-53 is reachable only from a hand-edited or foreign-written row. It is still read, so
+     * that no row which loads today stops loading; such an item is invisible in the window and is
+     * dropped by the first save of that page, which is why a row holding one should be repaired
+     * before the page is opened.
+     * <p>
+     * A bound is needed at all because a stored slot index is data: without it,
+     * {@code items.100000000} would turn its own key into an allocation request, and the resulting
+     * {@link OutOfMemoryError} is an {@link Error}, so the {@code catch (Exception)} around the
+     * deserializer would not contain it.
+     */
+    public static final int MAX_ADDRESSABLE_SLOTS = PAGE_CAPACITY + SLOTS_PER_ROW;
 
     @ConfigEntry(path = "permission_based_pages", comment = "Enable permission-based page limits")
     private boolean permissionBasedPages = true;
@@ -58,25 +76,6 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     @NotEmpty
     @ConfigEntry(path = "permission_prefix", comment = "Permission prefix for page limits (e.g., ultibag.pages.3)")
     private String permissionPrefix = "ultibag.pages.";
-
-    @Range(min = 0, max = 3600)
-    @ConfigEntry(path = "auto_save_interval", comment = "Auto save interval in seconds (0 to disable)")
-    private int autoSaveInterval = 300;
-    
-    @ConfigEntry(path = "save_on_close", comment = "Save bag when player closes the GUI")
-    private boolean saveOnClose = true;
-    
-    @NotEmpty
-    @ConfigEntry(path = "messages.no_permission", comment = "No permission message")
-    private String noPermissionMessage = "&c你没有权限使用远程背包！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.page_locked", comment = "Page locked message")
-    private String pageLockedMessage = "&c你没有权限访问第 {PAGE} 页！";
-
-    @NotEmpty
-    @ConfigEntry(path = "messages.bag_saved", comment = "Bag saved message")
-    private String bagSavedMessage = "&a远程背包已保存！";
 
     // ==================== 经济设置 ====================
 
