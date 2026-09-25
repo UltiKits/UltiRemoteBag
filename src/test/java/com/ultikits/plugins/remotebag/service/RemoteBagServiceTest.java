@@ -703,7 +703,7 @@ class RemoteBagServiceTest {
         }
 
         @Test
-        @DisplayName("Under language: zh a failed bag write is logged with the Chinese catalogue text (gate-1 WR-03)")
+        @DisplayName("Under language: zh a failed bag write is logged with the Chinese catalogue text")
         @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
         void updateFailureFollowsTheLanguageSetting() throws Exception {
             java.lang.reflect.Field pluginField = RemoteBagService.class.getDeclaredField("plugin");

@@ -279,7 +279,7 @@ class BagCommandTest {
         void reportsNothingSavedWhenTheCacheIsEmpty() {
             // Nothing is cached for a player who has not opened a page this session. Claiming
             // `bag_saved_manually` there reported a write that never happened, which is what the UAT
-            // row for this command had been amended to assert against (gate-1 review, WR-05).
+            // row for this command had been amended to assert against.
             when(bagService.hasCachedPages(playerUuid)).thenReturn(false);
 
             command.saveBag(player);

@@ -135,7 +135,7 @@ therefore needs both `ultibag.use` and the specific admin permission for each ac
 `UltiRemoteBag#onUnregister()` is the extension-point hook the framework's `final`
 `UltiToolsPlugin#unregisterSelf()` invokes when this module is unloaded (`/upm uninstall UltiRemoteBag`,
 or server shutdown). It runs first; the framework then unregisters this module's commands and
-listeners. Before `UltiKits/UltiRemoteBag#12`'s wave-0 lifecycle-hook migration this module overrode
+listeners. Before `UltiKits/UltiRemoteBag#12`'s lifecycle-hook migration this module overrode
 `unregisterSelf()` itself, so `/upm uninstall UltiRemoteBag` skipped both command and listener
 unregistration. Server shutdown was unaffected: the framework ran its own command and listener cleanup
 there independently of the override.
