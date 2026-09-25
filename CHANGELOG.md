@@ -11,8 +11,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Re-running `/bag <page>` or `/bag see <player> <page>` on a page you already have open no longer
   releases its lock, so two players can no longer edit the same page at once (UltiKits/UltiRemoteBag#41).
+  These two commands, and `/bag see <player>`, now close whatever window you have open before they
+  decide the lock, so a page you had open is saved and released first, also when the page you asked
+  for is then refused.
 - 修复：对已打开的页再次执行打开命令不再释放该页的锁，两名玩家不能再同时编辑同一页
-  （UltiKits/UltiRemoteBag#41）。
+  （UltiKits/UltiRemoteBag#41）。这两个命令以及 `/bag see <玩家>` 现在会在判断锁之前先关闭你当前打开的窗口，
+  因此你原先打开的页会先保存并释放，即使你请求的页随后被拒绝也是如此。
 
 - `language: en` now applies to the line shown when somebody else holds the bag page you open:
   "This bag is being used by <name>; it is open in read-only mode", "This bag is being used by
