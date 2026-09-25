@@ -181,7 +181,7 @@ class BagReopenKeepsLockTest {
     }
 
     @Test
-    @DisplayName("A re-open the lock then refuses still saves the page that was open (gate-1 IN-02)")
+    @DisplayName("A re-open the lock then refuses still saves the page that was open")
     void refusedReopenKeepsTheOpenPagesEdit() throws Exception {
         owner.addAttachment(MockBukkit.createMockPlugin("Perms"), "ultibag.pages.2", true);
         bagService.setBagPage(owner.getUniqueId(), 2, new ItemStack[45]);
@@ -202,7 +202,7 @@ class BagReopenKeepsLockTest {
     }
 
     @Test
-    @DisplayName("An administrator re-running /bag see on a page they view read-only is still a read-only viewer (gate-1 IN-03)")
+    @DisplayName("An administrator re-running /bag see on a page they view read-only is still a read-only viewer")
     void readOnlyAdminRerunStaysARegisteredViewer() throws Exception {
         command.openPage(owner, PAGE);
         command.seePlayerBagPage(admin, "Owner", PAGE);
