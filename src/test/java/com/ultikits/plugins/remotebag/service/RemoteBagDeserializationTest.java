@@ -166,6 +166,43 @@ class RemoteBagDeserializationTest {
     }
 
     @Test
+    @DisplayName("Under language: zh every skipped-slot reason, and an unreadable page, is the Chinese catalogue text (gate-1 WR-03)")
+    void everyRoutedDeserializationLineIsTheCatalogueText() {
+        when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items.0", new ItemStack(Material.DIAMOND));
+        yaml.set("items.-1", "garbage");
+        yaml.set("items.07", "garbage");
+        yaml.set("items.99999", "garbage");
+        store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
+        String line = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot").replace("{PAGE}", String.valueOf(PAGE));
+        String negative = line.replace("{REASON}", com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot_negative")).replace("{KEY}", "-1");
+        String padded = line.replace("{REASON}", com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot_not_canonical")).replace("{KEY}", "07");
+        String beyond = line.replace("{REASON}", com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot_beyond_max")
+                .replace("{MAX}", String.valueOf(com.ultikits.plugins.remotebag.config.RemoteBagConfig.MAX_ADDRESSABLE_SLOTS)))
+                .replace("{KEY}", "99999");
+
+        service.loadBagIfNeeded(playerUuid);
+
+        ArgumentCaptor<String> warned = ArgumentCaptor.forClass(String.class);
+        verify(pluginLogger, atLeastOnce()).warn(warned.capture());
+        assertThat(warned.getAllValues()).contains(negative, padded, beyond);
+        assertThat(String.join("\n", warned.getAllValues())).doesNotContain("{MAX}");
+    }
+
+    @Test
+    @DisplayName("Under language: zh a page whose stored data cannot be read is reported with the Chinese catalogue text (gate-1 WR-03)")
+    void anUnreadablePageIsReportedInTheServerLanguage() {
+        when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+        store.seed(playerUuid.toString(), PAGE, "items: [unclosed\n  0: {");
+        String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_bag_deserialize_failed");
+
+        service.loadBagIfNeeded(playerUuid);
+
+        verify(pluginLogger).warn(org.mockito.ArgumentMatchers.any(Throwable.class), org.mockito.ArgumentMatchers.eq(expected));
+    }
+
+    @Test
     @DisplayName("A page with an unparsable slot key keeps the items that do parse")
     void anUnparsableKeyDoesNotDiscardThePage() {
         YamlConfiguration yaml = new YamlConfiguration();

@@ -119,6 +119,18 @@ class RemovedConfigKeyWarningTest {
     }
 
     @Test
+    @DisplayName("Under language: en the warning is, word for word, the English line earlier versions printed (gate-1 WR-03)")
+    void englishWarningIsWordForWordUnchanged() {
+        YamlConfiguration onDisk = new YamlConfiguration();
+        onDisk.set("auto_save_interval", 300);
+
+        assertThat(bootWith(onDisk)).containsExactly("UltiRemoteBag: 'auto_save_interval' in config/remotebag.yml"
+                + " no longer has any effect and can be deleted from the file -- the periodic auto-save it named"
+                + " was removed because it had nothing to do; every write to a bag page is already persisted in"
+                + " the same action (UltiKits/UltiRemoteBag#13, UltiKits/UltiRemoteBag#23).");
+    }
+
+    @Test
     @DisplayName("Under language: zh the warning is the Chinese catalogue text, naming the file and the key")
     void warningFollowsTheLanguageSetting() {
         YamlConfiguration onDisk = new YamlConfiguration();
