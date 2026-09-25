@@ -130,8 +130,8 @@ class BagSaveOpenPageTest {
         // flushOpenEditPage -> saveCurrentContents already ends in saveBag(ownerUuid), and the command
         // then called saveBag(player) again. For a sender whose own page was flushed those are the same
         // UUID, so every cached page was re-queried, re-serialized and re-updated a second time and
-        // last_updated was written twice (gate-1 review, IN-09). Invisible in the stored contents --
-        // the second write stores the same bytes -- so the store counts its updates.
+        // last_updated was written twice. Invisible in the stored contents -- the second write stores
+        // the same bytes -- so the store counts its updates.
         RemoteBagContentGUI page = openEditPage();
         page.getInventory().setItem(CONTENT_SLOT, new ItemStack(Material.DIAMOND));
         // An existing row, so the write takes the update branch rather than the insert branch.
@@ -266,8 +266,8 @@ class BagSaveOpenPageTest {
         // The real service, not a stub: saveBag returns false for a player with no cached pages -- a
         // fresh login that has not opened a page -- and the command printed bag_saved_manually anyway,
         // which is what made the ultiremotebag.bag.save row's "or run this from a fresh login"
-        // precondition assert against correct code (gate-1 review, WR-05). A mocked service cannot
-        // pin this: the behaviour under test is the service's own answer.
+        // precondition assert against correct code. A mocked service cannot pin this: the behaviour
+        // under test is the service's own answer.
         assertThat(store.rows()).as("precondition: the store is empty").isEmpty();
 
         command.saveBag(player);

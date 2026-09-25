@@ -119,7 +119,7 @@ class RemovedConfigKeyWarningTest {
     }
 
     @Test
-    @DisplayName("Under language: en the warning is, word for word, the English line earlier versions printed (gate-1 WR-03)")
+    @DisplayName("Under language: en the warning is, word for word, the English line earlier versions printed")
     void englishWarningIsWordForWordUnchanged() {
         YamlConfiguration onDisk = new YamlConfiguration();
         onDisk.set("auto_save_interval", 300);

@@ -285,7 +285,7 @@ class RemoteBagContentGUITest {
         @Test
         @DisplayName("Refuses to write, with a message, when the live lock is no longer this page's")
         void refusesWhenTheLockIsNoLongerOurs() throws Exception {
-            // Defence in depth for the lost update in pull request #34's gate-1 review: this page was
+            // Defence in depth for the lost update found reviewing pull request #34: this page was
             // constructed in EDIT mode, but the live lock now says READ_ONLY, i.e. somebody else holds
             // the page. Writing would overwrite their committed edits with a snapshot taken before
             // they existed. The primary protection is that a lock can no longer expire while its page

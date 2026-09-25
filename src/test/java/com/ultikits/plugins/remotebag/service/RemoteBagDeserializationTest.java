@@ -129,7 +129,7 @@ class RemoteBagDeserializationTest {
         // Both warnings used an inline java.util.logging.Logger while this class holds a plugin whose
         // getLogger() is the framework PluginLogger used everywhere else in the module, so the lines
         // appeared without the [UltiTools] [UltiRemoteBag] prefix that
-        // ultiremotebag.bag.persistence.small-rows-per-page's verdict looks for (gate-1 review, IN-13).
+        // ultiremotebag.bag.persistence.small-rows-per-page's verdict looks for.
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("items.0", new ItemStack(Material.DIAMOND));
         yaml.set("items.not-a-slot", "garbage");
@@ -166,7 +166,7 @@ class RemoteBagDeserializationTest {
     }
 
     @Test
-    @DisplayName("Under language: zh every skipped-slot reason, and an unreadable page, is the Chinese catalogue text (gate-1 WR-03)")
+    @DisplayName("Under language: zh every skipped-slot reason, and an unreadable page, is the Chinese catalogue text")
     void everyRoutedDeserializationLineIsTheCatalogueText() {
         when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
         YamlConfiguration yaml = new YamlConfiguration();
@@ -191,7 +191,7 @@ class RemoteBagDeserializationTest {
     }
 
     @Test
-    @DisplayName("Under language: zh a page whose stored data cannot be read is reported with the Chinese catalogue text (gate-1 WR-03)")
+    @DisplayName("Under language: zh a page whose stored data cannot be read is reported with the Chinese catalogue text")
     void anUnreadablePageIsReportedInTheServerLanguage() {
         when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
         store.seed(playerUuid.toString(), PAGE, "items: [unclosed\n  0: {");
@@ -311,7 +311,7 @@ class RemoteBagDeserializationTest {
     void aNonCanonicalKeyDoesNotCollideWithItsPlainForm() {
         // Integer.parseInt("+5") is 5, so items.'+5' and items.'5' used to land on one map entry: the
         // second put won and the first item disappeared with no warning, the only path in the
-        // deserializer that discarded an entry silently (pull request #34 gate-1 review, IN-10).
+        // deserializer that discarded an entry silently.
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("items.5", new ItemStack(Material.DIAMOND));
         yaml.set("items.+5", new ItemStack(Material.EMERALD));
