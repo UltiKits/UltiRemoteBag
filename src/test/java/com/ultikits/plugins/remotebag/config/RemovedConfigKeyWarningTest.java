@@ -118,6 +118,18 @@ class RemovedConfigKeyWarningTest {
         assertThat(bootWith(onDisk)).isEmpty();
     }
 
+    @Test
+    @DisplayName("Under language: zh the warning is the Chinese catalogue text, naming the file and the key")
+    void warningFollowsTheLanguageSetting() {
+        YamlConfiguration onDisk = new YamlConfiguration();
+        onDisk.set("gui_title", "anything");
+        String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "removed_key_warning").replace("{FILE}", CONFIG_FILE)
+                .replace("{REASON}", com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "removed_key_reason_gui_title"))
+                .replace("{KEY}", "gui_title");
+
+        assertThat(bootWith(onDisk, "zh")).containsExactly(expected);
+    }
+
     // ==================== helpers ====================
 
     private void assertWarnedAbout(String removedKey, Object valueOnDisk) {
@@ -145,6 +157,10 @@ class RemovedConfigKeyWarningTest {
      * a unit test presents "this key is still on disk".
      */
     private List<String> bootWith(YamlConfiguration onDisk) {
+        return bootWith(onDisk, "en");
+    }
+
+    private List<String> bootWith(YamlConfiguration onDisk, String language) {
         UltiRemoteBag plugin = mock(UltiRemoteBag.class);
         PluginLogger logger = mock(PluginLogger.class);
         when(plugin.getLogger()).thenReturn(logger);
@@ -152,6 +168,10 @@ class RemovedConfigKeyWarningTest {
         RemoteBagConfig config = mock(RemoteBagConfig.class);
         when(config.getConfig()).thenReturn(onDisk);
         when(config.getConfigFilePath()).thenReturn(CONFIG_FILE);
+        // The framework binds the configuration to the plugin that loaded it; the warning's text comes
+        // from that plugin's language file, answered here from the real catalogue for `language`.
+        when(config.getUltiToolsPlugin()).thenReturn(plugin);
+        when(plugin.i18n(org.mockito.ArgumentMatchers.anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer(language));
 
         SimpleContainer context = mock(SimpleContainer.class);
         when(plugin.getContext()).thenReturn(context);

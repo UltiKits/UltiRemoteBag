@@ -42,10 +42,14 @@ class UltiRemoteBagTest {
 
             when(plugin.registerSelf()).thenCallRealMethod();
 
+            // The console line follows the server's language: answered from the real zh catalogue.
+            when(plugin.i18n(org.mockito.ArgumentMatchers.anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+            String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "bag_enabled");
+
             boolean result = plugin.registerSelf();
 
             assertThat(result).isTrue();
-            verify(logger).info("UltiRemoteBag has been enabled!");
+            verify(logger).info(expected);
         }
 
         @Test
@@ -138,10 +142,12 @@ class UltiRemoteBagTest {
             when(mockContext.getBean(any(Class.class))).thenReturn(null);
 
             doCallRealMethod().when(plugin).onUnregister();
+            when(plugin.i18n(org.mockito.ArgumentMatchers.anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+            String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "bag_disabled");
 
             plugin.onUnregister();
 
-            verify(logger).info("UltiRemoteBag has been disabled!");
+            verify(logger).info(expected);
         }
 
         @Test
@@ -158,12 +164,14 @@ class UltiRemoteBagTest {
             when(mockContext.getBean(RemoteBagService.class)).thenReturn(bagService);
 
             doCallRealMethod().when(plugin).onUnregister();
+            when(plugin.i18n(org.mockito.ArgumentMatchers.anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+            String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "bag_disabled");
 
             plugin.onUnregister();
 
             InOrder inOrder = inOrder(bagService, logger);
             inOrder.verify(bagService, times(1)).saveAllBags();
-            inOrder.verify(logger).info("UltiRemoteBag has been disabled!");
+            inOrder.verify(logger).info(expected);
             verify(bagService, times(1)).saveAllBags();
         }
     }

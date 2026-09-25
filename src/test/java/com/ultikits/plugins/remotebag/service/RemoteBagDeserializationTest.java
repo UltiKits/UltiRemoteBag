@@ -18,7 +18,9 @@ import org.mockito.ArgumentCaptor;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -54,6 +56,7 @@ class RemoteBagDeserializationTest {
     private RemoteBagConfig config;
     private InMemoryRemoteBagStore store;
     private PluginLogger pluginLogger;
+    private UltiToolsPlugin mockPlugin;
     private UUID playerUuid;
 
     @BeforeEach
@@ -67,6 +70,9 @@ class RemoteBagDeserializationTest {
         UltiToolsPlugin mockPlugin = mock(UltiToolsPlugin.class);
         pluginLogger = mock(PluginLogger.class);
         lenient().when(mockPlugin.getLogger()).thenReturn(pluginLogger);
+        // The console lines come from the language file; the assertions quote its English text.
+        lenient().when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("en"));
+        this.mockPlugin = mockPlugin;
 
         service = new RemoteBagService(mockPlugin, config);
         UltiRemoteBagTestHelper.setField(service, "dataOperator", store);
@@ -138,6 +144,25 @@ class RemoteBagDeserializationTest {
                 .anySatisfy(line -> assertThat(line)
                         .contains("Skipping unreadable slot in bag page 1")
                         .contains("not-a-slot"));
+    }
+
+    @Test
+    @DisplayName("Under language: zh the skipped-slot line is the Chinese catalogue text")
+    void aSkippedSlotWarningFollowsTheLanguageSetting() {
+        when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items.0", new ItemStack(Material.DIAMOND));
+        yaml.set("items.not-a-slot", "garbage");
+        store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
+        String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot").replace("{PAGE}", String.valueOf(PAGE))
+                .replace("{REASON}", com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot_not_a_number"))
+                .replace("{KEY}", "not-a-slot");
+
+        service.loadBagIfNeeded(playerUuid);
+
+        ArgumentCaptor<String> warned = ArgumentCaptor.forClass(String.class);
+        verify(pluginLogger, atLeastOnce()).warn(warned.capture());
+        assertThat(warned.getAllValues()).contains(expected);
     }
 
     @Test
