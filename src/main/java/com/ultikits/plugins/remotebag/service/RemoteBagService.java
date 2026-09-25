@@ -157,7 +157,7 @@ public class RemoteBagService {
                 try {
                     dataOperator.update(data);
                 } catch (IllegalAccessException e) {
-                    plugin.getLogger().error("Failed to update bag data", e);
+                    plugin.getLogger().error(plugin.i18n("log_bag_update_failed"), e);
                     // Keep going -- one unwritable page must not cost the others -- but do not let the
                     // caller report a completed save.
                     written = false;
@@ -253,11 +253,11 @@ public class RemoteBagService {
                 try {
                     slot = Integer.parseInt(key);
                 } catch (NumberFormatException e) {
-                    warnSkippedSlot(pageNumber, key, "not a slot number");
+                    warnSkippedSlot(pageNumber, key, plugin.i18n("log_skipped_slot_not_a_number"));
                     continue;
                 }
                 if (slot < 0) {
-                    warnSkippedSlot(pageNumber, key, "negative slot index");
+                    warnSkippedSlot(pageNumber, key, plugin.i18n("log_skipped_slot_negative"));
                     continue;
                 }
                 if (!key.equals(Integer.toString(slot))) {
@@ -267,12 +267,12 @@ public class RemoteBagService {
                     // path here that discarded an entry silently. Not reachable from serializeItems,
                     // which writes plain decimal indices, so it takes a hand-edited or
                     // foreign-written row to produce.
-                    warnSkippedSlot(pageNumber, key, "not a canonical slot number");
+                    warnSkippedSlot(pageNumber, key, plugin.i18n("log_skipped_slot_not_canonical"));
                     continue;
                 }
                 if (slot >= MAX_PAGE_SLOTS) {
-                    warnSkippedSlot(pageNumber, key,
-                            "slot beyond the largest addressable page of " + MAX_PAGE_SLOTS + " slots");
+                    warnSkippedSlot(pageNumber, key, plugin.i18n("log_skipped_slot_beyond_max")
+                            .replace("{MAX}", String.valueOf(MAX_PAGE_SLOTS)));
                     continue;
                 }
                 slots.put(slot, key);
@@ -288,15 +288,17 @@ public class RemoteBagService {
             // The module's own logger, not an inline java.util.logging one: every other line this
             // module emits carries the framework's [UltiTools] [UltiRemoteBag] prefix, and a checklist
             // row looks for this exact text, so an unprefixed line is a line a tester cannot match.
-            plugin.getLogger().warn(e, "Failed to deserialize bag items");
+            plugin.getLogger().warn(e, plugin.i18n("log_bag_deserialize_failed"));
             return new ItemStack[PAGE_CAPACITY];
         }
     }
 
     private void warnSkippedSlot(int pageNumber, String key, String reason) {
-        plugin.getLogger().warn(String.format(
-                "Skipping unreadable slot in bag page %d: key '%s' (%s); the rest of the page is kept",
-                pageNumber, key, reason));
+        plugin.getLogger().warn(plugin.i18n("log_skipped_slot")
+                .replace("{PAGE}", String.valueOf(pageNumber))
+                .replace("{REASON}", reason)
+                // The stored key last: it is data, so a brace sequence inside it stays as written.
+                .replace("{KEY}", key));
     }
 
     /**

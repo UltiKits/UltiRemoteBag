@@ -37,7 +37,7 @@ import java.util.UUID;
 @CmdExecutor(
     alias = {"bag", "remotebag", "rb", "yunbag"},
     permission = "ultibag.use",
-    description = "远程背包系统"
+    description = "command_description"
 )
 public class BagCommand extends BaseCommandExecutor {
 
@@ -93,7 +93,7 @@ public class BagCommand extends BaseCommandExecutor {
                     bagService, lockService, config, result.getAccessMode()).open();
         } else {
             SoundUtil.playErrorSound(player, config);
-            player.sendMessage(result.getMessage());
+            player.sendMessage(result.renderMessage(plugin));
         }
     }
     
@@ -201,7 +201,7 @@ public class BagCommand extends BaseCommandExecutor {
         if (result.isSuccess()) {
             AccessMode mode = result.getAccessMode();
             if (mode == AccessMode.READ_ONLY) {
-                admin.sendMessage(result.getMessage());
+                admin.sendMessage(result.renderMessage(plugin));
                 // Say WHY it is read-only when the reason is presence rather than a recent lock.
                 // A lock is no longer reclaimed while its page is open, so an admin who waited out
                 // lock.timeout_seconds still gets read-only; without this line that is
@@ -214,7 +214,7 @@ public class BagCommand extends BaseCommandExecutor {
                     bagService, lockService, config, mode).open();
         } else {
             SoundUtil.playErrorSound(admin, config);
-            admin.sendMessage(result.getMessage());
+            admin.sendMessage(result.renderMessage(plugin));
         }
     }
     

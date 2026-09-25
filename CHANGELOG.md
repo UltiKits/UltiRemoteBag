@@ -9,6 +9,24 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `language: en` now applies to the line shown when somebody else holds the bag page you open:
+  "This bag is being used by <name>; it is open in read-only mode", "This bag is being used by
+  <name>, please try again later" and "This bag is being edited by admin <name>, please try again
+  later" were fixed Chinese text in every language (UltiKits/UltiRemoteBag#20). The `/bag` command's
+  description (shown by `/help`) now follows `language` too.
+- `language: zh` now applies to the console lines that were fixed English text: the module's
+  enabled and disabled lines (which the language files already carried), the warning about a
+  setting this version no longer reads, a skipped unreadable slot when a bag page is loaded, and a
+  failed bag write or read. Their English wording is unchanged, except that the warning for a
+  leftover `messages.page_locked` now says the someone-else-holds-the-page lines come from the
+  language files, where it used to point at this issue as still open.
+- `language: en` 现在对打开一个正被他人占用的背包页面时显示的那一行生效：「该背包正被 <名字> 使用中，当前为只读模式」
+  「该背包正被 <名字> 使用中，请稍后再试」「该背包正被管理员 <名字> 编辑中，请稍后再试」原先在任何语言下都是写死的中文
+  （UltiKits/UltiRemoteBag#20）。`/bag` 命令的描述（由 `/help` 显示）现在也跟随 `language`。
+- `language: zh` 现在也对原先写死为英文的控制台日志生效：本模块的启用与禁用日志（语言文件里本来就有这两条）、
+  关于本版本不再读取的设置的警告、加载背包页面时跳过无法读取的槽位，以及背包写入或读取失败。它们的英文措辞不变，
+  只是残留的 `messages.page_locked` 的警告现在说明「页面被他人占用」的那几行来自语言文件，而不再指向本问题仍未解决。
+
 - `/ul reload UltiRemoteBag` now reloads this module's configuration and refreshes its language
   catalogue; previously this module replaced the framework's reload step, so neither happened and
   an edited `config/remotebag.yml` took effect only after a restart (UltiKits/UltiRemoteBag#12).
@@ -166,6 +184,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   而一页的容量一直是固定的 45 格（UltiKits/UltiRemoteBag#24）。
 
 ### Removed
+
+- The language-file entry `opening_bag` ("Opening bag #{0}...") from `lang/en.yml` and
+  `lang/zh.yml`: no code ever displayed it.
+- 从 `lang/en.yml` 与 `lang/zh.yml` 中移除语言文件条目 `opening_bag`（「正在打开背包 #{0}...」）：从未有任何代码显示它。
 
 - Removed the module's own 'configuration reloaded' console line; UltiTools 6.3.0 logs one reload
   line per module.
