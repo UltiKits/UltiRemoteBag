@@ -180,6 +180,45 @@ class BagReopenKeepsLockTest {
                 .isEqualTo(new ItemStack(Material.DIAMOND));
     }
 
+    @Test
+    @DisplayName("A re-open the lock then refuses still saves the page that was open (gate-1 IN-02)")
+    void refusedReopenKeepsTheOpenPagesEdit() throws Exception {
+        owner.addAttachment(MockBukkit.createMockPlugin("Perms"), "ultibag.pages.2", true);
+        bagService.setBagPage(owner.getUniqueId(), 2, new ItemStack[45]);
+        // An administrator holds page 1's edit lock (they have it open), so the owner's /bag 1 is refused.
+        command.seePlayerBagPage(admin, "Owner", PAGE);
+        assertAdminHoldsTheLock("precondition: the administrator holds page 1");
+        command.openPage(owner, 2);
+        currentPage(owner).getInventory().setItem(CONTENT_SLOT, new ItemStack(Material.EMERALD));
+
+        command.openPage(owner, PAGE);
+
+        assertThat(store.storedContents(owner.getUniqueId().toString(), 2))
+                .as("closing page 2 before the refused lock decision saved it")
+                .contains("minecraft:emerald");
+        assertThat(lockService.getLockInfo(owner.getUniqueId(), 2))
+                .as("and released page 2's lock").isEmpty();
+        assertAdminHoldsTheLock("the refusal left the administrator's lock alone");
+    }
+
+    @Test
+    @DisplayName("An administrator re-running /bag see on a page they view read-only is still a read-only viewer (gate-1 IN-03)")
+    void readOnlyAdminRerunStaysARegisteredViewer() throws Exception {
+        command.openPage(owner, PAGE);
+        command.seePlayerBagPage(admin, "Owner", PAGE);
+        assertThat(modeOf(currentPage(admin))).as("precondition: read-only").isEqualTo(AccessMode.READ_ONLY);
+
+        command.seePlayerBagPage(admin, "Owner", PAGE);
+
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, java.util.Set<java.util.UUID>> sessions =
+                (java.util.Map<String, java.util.Set<java.util.UUID>>) UltiRemoteBagTestHelper.getField(lockService, "readOnlySessions");
+        assertThat(sessions.get(owner.getUniqueId() + ":" + PAGE))
+                .as("the re-run must not drop the administrator from the owner's read-only viewers,"
+                        + " or they stop receiving the owner's notices")
+                .contains(admin.getUniqueId());
+    }
+
     private void assertOwnerHoldsTheLock(String why) {
         Optional<BagLockInfo> lock = lockService.getLockInfo(owner.getUniqueId(), PAGE);
         assertThat(lock).as(why).isPresent();
