@@ -42,7 +42,7 @@ public class UltiRemoteBag extends UltiToolsPlugin {
         // once per boot rather than letting an edited value fail silently.
         RemovedConfigKeys.warnIfStillPresent(config, getLogger());
 
-        getLogger().info("UltiRemoteBag has been enabled!");
+        getLogger().info(i18n("bag_enabled"));
         return true;
     }
 
@@ -54,7 +54,7 @@ public class UltiRemoteBag extends UltiToolsPlugin {
             bagService.saveAllBags();
         }
 
-        getLogger().info("UltiRemoteBag has been disabled!");
+        getLogger().info(i18n("bag_disabled"));
     }
 
     @Override

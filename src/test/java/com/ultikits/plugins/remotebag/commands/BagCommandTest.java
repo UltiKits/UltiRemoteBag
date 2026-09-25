@@ -246,10 +246,13 @@ class BagCommandTest {
             when(lockService.ownerOpen(playerUuid, 1, player))
                     .thenReturn(BagOpenResult.blocked(lockInfo));
 
+            // The notice comes from the language file: answered from the real en catalogue.
+            when(mockPluginOf(command).i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("en"));
+            String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("en", "bag_blocked_by_admin").replace("{PLAYER}", "AdminPlayer");
+
             command.openPage(player, 1);
 
-            // Should send the blocked message (contains "管理员")
-            verify(player).sendMessage(contains("AdminPlayer"));
+            verify(player).sendMessage(expected);
         }
     }
 
@@ -276,7 +279,7 @@ class BagCommandTest {
         void reportsNothingSavedWhenTheCacheIsEmpty() {
             // Nothing is cached for a player who has not opened a page this session. Claiming
             // `bag_saved_manually` there reported a write that never happened, which is what the UAT
-            // row for this command had been amended to assert against (gate-1 review, WR-05).
+            // row for this command had been amended to assert against.
             when(bagService.hasCachedPages(playerUuid)).thenReturn(false);
 
             command.saveBag(player);
@@ -444,14 +447,16 @@ class BagCommandTest {
             when(lockService.adminOpen(eq(targetUuid), eq(1), eq(player)))
                     .thenReturn(readOnlyResult);
 
+            when(mockPluginOf(command).i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("en"));
+            String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("en", "bag_read_only_in_use").replace("{PLAYER}", "OwnerPlayer");
             try {
                 command.seePlayerBagPage(player, "TargetPlayer", 1);
             } catch (Exception e) {
                 // Expected: GUI not initialized
             }
 
-            // Should send the read-only warning message
-            verify(player).sendMessage(contains("OwnerPlayer"));
+            // Should send the read-only warning message, in the server's language
+            verify(player).sendMessage(expected);
         }
 
         @Test
@@ -470,9 +475,12 @@ class BagCommandTest {
             when(lockService.adminOpen(eq(targetUuid), eq(1), eq(player)))
                     .thenReturn(BagOpenResult.blocked(adminLock));
 
+            when(mockPluginOf(command).i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("en"));
+            String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("en", "bag_blocked_by_admin").replace("{PLAYER}", "OtherAdmin");
+
             command.seePlayerBagPage(player, "TargetPlayer", 1);
 
-            verify(player).sendMessage(contains("OtherAdmin"));
+            verify(player).sendMessage(expected);
         }
     }
 
@@ -754,6 +762,18 @@ class BagCommandTest {
             command.handleHelp(consoleSender);
 
             verify(consoleSender, never()).sendMessage(any(String.class));
+        }
+    }
+
+    /** The plugin double the command was built with, so a test can answer its i18n differently. */
+    @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
+    private static UltiToolsPlugin mockPluginOf(BagCommand command) {
+        try {
+            java.lang.reflect.Field f = BagCommand.class.getDeclaredField("plugin");
+            f.setAccessible(true);
+            return (UltiToolsPlugin) f.get(command);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError(e);
         }
     }
 }

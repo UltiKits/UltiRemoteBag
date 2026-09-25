@@ -11,7 +11,6 @@ bag_name: "背包 #{0}"
 lore_item_count: "物品数量: §f{0} 个"
 lore_slot_usage: "占用槽位: §f{0}/{1}"
 lore_click_open: "点击打开"
-opening_bag: "正在打开背包 #{0}..."
 
 # 购买相关
 purchase_button: "购买新背包"
@@ -98,3 +97,30 @@ help_clear: "清空玩家背包页"
 help_list: "列出玩家所有背包"
 page: "页码"
 player: "玩家"
+
+# 命令描述
+command_description: "远程背包系统"
+
+# 背包正被他人占用
+bag_read_only_in_use: "§e该背包正被 {PLAYER} 使用中，当前为只读模式"
+bag_blocked_by_admin: "§c该背包正被管理员 {PLAYER} 编辑中，请稍后再试"
+bag_blocked_in_use: "§c该背包正被 {PLAYER} 使用中，请稍后再试"
+
+# 控制台消息
+log_bag_update_failed: "更新背包数据失败"
+log_bag_deserialize_failed: "反序列化背包物品失败"
+log_skipped_slot: "跳过背包第 {PAGE} 页中无法读取的槽位：键 '{KEY}'（{REASON}）；该页其余内容保留"
+log_skipped_slot_not_a_number: "不是槽位编号"
+log_skipped_slot_negative: "槽位编号为负数"
+log_skipped_slot_not_canonical: "不是规范的槽位编号"
+log_skipped_slot_beyond_max: "槽位超出最大可寻址页面的 {MAX} 个槽位"
+
+# 已从 config/remotebag.yml 移除的设置
+removed_key_warning: "UltiRemoteBag：{FILE} 中的 '{KEY}' 已不再有任何作用，可以从文件中删除——{REASON}。"
+removed_key_reason_auto_save_interval: "它所指的定时自动保存已被移除，因为它没有任何事可做；对背包页面的每一次写入都已在同一操作中持久化（UltiKits/UltiRemoteBag#13、UltiKits/UltiRemoteBag#23）"
+removed_key_reason_gui_title: "背包页面的标题来自本模块的语言文件，即 lang/en.yml 与 lang/zh.yml 中的 'bag_name' 键（UltiKits/UltiRemoteBag#14）"
+removed_key_reason_no_permission: "权限拒绝消息来自 UltiTools 自身已翻译的消息，因此已经跟随服务器的 'language' 设置（UltiKits/UltiRemoteBag#15）"
+removed_key_reason_page_locked: "请求一个你无权打开的页面时，回复来自本模块的语言文件中已翻译的 'page_out_of_range' 键。如果你想修改的是页面正被他人占用时显示的那一行，它同样来自本模块的语言文件，即 'bag_read_only_in_use'、'bag_blocked_in_use' 与 'bag_blocked_by_admin' 键（UltiKits/UltiRemoteBag#16、UltiKits/UltiRemoteBag#20）"
+removed_key_reason_rows_per_page: "每个背包页面固定容纳 45 个槽位；该设置被移除而非写入文档，是因为它在两个方向上都不决定这一点——它只是主菜单「占用槽位」一行的分母，在其自身默认值下，满页显示为 45/54；让容量真正可配置记录在 UltiKits/UltiRemoteBag#38（UltiKits/UltiRemoteBag#24）"
+removed_key_reason_save_on_close: "在编辑模式下关闭背包页面总会保存，本模块一向如此；该开关被移除而非接线，是因为关闭它会销毁玩家拖入窗口的物品，UltiKits/UltiRemoteBag#37 记录了实现它需要怎么做（UltiKits/UltiRemoteBag#18）"
+removed_key_reason_bag_saved: "'/bag save' 的确认消息来自本模块的语言文件，即 'bag_saved_manually' 键（UltiKits/UltiRemoteBag#17）"

@@ -701,6 +701,25 @@ class RemoteBagServiceTest {
             // Should not throw, should log error instead
             assertThatCode(() -> service.saveBag(playerUuid)).doesNotThrowAnyException();
         }
+
+        @Test
+        @DisplayName("Under language: zh a failed bag write is logged with the Chinese catalogue text")
+        @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
+        void updateFailureFollowsTheLanguageSetting() throws Exception {
+            java.lang.reflect.Field pluginField = RemoteBagService.class.getDeclaredField("plugin");
+            pluginField.setAccessible(true);
+            UltiToolsPlugin plugin = (UltiToolsPlugin) pluginField.get(service);
+            when(plugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+            RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
+            when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
+            doThrow(new IllegalAccessException("Test error")).when(dataOperator).update(any(RemoteBagData.class));
+            String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_bag_update_failed");
+
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            service.saveBag(playerUuid);
+
+            verify(plugin.getLogger()).error(eq(expected), any(IllegalAccessException.class));
+        }
     }
 
     // ==================== saveAllBags ====================
