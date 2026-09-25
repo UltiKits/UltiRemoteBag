@@ -742,7 +742,7 @@ class UltiRemoteBagLanguageCatalogueTest {
         }
 
         @Test
-        @DisplayName("a forwarding call inside an anonymous class in an i18n wrapper is not a pass-through (finding 2)")
+        @DisplayName("a forwarding call inside an anonymous class in an i18n wrapper is not a pass-through")
         void forwardingInsideAnonymousClassIsDynamic() {
             SourceFile f = source("String i18n(String key) { return new java.util.function.Function<String, String>() {"
                     + " public String apply(String key) { return plugin.i18n(key); } }.apply(\"x.\" + suffix); }");
@@ -751,7 +751,7 @@ class UltiRemoteBagLanguageCatalogueTest {
         }
 
         @Test
-        @DisplayName("@CmdParam(suggest = ...) is resolved on the compiled executor by the framework's own lookup (Codex, UltiBackup#22)")
+        @DisplayName("@CmdParam(suggest = ...) is resolved on the compiled executor by the framework's own lookup")
         void suggestResolvedByTheFrameworkLookup() {
             I18nSourceScanner.SuggestScan scan = I18nSourceScanner.suggestHintSites(Arrays.<Class<?>>asList(
                     SuggestFixtures.Executor.class, SuggestFixtures.Base.class, SuggestFixtures.Provider.class,
@@ -812,7 +812,7 @@ class UltiRemoteBagLanguageCatalogueTest {
         }
 
         @Test
-        @DisplayName("two sites printing the same expression in one file need one entry each (Codex, UltiBackup#22)")
+        @DisplayName("two sites printing the same expression in one file need one entry each")
         void sameExpressionTwiceNeedsTwoEntries() throws IOException {
             List<SourceFile> files = Collections.singletonList(source(
                     "String a(String key) { return plugin.i18n(key); }\n"
@@ -910,7 +910,7 @@ class UltiRemoteBagLanguageCatalogueTest {
         }
 
         @Test
-        @DisplayName("a literal percent sign in prose is not a format placeholder (finding 7)")
+        @DisplayName("a literal percent sign in prose is not a format placeholder")
         void percentInProseIsNotAPlaceholder() throws IOException {
             assertThat(placeholderMismatches(Arrays.asList(
                     yaml("en", "a: \"Saved 100% of items\"\n"), yaml("zh", "a: \"\u5df2\u4fdd\u5b58100%\"\n"))))
@@ -929,7 +929,7 @@ class UltiRemoteBagLanguageCatalogueTest {
         }
 
         @Test
-        @DisplayName("every java.util.Formatter specifier that takes an argument is a placeholder (Codex, UltiBackup#22)")
+        @DisplayName("every java.util.Formatter specifier that takes an argument is a placeholder")
         void everyFormatterConversionIsAPlaceholder() throws IOException {
             for (String spec : new String[]{"%b", "%c", "%o", "%e", "%g", "%S", "%X", "%h", "%a", "%tY", "%1$tY", "%<s"}) {
                 assertThat(placeholderMismatches(Arrays.asList(
@@ -939,7 +939,7 @@ class UltiRemoteBagLanguageCatalogueTest {
         }
 
         @Test
-        @DisplayName("a %NAME% token is a placeholder, read whole rather than as a specifier (Codex, UltiBackup#22)")
+        @DisplayName("a %NAME% token is a placeholder, read whole rather than as a specifier")
         void percentNameTokenIsAPlaceholder() throws IOException {
             assertThat(placeholders("&e%online%&7/&e%max%")).containsExactly("%max%", "%online%");
             assertThat(placeholderMismatches(Arrays.asList(
@@ -948,7 +948,7 @@ class UltiRemoteBagLanguageCatalogueTest {
         }
 
         @Test
-        @DisplayName("every percent sign belongs to one placeholder, so none can be dropped or added unnoticed (Codex, UltiBackup#22)")
+        @DisplayName("every percent sign belongs to one placeholder, so none can be dropped or added unnoticed")
         void everyPercentSignIsCounted() throws IOException {
             List<String> problems = placeholderMismatches(Arrays.asList(
                     yaml("en", "one: \"Hi %x%\"\npair: \"100%% sure\"\nspace: \"Got % d items\"\nprose: \"Saved 100% of it\"\n"),
@@ -963,7 +963,7 @@ class UltiRemoteBagLanguageCatalogueTest {
         }
 
         @Test
-        @DisplayName("a relative specifier %<s stays bound to the argument before it (Codex, UltiBackup#22)")
+        @DisplayName("a relative specifier %<s stays bound to the argument before it")
         void relativeSpecifierKeepsItsArgument() throws IOException {
             List<String> problems = placeholderMismatches(Arrays.asList(
                     yaml("en", "lead: \"%s and %<s\"\nmoved: \"%s of %d, %<d\"\nsame: \"%s then %<s\"\n"),
