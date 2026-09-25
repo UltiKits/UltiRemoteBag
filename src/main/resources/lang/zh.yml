@@ -121,6 +121,6 @@ removed_key_reason_auto_save_interval: "它所指的定时自动保存已被移�
 removed_key_reason_gui_title: "背包页面的标题来自本模块的语言文件，即 lang/en.yml 与 lang/zh.yml 中的 'bag_name' 键（UltiKits/UltiRemoteBag#14）"
 removed_key_reason_no_permission: "权限拒绝消息来自 UltiTools 自身已翻译的消息，因此已经跟随服务器的 'language' 设置（UltiKits/UltiRemoteBag#15）"
 removed_key_reason_page_locked: "请求一个你无权打开的页面时，回复来自本模块的语言文件中已翻译的 'page_out_of_range' 键。如果你想修改的是页面正被他人占用时显示的那一行，它同样来自本模块的语言文件，即 'bag_read_only_in_use'、'bag_blocked_in_use' 与 'bag_blocked_by_admin' 键（UltiKits/UltiRemoteBag#16、UltiKits/UltiRemoteBag#20）"
-removed_key_reason_rows_per_page: "每个背包页面固定容纳 45 个槽位；该设置被移除而非写入文档，是因为它在两个方向上都不决定这一点——它只是主菜单「已用槽位」一行的分母，在其自身默认值下，满页显示为 45/54；让容量真正可配置记录在 UltiKits/UltiRemoteBag#38（UltiKits/UltiRemoteBag#24）"
+removed_key_reason_rows_per_page: "每个背包页面固定容纳 45 个槽位；该设置被移除而非写入文档，是因为它在两个方向上都不决定这一点——它只是主菜单「占用槽位」一行的分母，在其自身默认值下，满页显示为 45/54；让容量真正可配置记录在 UltiKits/UltiRemoteBag#38（UltiKits/UltiRemoteBag#24）"
 removed_key_reason_save_on_close: "在编辑模式下关闭背包页面总会保存，本模块一向如此；该开关被移除而非接线，是因为关闭它会销毁玩家拖入窗口的物品，UltiKits/UltiRemoteBag#37 记录了实现它需要怎么做（UltiKits/UltiRemoteBag#18）"
 removed_key_reason_bag_saved: "'/bag save' 的确认消息来自本模块的语言文件，即 'bag_saved_manually' 键（UltiKits/UltiRemoteBag#17）"
