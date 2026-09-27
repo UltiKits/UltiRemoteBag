@@ -120,7 +120,8 @@ class OwnerPresenceLockHandoverTest {
         // Tolerant: the config field arrives with UltiKits/UltiRemoteBag#19's fix. See
         // UltiRemoteBagTestHelper#setFieldIfPresent.
         UltiRemoteBagTestHelper.setFieldIfPresent(lockService, "config", config);
-        lockService.setLockTimeout(LOCK_TIMEOUT_SECONDS);
+        // The timeout is read from the configuration at each use (UltiKits/UltiRemoteBag#39).
+        lenient().when(config.getLockTimeout()).thenReturn(LOCK_TIMEOUT_SECONDS);
 
         owner = server.addPlayer("Owner");
         admin = server.addPlayer("Admin");

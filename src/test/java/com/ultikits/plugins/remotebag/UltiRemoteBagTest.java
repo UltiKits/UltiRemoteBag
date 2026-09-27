@@ -75,8 +75,8 @@ class UltiRemoteBagTest {
         }
 
         @Test
-        @DisplayName("Should set lock timeout when lockService and config available")
-        void setsLockTimeout() throws Exception {
+        @DisplayName("Does not copy lock.timeout_seconds into the lock service at load (UltiKits/UltiRemoteBag#39)")
+        void doesNotCopyTheLockTimeoutAtLoad() throws Exception {
             UltiRemoteBag plugin = mock(UltiRemoteBag.class);
             PluginLogger logger = mock(PluginLogger.class);
             when(plugin.getLogger()).thenReturn(logger);
@@ -98,7 +98,9 @@ class UltiRemoteBagTest {
             boolean result = plugin.registerSelf();
 
             assertThat(result).isTrue();
-            verify(lockService).setLockTimeout(600);
+            // The lock service reads the timeout from the configuration at each use; a copy made
+            // here would be stale after /ul reload.
+            verifyNoInteractions(lockService);
         }
 
         @Test
@@ -120,7 +122,7 @@ class UltiRemoteBagTest {
 
             plugin.registerSelf();
 
-            verify(lockService, never()).setLockTimeout(anyInt());
+            verifyNoInteractions(lockService);
         }
     }
 
