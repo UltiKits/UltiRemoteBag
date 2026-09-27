@@ -127,6 +127,28 @@ class BagCommandTest {
             verify(player).sendMessage(contains("page_out_of_range"));
         }
 
+        /**
+         * UltiKits/UltiRemoteBag#26: the stored list no longer invents page 1, but the owner is still
+         * offered it, so {@code /bag 1} opens it before anything is stored.
+         */
+        @Test
+        @DisplayName("/bag 1 still opens page 1 when nothing is stored yet (UltiKits/UltiRemoteBag#26)")
+        void pageOneIsOfferedWhenNothingIsStored() {
+            when(bagService.getPlayerMaxPages(player)).thenReturn(5);
+            when(bagService.getPlayerBagPages(playerUuid)).thenReturn(Collections.emptyList());
+            when(lockService.ownerOpen(eq(playerUuid), eq(1), eq(player)))
+                    .thenReturn(BagOpenResult.editMode());
+
+            try {
+                command.openPage(player, 1);
+            } catch (Exception e) {
+                // Expected: GUI not initialized
+            }
+
+            verify(player, never()).sendMessage(contains("bag_not_exist"));
+            verify(lockService).ownerOpen(eq(playerUuid), eq(1), eq(player));
+        }
+
         @Test
         @DisplayName("Should send error when bag does not exist")
         void errorWhenBagNotExist() {
@@ -645,6 +667,7 @@ class BagCommandTest {
             command.listBags(player, "TargetPlayer");
 
             verify(player).sendMessage(contains("no_bags"));
+            verify(player, never()).sendMessage(contains("#1"));
         }
 
         @Test

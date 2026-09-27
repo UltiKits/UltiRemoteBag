@@ -274,15 +274,27 @@ class RemoteBagMainGUITest {
             }
         }
 
+        /**
+         * UltiKits/UltiRemoteBag#26: with nothing stored the owner's own window still offers page 1,
+         * as it did while the stored list invented it.
+         */
         @Test
-        @DisplayName("Should return empty list when no bag pages")
-        void emptyWhenNoBags() throws Exception {
+        @DisplayName("Offers page 1 when nothing is stored (UltiKits/UltiRemoteBag#26)")
+        void offersPageOneWhenNothingIsStored() throws Exception {
             when(bagService.getPlayerBagPages(playerUuid))
                     .thenReturn(Collections.emptyList());
-            when(bagService.getPlayerMaxPages(player)).thenReturn(10);
+            when(bagService.getPlayerMaxPages(player)).thenReturn(1);
+            when(bagService.getItemCount(eq(playerUuid), anyInt())).thenReturn(0);
+            when(bagService.getStackCount(eq(playerUuid), anyInt())).thenReturn(0);
 
-            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
-                econMock.when(EconomyUtils::isAvailable).thenReturn(false);
+            ItemMeta mockMeta = mock(ItemMeta.class);
+
+            try (MockedConstruction<ItemStack> isMock = mockConstruction(ItemStack.class,
+                    (mock, context) -> when(mock.getItemMeta()).thenReturn(mockMeta));
+                 MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(0.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$0");
 
                 RemoteBagMainGUI gui = new RemoteBagMainGUI(
                         player, mockPlugin, bagService, lockService, config);
@@ -292,8 +304,9 @@ class RemoteBagMainGUITest {
                 @SuppressWarnings("unchecked")
                 List<Icon> icons = (List<Icon>) provideItems.invoke(gui);
 
-                // No bags, economy unavailable = empty
-                assertThat(icons).isEmpty();
+                // Page 1's icon; at the one-page limit, no purchase icon
+                assertThat(icons).hasSize(1);
+                verify(bagService).getItemCount(playerUuid, 1);
             }
         }
     }
