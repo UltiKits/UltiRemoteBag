@@ -17,6 +17,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
@@ -617,17 +618,36 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     }
 
     /**
-     * Whether a click actually carries an item, either in the clicked slot or on the cursor.
+     * Whether a click actually carries an item: in the clicked slot, on the cursor, or -- for a
+     * number-key or off-hand swap -- in the viewer's own hotbar or off-hand slot the key names.
      * <p>
      * Both getters return an AIR stack rather than {@code null} for an empty slot or an empty
      * cursor on a live server, so a plain null check (which this class used to do) is true for
-     * essentially every click, including a click on a background pane.
+     * essentially every click, including a click on a background pane. A swap over an empty
+     * content slot moves the viewer's hotbar or off-hand item, which neither getter sees, so it
+     * used to be refused silently (UltiKits/UltiRemoteBag#35).
      *
      * @param event the click to inspect
      * @return true if an item is involved
      */
     private boolean isItemMovementAttempt(InventoryClickEvent event) {
-        return isRealItem(event.getCurrentItem()) || isRealItem(event.getCursor());
+        return isRealItem(event.getCurrentItem()) || isRealItem(event.getCursor())
+                || isRealItem(itemSwappedInByKey(event));
+    }
+
+    /**
+     * The viewer's own item a number-key or off-hand swap would move, or {@code null} for any other
+     * click.
+     */
+    private ItemStack itemSwappedInByKey(InventoryClickEvent event) {
+        if (event.getClick() == ClickType.SWAP_OFFHAND) {
+            return event.getWhoClicked().getInventory().getItemInOffHand();
+        }
+        int button = event.getHotbarButton();
+        if (event.getClick() == ClickType.NUMBER_KEY && button >= 0) {
+            return event.getWhoClicked().getInventory().getItem(button);
+        }
+        return null;
     }
 
     private boolean isRealItem(ItemStack item) {

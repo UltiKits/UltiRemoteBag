@@ -9,6 +9,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- In a read-only bag page, pressing a number key or the off-hand swap key over an empty slot now
+  answers `Read-only mode, cannot move items` and plays the error sound like every other refused move;
+  before, it was refused silently. Nothing could move either way (UltiKits/UltiRemoteBag#35).
+- 只读背包页中，在空格子上按数字键或副手交换键时，现在会像其它被拒绝的移动一样提示「只读模式，无法移动物品」并播放错误音效；
+  此前是静默拒绝。两种情况下物品都不会移动（UltiKits/UltiRemoteBag#35）。
+
 - `lock.timeout_seconds` in `config/remotebag.yml` now follows `/ul reload UltiRemoteBag`: the lock
   service reads it each time it decides whether a lock can be reclaimed. Before, the value was copied
   once when the module loaded, so a changed timeout took effect only after a server restart
