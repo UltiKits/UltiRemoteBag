@@ -689,7 +689,7 @@ class BagCommandTest {
             command.listBags(player, "UnknownPlayer");
 
             verify(player).sendMessage(contains("player_not_found"));
-            verify(bagService, never()).getPlayerBagPages(any());
+            verify(player, never()).sendMessage(contains("bag_list_title"));
         }
 
         @Test
@@ -863,6 +863,58 @@ class BagCommandTest {
             verify(bagService).loadBagIfNeeded(offlineUuid);
         }
 
+        /**
+         * The server forgets names after a while, so a player who has been away long enough is not in
+         * its name cache any more. Such a name is accepted when this module holds bag data for the
+         * player it names -- the module's own data, never Bukkit's "played before" record.
+         */
+        @Test
+        @DisplayName("A name the server's cache has forgotten resolves when the module holds bag data for it")
+        void aForgottenNameWithBagDataResolves() {
+            UUID awayUuid = UUID.randomUUID();
+            OfflinePlayer away = mock(OfflinePlayer.class);
+            when(away.getUniqueId()).thenReturn(awayUuid);
+            lenient().when(away.hasPlayedBefore()).thenReturn(false);
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("LongGone");
+            doReturn(away).when(mockServer).getOfflinePlayer("LongGone");
+            when(bagService.getPlayerBagPages(awayUuid)).thenReturn(Collections.singletonList(2));
+
+            command.listBags(player, "LongGone");
+
+            verify(player, never()).sendMessage(contains("player_not_found"));
+            verify(player).sendMessage(contains("bag_list_title"));
+        }
+
+        @Test
+        @DisplayName("A forgotten name with no bag data is not found, whatever Bukkit's played-before record says")
+        void aForgottenNameWithoutBagDataIsNotFound() {
+            OfflinePlayer away = mock(OfflinePlayer.class);
+            lenient().when(away.getUniqueId()).thenReturn(UUID.randomUUID());
+            lenient().when(away.hasPlayedBefore()).thenReturn(true);
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("LongGone");
+            doReturn(away).when(mockServer).getOfflinePlayer("LongGone");
+
+            command.createBag(player, "LongGone");
+
+            verify(player).sendMessage(contains("player_not_found"));
+            verify(bagService, never()).createBagPage(any());
+        }
+
+        @Test
+        @DisplayName("A server without the cached-name lookup falls back to the module's own data instead of failing")
+        void aServerWithoutTheCachedLookupFallsBack() {
+            UUID awayUuid = UUID.randomUUID();
+            OfflinePlayer away = mock(OfflinePlayer.class);
+            when(away.getUniqueId()).thenReturn(awayUuid);
+            doThrow(new NoSuchMethodError("getOfflinePlayerIfCached")).when(mockServer).getOfflinePlayerIfCached(anyString());
+            doReturn(away).when(mockServer).getOfflinePlayer("Away");
+            when(bagService.getPlayerBagPages(awayUuid)).thenReturn(Collections.singletonList(1));
+
+            command.listBags(player, "Away");
+
+            verify(player).sendMessage(contains("bag_list_title"));
+        }
+
         @Test
         @DisplayName("A partial name never resolves to an online player")
         void aPartialNameDoesNotResolve() {
@@ -874,7 +926,7 @@ class BagCommandTest {
 
             verify(player).sendMessage(contains("player_not_found"));
             verify(bagService, never()).loadBagIfNeeded(onlineUuid);
-            verify(bagService, never()).getPlayerBagPages(any());
+            verify(bagService, never()).getPlayerBagPages(onlineUuid);
         }
 
         @Test
