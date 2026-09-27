@@ -348,6 +348,76 @@ class RemoteBagMainGUITest {
             verify(player).sendMessage(contains("create_success"));
         }
 
+        /** Builds the owner's window with {@code economyOn} and returns the icon offering the next page. */
+        private Icon nextPageIcon(RemoteBagConfig cfg, boolean economyOn) throws Exception {
+            when(cfg.isEconomyEnabled()).thenReturn(economyOn);
+            when(bagService.getPlayerBagPages(playerUuid)).thenReturn(Collections.singletonList(1));
+            when(bagService.getPlayerMaxPages(player)).thenReturn(10);
+            lenient().when(bagService.getItemCount(eq(playerUuid), anyInt())).thenReturn(0);
+            lenient().when(bagService.getStackCount(eq(playerUuid), anyInt())).thenReturn(0);
+            lenient().when(bagService.calculatePrice(anyInt())).thenReturn(100);
+            ItemMeta mockMeta = mock(ItemMeta.class);
+            try (MockedConstruction<ItemStack> isMock = mockConstruction(ItemStack.class,
+                    (mock, context) -> when(mock.getItemMeta()).thenReturn(mockMeta))) {
+                RemoteBagMainGUI gui = new RemoteBagMainGUI(player, mockPlugin, bagService, lockService, cfg);
+                Method provideItems = RemoteBagMainGUI.class.getDeclaredMethod("provideItems");
+                provideItems.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                List<Icon> icons = (List<Icon>) provideItems.invoke(gui);
+                assertThat(icons).hasSize(2);
+                return icons.get(1);
+            }
+        }
+
+        private void click(Icon icon) {
+            try {
+                icon.getClickAction().accept(null);
+            } catch (RuntimeException e) {
+                // Re-opening the refreshed window needs the GUI library, which this test does not start.
+            }
+        }
+
+        /**
+         * A free icon clicked after the economy came on (a reload, or a provider registering) must not
+         * charge the player: the icon said the page was free.
+         */
+        @Test
+        @DisplayName("A free icon clicked after the economy came on charges nothing and refreshes")
+        void aStaleFreeIconDoesNotCharge() throws Exception {
+            RemoteBagConfig cfg = UltiRemoteBagTestHelper.createDefaultConfig();
+            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(1000.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$100");
+                Icon free = nextPageIcon(cfg, false);
+                when(cfg.isEconomyEnabled()).thenReturn(true);
+
+                click(free);
+
+                verify(bagService, never()).purchaseBag(player);
+                verify(player).sendMessage(contains("bag_price_changed"));
+            }
+        }
+
+        /** The mirror case: a purchase icon clicked after the economy went off does not act either. */
+        @Test
+        @DisplayName("A purchase icon clicked after the economy went off does nothing and refreshes")
+        void aStalePurchaseIconDoesNotAct() throws Exception {
+            RemoteBagConfig cfg = UltiRemoteBagTestHelper.createDefaultConfig();
+            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(1000.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$100");
+                Icon paid = nextPageIcon(cfg, true);
+                when(cfg.isEconomyEnabled()).thenReturn(false);
+
+                click(paid);
+
+                verify(bagService, never()).purchaseBag(player);
+                verify(player).sendMessage(contains("bag_price_changed"));
+            }
+        }
+
         /**
          * UltiKits/UltiRemoteBag#26: with nothing stored the owner's own window still offers page 1,
          * as it did while the stored list invented it.
