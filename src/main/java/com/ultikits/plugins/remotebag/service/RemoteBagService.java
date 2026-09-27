@@ -335,6 +335,21 @@ public class RemoteBagService {
     }
     
     /**
+     * The pages a player is offered in their own views ({@code /bag}, {@code /bag <page>}, and the
+     * next page a purchase or free creation adds): the stored pages, or page 1 alone when nothing is
+     * stored yet, so a new player always has a page to open.
+     *
+     * @param storedPages the player's stored pages, as {@link #getPlayerBagPages} returns them
+     * @return the pages offered to their owner (sorted)
+     */
+    public static List<Integer> pagesOfferedToOwner(List<Integer> storedPages) {
+        if (storedPages == null || storedPages.isEmpty()) {
+            return Collections.singletonList(1);
+        }
+        return storedPages;
+    }
+
+    /**
      * 获取指定背包页的物品总数量
      *
      * @param playerUuid 玩家 UUID
@@ -406,7 +421,7 @@ public class RemoteBagService {
             return createNewBagPage(player);
         }
         
-        List<Integer> existingPages = getPlayerBagPages(player.getUniqueId());
+        List<Integer> existingPages = pagesOfferedToOwner(getPlayerBagPages(player.getUniqueId()));
         int nextBagNum = existingPages.size() + 1;
         
         // 检查是否超过上限
@@ -436,8 +451,8 @@ public class RemoteBagService {
         UUID playerUuid = player.getUniqueId();
         loadBagIfNeeded(playerUuid);
         
-        List<Integer> existingPages = getPlayerBagPages(playerUuid);
-        int nextPage = existingPages.isEmpty() ? 1 : Collections.max(existingPages) + 1;
+        List<Integer> existingPages = pagesOfferedToOwner(getPlayerBagPages(playerUuid));
+        int nextPage = Collections.max(existingPages) + 1;
         
         // 检查是否超过上限
         int maxPages = getPlayerMaxPages(player);
