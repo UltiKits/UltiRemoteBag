@@ -324,8 +324,8 @@ public class RemoteBagService {
      * (UltiKits/UltiRemoteBag#26). The owner's own views still offer page 1 through
      * {@link #pagesOfferedToOwner}.
      *
-     * @param playerUuid 玩家 UUID
-     * @return 已存储的背包页码列表（已排序，可能为空）
+     * @param playerUuid the player's UUID / 玩家 UUID
+     * @return the stored page numbers, sorted; empty when nothing is stored / 已存储的背包页码列表（已排序，可能为空）
      */
     public List<Integer> getPlayerBagPages(UUID playerUuid) {
         loadBagIfNeeded(playerUuid);
