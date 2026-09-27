@@ -157,15 +157,14 @@ public class BagCommand extends BaseCommandExecutor {
      */
     @CmdMapping(format = "see <player>", permission = "ultibag.admin.see")
     public void seePlayerBag(@CmdSender Player admin, @CmdParam("player") String playerName) {
-        OfflinePlayer target = Bukkit.getOfflinePlayer(playerName);
-        if (target == null || !target.hasPlayedBefore()) {
-            admin.sendMessage(ChatColor.RED + i18n("player_not_found").replace("{0}", playerName));
+        UUID targetUuid = resolveTarget(admin, playerName);
+        if (targetUuid == null) {
             return;
         }
         
         // 加载目标玩家背包
-        bagService.loadBagIfNeeded(target.getUniqueId());
-        List<Integer> pages = bagService.getPlayerBagPages(target.getUniqueId());
+        bagService.loadBagIfNeeded(targetUuid);
+        List<Integer> pages = bagService.getPlayerBagPages(targetUuid);
         
         if (pages.isEmpty()) {
             admin.sendMessage(ChatColor.YELLOW + i18n("player_no_bags").replace("{0}", playerName));
@@ -173,7 +172,7 @@ public class BagCommand extends BaseCommandExecutor {
         }
         
         // 打开第一页
-        openAdminBagPage(admin, target.getUniqueId(), pages.get(0), playerName);
+        openAdminBagPage(admin, targetUuid, pages.get(0), playerName);
     }
     
     /**
@@ -183,15 +182,43 @@ public class BagCommand extends BaseCommandExecutor {
     public void seePlayerBagPage(@CmdSender Player admin, 
                                   @CmdParam("player") String playerName,
                                   @CmdParam("page") int page) {
-        OfflinePlayer target = Bukkit.getOfflinePlayer(playerName);
-        if (target == null || !target.hasPlayedBefore()) {
-            admin.sendMessage(ChatColor.RED + i18n("player_not_found").replace("{0}", playerName));
+        UUID targetUuid = resolveTarget(admin, playerName);
+        if (targetUuid == null) {
             return;
         }
         
-        openAdminBagPage(admin, target.getUniqueId(), page, playerName);
+        openAdminBagPage(admin, targetUuid, page, playerName);
     }
     
+    /**
+     * Resolves an administrator command's target by name, or tells the sender it was not found and
+     * returns {@code null}.
+     * <p>
+     * An online player is matched by exact name first ({@code Bukkit#getPlayerExact}, never a
+     * partial name); otherwise the server's own name cache is asked
+     * ({@code Bukkit#getOfflinePlayerIfCached}, which makes no web request). The target used to be
+     * gated on {@code OfflinePlayer#hasPlayedBefore()}, which is false throughout a player's first
+     * session even when this module already holds their bag data, so every administrator command
+     * refused a genuinely online first-time player (UltiKits/UltiRemoteBag#30). Whether the target
+     * has any bag page is each command's own question.
+     *
+     * @param admin      the sender, told when the name is not found
+     * @param playerName the name as typed
+     * @return the target's UUID, or {@code null} if no such player is known
+     */
+    private UUID resolveTarget(Player admin, String playerName) {
+        Player online = Bukkit.getPlayerExact(playerName);
+        if (online != null) {
+            return online.getUniqueId();
+        }
+        OfflinePlayer known = Bukkit.getOfflinePlayerIfCached(playerName);
+        if (known != null) {
+            return known.getUniqueId();
+        }
+        admin.sendMessage(ChatColor.RED + i18n("player_not_found").replace("{0}", playerName));
+        return null;
+    }
+
     /**
      * 管理员打开背包页
      */
@@ -237,13 +264,12 @@ public class BagCommand extends BaseCommandExecutor {
      */
     @CmdMapping(format = "create <player>", permission = "ultibag.admin.create")
     public void createBag(@CmdSender Player admin, @CmdParam("player") String playerName) {
-        OfflinePlayer target = Bukkit.getOfflinePlayer(playerName);
-        if (target == null || !target.hasPlayedBefore()) {
-            admin.sendMessage(ChatColor.RED + i18n("player_not_found").replace("{0}", playerName));
+        UUID targetUuid = resolveTarget(admin, playerName);
+        if (targetUuid == null) {
             return;
         }
         
-        int newPage = bagService.createBagPage(target.getUniqueId());
+        int newPage = bagService.createBagPage(targetUuid);
         if (newPage > 0) {
             admin.sendMessage(ChatColor.GREEN + i18n("admin_bag_created")
                     .replace("{0}", playerName)
@@ -260,19 +286,18 @@ public class BagCommand extends BaseCommandExecutor {
     public void deleteBag(@CmdSender Player admin,
                           @CmdParam("player") String playerName,
                           @CmdParam("page") int page) {
-        OfflinePlayer target = Bukkit.getOfflinePlayer(playerName);
-        if (target == null || !target.hasPlayedBefore()) {
-            admin.sendMessage(ChatColor.RED + i18n("player_not_found").replace("{0}", playerName));
+        UUID targetUuid = resolveTarget(admin, playerName);
+        if (targetUuid == null) {
             return;
         }
         
         // 检查背包是否被锁定
-        if (!lockService.canUpgradeToEdit(target.getUniqueId(), page)) {
+        if (!lockService.canUpgradeToEdit(targetUuid, page)) {
             admin.sendMessage(ChatColor.RED + i18n("bag_in_use_cannot_delete"));
             return;
         }
         
-        if (bagService.deleteBagPage(target.getUniqueId(), page)) {
+        if (bagService.deleteBagPage(targetUuid, page)) {
             admin.sendMessage(ChatColor.GREEN + i18n("admin_bag_deleted")
                     .replace("{0}", playerName)
                     .replace("{1}", String.valueOf(page)));
@@ -290,19 +315,18 @@ public class BagCommand extends BaseCommandExecutor {
     public void clearBag(@CmdSender Player admin,
                          @CmdParam("player") String playerName,
                          @CmdParam("page") int page) {
-        OfflinePlayer target = Bukkit.getOfflinePlayer(playerName);
-        if (target == null || !target.hasPlayedBefore()) {
-            admin.sendMessage(ChatColor.RED + i18n("player_not_found").replace("{0}", playerName));
+        UUID targetUuid = resolveTarget(admin, playerName);
+        if (targetUuid == null) {
             return;
         }
         
         // 检查背包是否被锁定
-        if (!lockService.canUpgradeToEdit(target.getUniqueId(), page)) {
+        if (!lockService.canUpgradeToEdit(targetUuid, page)) {
             admin.sendMessage(ChatColor.RED + i18n("bag_in_use_cannot_clear"));
             return;
         }
         
-        if (bagService.clearBagPage(target.getUniqueId(), page)) {
+        if (bagService.clearBagPage(targetUuid, page)) {
             admin.sendMessage(ChatColor.GREEN + i18n("admin_bag_cleared")
                     .replace("{0}", playerName)
                     .replace("{1}", String.valueOf(page)));
@@ -318,14 +342,13 @@ public class BagCommand extends BaseCommandExecutor {
      */
     @CmdMapping(format = "list <player>", permission = "ultibag.admin.list")
     public void listBags(@CmdSender Player admin, @CmdParam("player") String playerName) {
-        OfflinePlayer target = Bukkit.getOfflinePlayer(playerName);
-        if (target == null || !target.hasPlayedBefore()) {
-            admin.sendMessage(ChatColor.RED + i18n("player_not_found").replace("{0}", playerName));
+        UUID targetUuid = resolveTarget(admin, playerName);
+        if (targetUuid == null) {
             return;
         }
         
-        bagService.loadBagIfNeeded(target.getUniqueId());
-        List<Integer> pages = bagService.getPlayerBagPages(target.getUniqueId());
+        bagService.loadBagIfNeeded(targetUuid);
+        List<Integer> pages = bagService.getPlayerBagPages(targetUuid);
         
         admin.sendMessage(ChatColor.GOLD + "=== " + playerName + " " + i18n("bag_list_title") + " ===");
         
@@ -333,8 +356,8 @@ public class BagCommand extends BaseCommandExecutor {
             admin.sendMessage(ChatColor.GRAY + i18n("no_bags"));
         } else {
             for (int pageNum : pages) {
-                int itemCount = bagService.getItemCount(target.getUniqueId(), pageNum);
-                int stackCount = bagService.getStackCount(target.getUniqueId(), pageNum);
+                int itemCount = bagService.getItemCount(targetUuid, pageNum);
+                int stackCount = bagService.getStackCount(targetUuid, pageNum);
                 admin.sendMessage(ChatColor.YELLOW + "  #" + pageNum + ChatColor.WHITE + " - " +
                         i18n("items_stacks")
                                 .replace("{0}", String.valueOf(itemCount))
