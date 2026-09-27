@@ -20,6 +20,10 @@ lore_click_purchase: "Click to purchase"
 lore_insufficient_balance: "Insufficient balance"
 purchase_success: "Successfully purchased bag #{0}!"
 purchase_failed: "Purchase failed! Insufficient balance, requires {0}"
+create_button: "Create New Bag"
+lore_click_create: "Click to create (free)"
+create_success: "Created bag #{0}!"
+create_failed: "Could not create a new bag."
 
 # Bag Content GUI
 read_only: "Read Only"

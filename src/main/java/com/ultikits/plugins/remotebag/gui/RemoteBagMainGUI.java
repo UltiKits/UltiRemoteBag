@@ -20,6 +20,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -99,10 +100,17 @@ public class RemoteBagMainGUI extends BasePaginationPage {
             icons.add(createBagIcon(pageNum));
         }
         
-        // 添加购买按钮（如果未达上限且启用经济系统）
+        // Below the page limit, offer the next page: bought when the economy is on and a provider is
+        // present, free otherwise. The free icon is the only way to reach the service's free path;
+        // before it existed, a server with economy off had no way to add a page at all
+        // (UltiKits/UltiRemoteBag#25).
         int maxPages = bagService.getPlayerMaxPages(player);
-        if (bagPages.size() < maxPages && config.isEconomyEnabled() && EconomyUtils.isAvailable()) {
-            icons.add(createPurchaseIcon());
+        if (bagPages.size() < maxPages) {
+            if (config.isEconomyEnabled() && EconomyUtils.isAvailable()) {
+                icons.add(createPurchaseIcon());
+            } else {
+                icons.add(createFreeCreateIcon());
+            }
         }
         
         return icons;
@@ -220,6 +228,47 @@ public class RemoteBagMainGUI extends BasePaginationPage {
         return icon;
     }
     
+    /**
+     * The icon that adds the next page for free, shown instead of the purchase icon when the economy
+     * is disabled or no economy provider is present (UltiKits/UltiRemoteBag#25).
+     * <p>
+     * Its click goes through {@link RemoteBagService#purchaseBag}, which creates the page without
+     * charging only while the economy is still off at the moment of the click, and refuses past the
+     * player's page limit -- so the icon can neither skip a configured price nor add a page beyond
+     * the limit.
+     *
+     * @return the free create icon
+     */
+    private Icon createFreeCreateIcon() {
+        // The page the free path creates: one past the highest page offered (RemoteBagService#createNewBagPage).
+        int nextBagNum = Collections.max(bagPages) + 1;
+        ItemStack item = new ItemStack(Material.MINECART);
+        ItemMeta meta = item.getItemMeta();
+
+        if (meta != null) {
+            meta.setDisplayName(ChatColor.GREEN + plugin.i18n("create_button"));
+            List<String> lore = new ArrayList<>();
+            lore.add("");
+            lore.add(ChatColor.GREEN + "▶ " + plugin.i18n("lore_click_create"));
+            meta.setLore(lore);
+            item.setItemMeta(meta);
+        }
+
+        Icon icon = new Icon(item);
+        icon.onClick(e -> {
+            if (bagService.purchaseBag(player)) {
+                SoundUtil.playPurchaseSound(player, config);
+                player.sendMessage(ChatColor.GREEN + plugin.i18n("create_success").replace("{0}", String.valueOf(nextBagNum)));
+                new RemoteBagMainGUI(player, plugin, bagService, lockService, config).open();
+            } else {
+                SoundUtil.playErrorSound(player, config);
+                player.sendMessage(ChatColor.RED + plugin.i18n("create_failed"));
+            }
+        });
+
+        return icon;
+    }
+
     /**
      * 设置导航按钮
      * <p>
