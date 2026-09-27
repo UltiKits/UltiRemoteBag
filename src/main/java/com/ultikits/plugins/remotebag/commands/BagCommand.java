@@ -86,6 +86,14 @@ public class BagCommand extends BaseCommandExecutor {
             return;
         }
         
+        // Close whatever the sender has open BEFORE the lock is decided. If it is this same page in
+        // edit mode, its onClose saves it and releases the lock now; opening the new page would
+        // otherwise fire the GUI library's fake close for the old page AFTER ownerOpen had answered
+        // "own lock, keep editing", releasing the lock under the new page and letting a second
+        // player edit the same stored page (UltiKits/UltiRemoteBag#41). The main GUI's page buttons
+        // and the content page's Refresh button already close first.
+        player.closeInventory();
+
         // 尝试打开
         BagOpenResult result = lockService.ownerOpen(player.getUniqueId(), page, player);
         if (result.isSuccess()) {
@@ -195,6 +203,11 @@ public class BagCommand extends BaseCommandExecutor {
             return;
         }
         
+        // Close first, for the same reason as openPage: an administrator re-running /bag see on a
+        // page they hold in edit mode must not have the old page's close release the lock under the
+        // new one (UltiKits/UltiRemoteBag#41).
+        admin.closeInventory();
+
         // 尝试以管理员身份打开
         BagOpenResult result = lockService.adminOpen(ownerUuid, page, admin);
         
