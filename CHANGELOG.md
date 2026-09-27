@@ -28,11 +28,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `/bag list <player>` and `/bag see <player>` now report a player with no stored bag page as having
   none (`No bags` / `Player <player> has no bags`), including after an administrator deletes every
-  page; before, page 1 was always listed. A player's own `/bag` still offers page 1 before anything is
-  stored, and `/bag create <player>` for a player with no stored page now creates page 1
-  (UltiKits/UltiRemoteBag#26).
+  page; before, page 1 was always listed. A player's own `/bag` always offers page 1, stored or not, so
+  a player who adds page 2 before ever using page 1 keeps page 1; `/bag create <player>` for a player
+  with no stored page now creates page 1 (UltiKits/UltiRemoteBag#26).
 - `/bag list <玩家>` 和 `/bag see <玩家>` 现在会如实报告没有已存储背包页的玩家（「没有背包」/「玩家 <玩家> 没有背包」），
-  包括管理员删除全部背包页之后；此前总会列出第 1 页。玩家自己的 `/bag` 在尚未存储任何内容时仍提供第 1 页；
+  包括管理员删除全部背包页之后；此前总会列出第 1 页。玩家自己的 `/bag` 始终提供第 1 页（无论是否已存储），先添加第 2 页的玩家也不会失去第 1 页；
   对没有已存储背包页的玩家执行 `/bag create <玩家>` 现在会创建第 1 页（UltiKits/UltiRemoteBag#26）。
 
 - In a read-only bag page, pressing a number key or the off-hand swap key over an empty slot now

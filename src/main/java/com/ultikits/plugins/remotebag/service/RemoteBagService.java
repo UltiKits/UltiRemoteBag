@@ -340,17 +340,20 @@ public class RemoteBagService {
     
     /**
      * The pages a player is offered in their own views ({@code /bag}, {@code /bag <page>}, and the
-     * next page a purchase or free creation adds): the stored pages, or page 1 alone when nothing is
-     * stored yet, so a new player always has a page to open.
+     * next page a purchase or free creation adds): every stored page plus page 1, which is every
+     * player's default page whether or not anything has been stored on it yet. A player who adds
+     * page 2 before ever opening page 1 therefore keeps page 1 (UltiKits/UltiRemoteBag#26).
      *
      * @param storedPages the player's stored pages, as {@link #getPlayerBagPages} returns them
-     * @return the pages offered to their owner (sorted)
+     * @return the pages offered to their owner, sorted
      */
     public static List<Integer> pagesOfferedToOwner(List<Integer> storedPages) {
-        if (storedPages == null || storedPages.isEmpty()) {
-            return Collections.singletonList(1);
+        TreeSet<Integer> offered = new TreeSet<>();
+        offered.add(1);
+        if (storedPages != null) {
+            offered.addAll(storedPages);
         }
-        return storedPages;
+        return new ArrayList<>(offered);
     }
 
     /**
