@@ -59,19 +59,24 @@ public class BagLockService {
     private final Map<String, Set<UUID>> readOnlySessions = new ConcurrentHashMap<>();
     
     /**
-     * 默认锁超时时间（毫秒）- 5分钟
+     * The lock timeout used only when no configuration is wired (a service built outside the
+     * container), in seconds.
      */
-    private long lockTimeoutMillis = 300_000L;
-    
+    private static final int DEFAULT_LOCK_TIMEOUT_SECONDS = 300;
+
     /**
-     * 设置锁超时时间
-     * 
-     * @param timeoutSeconds 超时时间（秒）
+     * The lock timeout in milliseconds, read from {@code lock.timeout_seconds} at each use.
+     * <p>
+     * It used to be copied into a field once at load, so {@code /ul reload UltiRemoteBag} re-read the
+     * file into the configuration bean while locks kept expiring on the old schedule until a restart
+     * (UltiKits/UltiRemoteBag#39). Reading it here, like {@code lock.notify_readonly_viewers}, removes
+     * the copy.
      */
-    public void setLockTimeout(int timeoutSeconds) {
-        this.lockTimeoutMillis = timeoutSeconds * 1000L;
+    private long lockTimeoutMillis() {
+        int seconds = config != null ? config.getLockTimeout() : DEFAULT_LOCK_TIMEOUT_SECONDS;
+        return seconds * 1000L;
     }
-    
+
     /**
      * 所有者尝试打开自己的背包
      * 
@@ -342,7 +347,7 @@ public class BagLockService {
      * @return true if the lock is past its timeout AND nobody is holding its page open
      */
     private boolean isReclaimable(UUID ownerUuid, int pageNum, BagLockInfo lock) {
-        if (!lock.isExpired(lockTimeoutMillis)) {
+        if (!lock.isExpired(lockTimeoutMillis())) {
             return false;
         }
         return !RemoteBagContentGUI.isPageOpenBy(ownerUuid, pageNum, lock.getHolderUuid());

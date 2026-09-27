@@ -9,6 +9,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- `lock.timeout_seconds` in `config/remotebag.yml` now follows `/ul reload UltiRemoteBag`: the lock
+  service reads it each time it decides whether a lock can be reclaimed. Before, the value was copied
+  once when the module loaded, so a changed timeout took effect only after a server restart
+  (UltiKits/UltiRemoteBag#39).
+- `config/remotebag.yml` 中的 `lock.timeout_seconds` 现在随 `/ul reload UltiRemoteBag` 生效：锁服务每次判断能否回收锁时都读取该值。
+  此前该值只在模块加载时复制一次，修改后要重启服务器才生效（UltiKits/UltiRemoteBag#39）。
+
 - Re-running `/bag <page>` or `/bag see <player> <page>` on a page you already have open no longer
   releases its lock, so two players can no longer edit the same page at once (UltiKits/UltiRemoteBag#41).
   These two commands, and `/bag see <player>`, now close whatever window you have open before they
