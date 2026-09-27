@@ -13,8 +13,12 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a green `Create New Bag` icon while the player is under their page limit; clicking it adds the next page
   for free and answers `Created bag #<n>!`. Before, only the paid purchase icon existed, and it was hidden
   whenever the economy was off, so such a server had no way to add a bag page (UltiKits/UltiRemoteBag#25).
+  If the economy comes on or goes off while the window is open, a click on either icon does nothing,
+  answers `The price of a new bag has changed. Check the menu again.` and redraws the window, so a free
+  icon never charges and a priced one never acts for free.
 - 当 `economy.enabled: false` 或未安装经济插件时，背包列表窗口（`/bag`）在玩家未达页数上限时会显示绿色的「创建新背包」图标，
   点击即可免费添加下一页，并提示「已创建背包 #<n>！」。此前只有付费购买图标，且经济关闭时该图标隐藏，这样的服务器无法添加背包页（UltiKits/UltiRemoteBag#25）。
+  窗口打开期间经济开启或关闭时，点击任一图标都不执行，提示「新背包的价格已变化，请重新查看菜单。」并刷新窗口：免费图标不会扣费，付费图标也不会免费生效。
 
 - The administrator commands `/bag see`, `/bag create`, `/bag delete`, `/bag clear` and `/bag list`
   now accept a player who is online in their very first session: the target is found by exact name

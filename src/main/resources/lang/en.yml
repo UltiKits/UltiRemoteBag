@@ -24,6 +24,7 @@ create_button: "Create New Bag"
 lore_click_create: "Click to create (free)"
 create_success: "Created bag #{0}!"
 create_failed: "Could not create a new bag."
+bag_price_changed: "The price of a new bag has changed. Check the menu again."
 
 # Bag Content GUI
 read_only: "Read Only"

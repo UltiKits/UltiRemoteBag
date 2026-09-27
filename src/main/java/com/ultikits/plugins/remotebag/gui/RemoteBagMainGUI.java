@@ -106,7 +106,7 @@ public class RemoteBagMainGUI extends BasePaginationPage {
         // (UltiKits/UltiRemoteBag#25).
         int maxPages = bagService.getPlayerMaxPages(player);
         if (bagPages.size() < maxPages) {
-            if (config.isEconomyEnabled() && EconomyUtils.isAvailable()) {
+            if (pagesArePaid()) {
                 icons.add(createPurchaseIcon());
             } else {
                 icons.add(createFreeCreateIcon());
@@ -214,6 +214,10 @@ public class RemoteBagMainGUI extends BasePaginationPage {
         final int finalPrice = price;
         Icon icon = new Icon(item);
         icon.onClick(e -> {
+            if (!pagesArePaid()) {
+                refreshAfterPriceChange();
+                return;
+            }
             if (bagService.purchaseBag(player)) {
                 SoundUtil.playPurchaseSound(player, config);
                 player.sendMessage(ChatColor.GREEN + plugin.i18n("purchase_success").replace("{0}", String.valueOf(nextBagNum)));
@@ -228,14 +232,30 @@ public class RemoteBagMainGUI extends BasePaginationPage {
         return icon;
     }
     
+    /** Whether a new page costs money right now: the economy is enabled and a provider is present. */
+    private boolean pagesArePaid() {
+        return config.isEconomyEnabled() && EconomyUtils.isAvailable();
+    }
+
+    /**
+     * Answers a click on a next-page icon drawn under the other pricing mode -- the economy came on or
+     * went off since the window was drawn. The click must not act in a mode the icon did not show (a
+     * "free" icon that charges, or a priced one that does not), so it does nothing, says why and redraws.
+     */
+    private void refreshAfterPriceChange() {
+        SoundUtil.playErrorSound(player, config);
+        player.sendMessage(ChatColor.YELLOW + plugin.i18n("bag_price_changed"));
+        new RemoteBagMainGUI(player, plugin, bagService, lockService, config).open();
+    }
+
     /**
      * The icon that adds the next page for free, shown instead of the purchase icon when the economy
      * is disabled or no economy provider is present (UltiKits/UltiRemoteBag#25).
      * <p>
-     * Its click goes through {@link RemoteBagService#purchaseBag}, which creates the page without
-     * charging only while the economy is still off at the moment of the click, and refuses past the
-     * player's page limit -- so the icon can neither skip a configured price nor add a page beyond
-     * the limit.
+     * Its click acts only while pages are still free: if the economy came on since the window was
+     * drawn (a reload, or a provider registering), the click charges nothing and redraws the window
+     * with the price instead. Otherwise it goes through {@link RemoteBagService#purchaseBag}, which
+     * refuses past the player's page limit.
      *
      * @return the free create icon
      */
@@ -256,6 +276,10 @@ public class RemoteBagMainGUI extends BasePaginationPage {
 
         Icon icon = new Icon(item);
         icon.onClick(e -> {
+            if (pagesArePaid()) {
+                refreshAfterPriceChange();
+                return;
+            }
             if (bagService.purchaseBag(player)) {
                 SoundUtil.playPurchaseSound(player, config);
                 player.sendMessage(ChatColor.GREEN + plugin.i18n("create_success").replace("{0}", String.valueOf(nextBagNum)));
