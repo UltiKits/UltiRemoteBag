@@ -11,7 +11,6 @@ bag_name: "Bag #{0}"
 lore_item_count: "Item Count: §f{0}"
 lore_slot_usage: "Slots Used: §f{0}/{1}"
 lore_click_open: "Click to open"
-opening_bag: "Opening bag #{0}..."
 
 # Purchase Related
 purchase_button: "Purchase New Bag"
@@ -98,3 +97,30 @@ help_clear: "Clear player's bag page"
 help_list: "List player's all bags"
 page: "page"
 player: "player"
+
+# Command description
+command_description: "Remote bag system"
+
+# Page held by somebody else
+bag_read_only_in_use: "§eThis bag is being used by {PLAYER}; it is open in read-only mode"
+bag_blocked_by_admin: "§cThis bag is being edited by admin {PLAYER}, please try again later"
+bag_blocked_in_use: "§cThis bag is being used by {PLAYER}, please try again later"
+
+# Console messages
+log_bag_update_failed: "Failed to update bag data"
+log_bag_deserialize_failed: "Failed to deserialize bag items"
+log_skipped_slot: "Skipping unreadable slot in bag page {PAGE}: key '{KEY}' ({REASON}); the rest of the page is kept"
+log_skipped_slot_not_a_number: "not a slot number"
+log_skipped_slot_negative: "negative slot index"
+log_skipped_slot_not_canonical: "not a canonical slot number"
+log_skipped_slot_beyond_max: "slot beyond the largest addressable page of {MAX} slots"
+
+# Settings removed from config/remotebag.yml
+removed_key_warning: "UltiRemoteBag: '{KEY}' in {FILE} no longer has any effect and can be deleted from the file -- {REASON}."
+removed_key_reason_auto_save_interval: "the periodic auto-save it named was removed because it had nothing to do; every write to a bag page is already persisted in the same action (UltiKits/UltiRemoteBag#13, UltiKits/UltiRemoteBag#23)"
+removed_key_reason_gui_title: "a bag page's title comes from this module's language files, key 'bag_name' in lang/en.yml and lang/zh.yml (UltiKits/UltiRemoteBag#14)"
+removed_key_reason_no_permission: "a permission refusal comes from UltiTools' own translated message, so it already follows the server's 'language' setting (UltiKits/UltiRemoteBag#15)"
+removed_key_reason_page_locked: "asking for a page you may not open answers with this module's language files, key 'page_out_of_range', which is already translated. If what you were trying to change is the line shown when somebody ELSE is holding the page, that one also comes from this module's language files, keys 'bag_read_only_in_use', 'bag_blocked_in_use' and 'bag_blocked_by_admin' (UltiKits/UltiRemoteBag#16, UltiKits/UltiRemoteBag#20)"
+removed_key_reason_rows_per_page: "a bag page holds a fixed 45 slots; the setting was removed rather than documented because it did not decide that in either direction -- it was the denominator of the main menu's 'Slots Used' line, which at its own default read 45/54 for a full page, and UltiKits/UltiRemoteBag#38 records making capacity genuinely configurable (UltiKits/UltiRemoteBag#24)"
+removed_key_reason_save_on_close: "closing a bag page in edit mode always saves it, which is what this module has always done; the switch was removed rather than wired because turning it off destroyed items the player had dragged into the window, and UltiKits/UltiRemoteBag#37 records what an implementation would have to do instead (UltiKits/UltiRemoteBag#18)"
+removed_key_reason_bag_saved: "the '/bag save' confirmation comes from this module's language files, key 'bag_saved_manually' (UltiKits/UltiRemoteBag#17)"

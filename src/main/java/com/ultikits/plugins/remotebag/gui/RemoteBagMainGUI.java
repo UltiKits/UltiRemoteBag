@@ -156,7 +156,7 @@ public class RemoteBagMainGUI extends BasePaginationPage {
             } else {
                 // 被阻止
                 SoundUtil.playErrorSound(player, config);
-                player.sendMessage(result.getMessage());
+                player.sendMessage(result.renderMessage(plugin));
             }
         });
         

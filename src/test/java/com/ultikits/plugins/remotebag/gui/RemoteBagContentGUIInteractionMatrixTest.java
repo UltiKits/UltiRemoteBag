@@ -501,7 +501,7 @@ class RemoteBagContentGUIInteractionMatrixTest {
             // The library turns this page's ALLOW into event.setCancelled(false), which CLEARS a
             // cancellation rather than declining to add one, and its listener is NORMAL priority with
             // ignoreCancelled = false. Answering ALLOW unconditionally therefore overrode an anti-cheat
-            // or region plugin (pull request #34 gate-1 review, IN-12).
+            // or region plugin.
             RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
             Listener otherPlugin = registerCancellingListenerAtLowest();
             try {
@@ -630,8 +630,8 @@ class RemoteBagContentGUIInteractionMatrixTest {
         void refreshClearsAVacatedSlot() {
             // The read-only Refresh button is loadBagContents()'s only other caller, and it wrote only
             // the non-null entries -- so a refreshed view showed the union of what was displayed before
-            // and what is stored now, i.e. items the owner had already taken out (pull request #34
-            // gate-1 review, IN-11).
+            // and what is stored now, i.e. items the owner had already taken out (found reviewing pull
+            // request #34).
             RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
             // The owner empties the page elsewhere while this read-only view stays open.
             lenient().when(bagService.getBagPage(ownerUuid, PAGE)).thenReturn(new ItemStack[45]);

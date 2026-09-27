@@ -5,13 +5,85 @@ import com.ultikits.plugins.remotebag.enums.LockType;
 
 import org.junit.jupiter.api.*;
 
+import com.ultikits.plugins.remotebag.i18n.CatalogueText;
+import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
+
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @DisplayName("BagOpenResult Tests")
 class BagOpenResultTest {
+
+    /**
+     * The notice a result shows under {@code language: zh}, as a player sees it: the result renders
+     * its text from the module's real zh catalogue (UltiKits/UltiRemoteBag#20). Reached by reflection
+     * so this file compiles against a tree that does not have the rendering method yet, which a revert
+     * proof needs.
+     */
+    static String render(BagOpenResult result) {
+        return render(result, "zh");
+    }
+
+    /** The notice a result shows under {@code language: code}. */
+    static String render(BagOpenResult result, String code) {
+        UltiToolsPlugin plugin = mock(UltiToolsPlugin.class);
+        when(plugin.i18n(anyString())).thenAnswer(CatalogueText.answer(code));
+        try {
+            Method m = BagOpenResult.class.getMethod("renderMessage", UltiToolsPlugin.class);
+            return (String) m.invoke(result, plugin);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("BagOpenResult cannot render its notice through the language file", e);
+        }
+    }
+
+    /**
+     * The private four-argument constructor, found by arity: its third parameter is the notice, whose
+     * type changed when the text moved to the language file (UltiKits/UltiRemoteBag#20).
+     */
+    @SuppressWarnings("unchecked")
+    static Constructor<BagOpenResult> fourArgConstructor() throws NoSuchMethodException {
+        for (Constructor<?> c : BagOpenResult.class.getDeclaredConstructors()) {
+            if (c.getParameterCount() == 4) {
+                return (Constructor<BagOpenResult>) c;
+            }
+        }
+        throw new NoSuchMethodException("BagOpenResult(boolean, AccessMode, <notice>, BagLockInfo)");
+    }
+
+    /** A non-null value of the constructor's notice parameter, whatever its type. */
+    static Object aNotice(Constructor<BagOpenResult> ctor) {
+        Class<?> type = ctor.getParameterTypes()[2];
+        return type.isEnum() ? type.getEnumConstants()[0] : "message";
+    }
+
+    @Nested
+    @DisplayName("Notices follow the language setting (UltiKits/UltiRemoteBag#20)")
+    class Language {
+
+        private BagLockInfo lock(String holder, LockType type) {
+            return BagLockInfo.builder().holderUuid(UUID.randomUUID()).holderName(holder)
+                    .lockType(type).acquiredAt(System.currentTimeMillis()).build();
+        }
+
+        @Test
+        @DisplayName("under language: en each notice is the English catalogue text with the holder's name")
+        void englishNotices() {
+            String readOnly = CatalogueText.text("en", "bag_read_only_in_use").replace("{PLAYER}", "Owner");
+            String byAdmin = CatalogueText.text("en", "bag_blocked_by_admin").replace("{PLAYER}", "Admin");
+            String inUse = CatalogueText.text("en", "bag_blocked_in_use").replace("{PLAYER}", "Other");
+
+            assertThat(render(BagOpenResult.readOnlyMode(lock("Owner", LockType.OWNER)), "en")).isEqualTo(readOnly);
+            assertThat(render(BagOpenResult.blocked(lock("Admin", LockType.ADMIN)), "en")).isEqualTo(byAdmin);
+            assertThat(render(BagOpenResult.blocked(lock("Other", LockType.OWNER)), "en")).isEqualTo(inUse);
+            assertThat(readOnly).doesNotContainPattern("[\\x{4e00}-\\x{9fff}]");
+        }
+    }
 
     @Nested
     @DisplayName("Edit Mode Factory")
@@ -24,7 +96,7 @@ class BagOpenResultTest {
 
             assertThat(result.isSuccess()).isTrue();
             assertThat(result.getAccessMode()).isEqualTo(AccessMode.EDIT);
-            assertThat(result.getMessage()).isNull();
+            assertThat(render(result)).isNull();
             assertThat(result.getExistingLock()).isNull();
         }
 
@@ -53,7 +125,7 @@ class BagOpenResultTest {
         @DisplayName("Edit mode result should have null message")
         void editModeHasNullMessage() {
             BagOpenResult result = BagOpenResult.editMode();
-            assertThat(result.getMessage()).isNull();
+            assertThat(render(result)).isNull();
         }
     }
 
@@ -75,8 +147,8 @@ class BagOpenResultTest {
 
             assertThat(result.isSuccess()).isTrue();
             assertThat(result.getAccessMode()).isEqualTo(AccessMode.READ_ONLY);
-            assertThat(result.getMessage()).contains("Owner");
-            assertThat(result.getMessage()).contains("只读模式");
+            assertThat(render(result)).contains("Owner");
+            assertThat(render(result)).contains("只读模式");
             assertThat(result.getExistingLock()).isSameAs(lock);
         }
 
@@ -119,7 +191,7 @@ class BagOpenResultTest {
                     .build();
 
             BagOpenResult result = BagOpenResult.readOnlyMode(lock);
-            assertThat(result.getMessage()).contains("SpecificPlayerName");
+            assertThat(render(result)).contains("SpecificPlayerName");
         }
 
         @Test
@@ -134,7 +206,7 @@ class BagOpenResultTest {
 
             BagOpenResult result = BagOpenResult.readOnlyMode(lock);
             // Message starts with color code section symbol
-            assertThat(result.getMessage()).startsWith("\u00a7");
+            assertThat(render(result)).startsWith("\u00a7");
         }
 
         @Test
@@ -170,8 +242,8 @@ class BagOpenResultTest {
 
             assertThat(result.isSuccess()).isFalse();
             assertThat(result.getAccessMode()).isNull();
-            assertThat(result.getMessage()).contains("OtherPlayer");
-            assertThat(result.getMessage()).contains("使用中");
+            assertThat(render(result)).contains("OtherPlayer");
+            assertThat(render(result)).contains("使用中");
             assertThat(result.getExistingLock()).isSameAs(lock);
         }
 
@@ -189,8 +261,8 @@ class BagOpenResultTest {
 
             assertThat(result.isSuccess()).isFalse();
             assertThat(result.getAccessMode()).isNull();
-            assertThat(result.getMessage()).contains("管理员");
-            assertThat(result.getMessage()).contains("AdminPlayer");
+            assertThat(render(result)).contains("管理员");
+            assertThat(render(result)).contains("AdminPlayer");
             assertThat(result.getExistingLock()).isSameAs(lock);
         }
 
@@ -215,8 +287,8 @@ class BagOpenResultTest {
             BagOpenResult ownerResult = BagOpenResult.blocked(ownerLock);
 
             // Admin message should contain "管理员", owner message should not
-            assertThat(adminResult.getMessage()).contains("管理员");
-            assertThat(ownerResult.getMessage()).doesNotContain("管理员");
+            assertThat(render(adminResult)).contains("管理员");
+            assertThat(render(ownerResult)).doesNotContain("管理员");
         }
 
         @Test
@@ -230,7 +302,7 @@ class BagOpenResultTest {
                     .build();
 
             BagOpenResult result = BagOpenResult.blocked(lock);
-            assertThat(result.getMessage()).startsWith("\u00a7c");
+            assertThat(render(result)).startsWith("\u00a7c");
         }
 
         @Test
@@ -294,7 +366,7 @@ class BagOpenResultTest {
 
             assertThat(result.isSuccess()).isTrue();
             assertThat(result.getAccessMode()).isEqualTo(AccessMode.READ_ONLY);
-            assertThat(result.getMessage()).isNotNull();
+            assertThat(render(result)).isNotNull();
             assertThat(result.getExistingLock()).isNotNull();
         }
 
@@ -305,7 +377,7 @@ class BagOpenResultTest {
 
             assertThat(result.isSuccess()).isTrue();
             assertThat(result.getAccessMode()).isEqualTo(AccessMode.EDIT);
-            assertThat(result.getMessage()).isNull();
+            assertThat(render(result)).isNull();
             assertThat(result.getExistingLock()).isNull();
         }
 
@@ -323,7 +395,7 @@ class BagOpenResultTest {
 
             assertThat(result.isSuccess()).isFalse();
             assertThat(result.getAccessMode()).isNull();
-            assertThat(result.getMessage()).isNotNull();
+            assertThat(render(result)).isNotNull();
             assertThat(result.getExistingLock()).isSameAs(lock);
         }
     }
@@ -562,8 +634,7 @@ class BagOpenResultTest {
         @DisplayName("Should handle null accessMode in both objects")
         void handlesNullAccessModeInBoth() throws Exception {
             // Use reflection to create two results with all null nullable fields
-            Constructor<BagOpenResult> ctor = BagOpenResult.class.getDeclaredConstructor(
-                    boolean.class, AccessMode.class, String.class, BagLockInfo.class);
+            Constructor<BagOpenResult> ctor = fourArgConstructor();
             ctor.setAccessible(true);
 
             BagOpenResult a = ctor.newInstance(false, null, null, null);
@@ -576,8 +647,7 @@ class BagOpenResultTest {
         @Test
         @DisplayName("Should not equal when one has null accessMode and other does not")
         void notEqualNullVsNonNullAccessMode() throws Exception {
-            Constructor<BagOpenResult> ctor = BagOpenResult.class.getDeclaredConstructor(
-                    boolean.class, AccessMode.class, String.class, BagLockInfo.class);
+            Constructor<BagOpenResult> ctor = fourArgConstructor();
             ctor.setAccessible(true);
 
             BagOpenResult a = ctor.newInstance(true, null, null, null);
@@ -589,12 +659,11 @@ class BagOpenResultTest {
         @Test
         @DisplayName("Should not equal when one has null message and other does not")
         void notEqualNullVsNonNullMessageReflection() throws Exception {
-            Constructor<BagOpenResult> ctor = BagOpenResult.class.getDeclaredConstructor(
-                    boolean.class, AccessMode.class, String.class, BagLockInfo.class);
+            Constructor<BagOpenResult> ctor = fourArgConstructor();
             ctor.setAccessible(true);
 
             BagOpenResult a = ctor.newInstance(true, AccessMode.EDIT, null, null);
-            BagOpenResult b = ctor.newInstance(true, AccessMode.EDIT, "message", null);
+            BagOpenResult b = ctor.newInstance(true, AccessMode.EDIT, aNotice(ctor), null);
 
             assertThat(a).isNotEqualTo(b);
         }
@@ -602,8 +671,7 @@ class BagOpenResultTest {
         @Test
         @DisplayName("Should not equal when one has null lock and other does not")
         void notEqualNullVsNonNullLockReflection() throws Exception {
-            Constructor<BagOpenResult> ctor = BagOpenResult.class.getDeclaredConstructor(
-                    boolean.class, AccessMode.class, String.class, BagLockInfo.class);
+            Constructor<BagOpenResult> ctor = fourArgConstructor();
             ctor.setAccessible(true);
 
             BagLockInfo lock = BagLockInfo.builder()

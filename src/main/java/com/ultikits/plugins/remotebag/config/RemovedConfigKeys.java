@@ -1,5 +1,6 @@
 package com.ultikits.plugins.remotebag.config;
 
+import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
 
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -28,63 +29,59 @@ import org.bukkit.configuration.file.YamlConfiguration;
  */
 public final class RemovedConfigKeys {
 
-    /** The module name each warning names, matching this module's own runtime name. */
-    private static final String MODULE = "UltiRemoteBag";
-
     /**
-     * One entry per removed key: the key path as it appears in the file, then where its job went.
-     * The second element completes the sentence "... and can be deleted from the file — %s."
+     * The removed keys, as each path appears in the file, in the order their warnings are logged.
+     * What became of each one is the language file's text, chosen in {@link #reasonFor}.
      */
-    private static final String[][] REMOVED = {
-            {"auto_save_interval",
-                    "the periodic auto-save it named was removed because it had nothing to do; "
-                            + "every write to a bag page is already persisted in the same action "
-                            + "(UltiKits/UltiRemoteBag#13, UltiKits/UltiRemoteBag#23)"},
-            {"gui_title",
-                    "a bag page's title comes from this module's language files, key 'bag_name' in "
-                            + "lang/en.yml and lang/zh.yml (UltiKits/UltiRemoteBag#14)"},
-            {"messages.no_permission",
-                    "a permission refusal comes from UltiTools' own translated message, so it "
-                            + "already follows the server's 'language' setting "
-                            + "(UltiKits/UltiRemoteBag#15)"},
-            {"messages.page_locked",
-                    "asking for a page you may not open answers with this module's language files, "
-                            + "key 'page_out_of_range', which is already translated. If what you "
-                            + "were trying to change is the line shown when somebody ELSE is "
-                            + "holding the page, that one is still a hardcoded Chinese literal in "
-                            + "the code and follows no language setting; it is not this key and is "
-                            + "tracked separately as UltiKits/UltiRemoteBag#20 "
-                            + "(UltiKits/UltiRemoteBag#16)"},
-            {"rows_per_page",
-                    "a bag page holds a fixed 45 slots; the setting was removed rather than "
-                            + "documented because it did not decide that in either direction -- it "
-                            + "was the denominator of the main menu's 'Slots Used' line, which at "
-                            + "its own default read 45/54 for a full page, and "
-                            + "UltiKits/UltiRemoteBag#38 records making capacity genuinely "
-                            + "configurable (UltiKits/UltiRemoteBag#24)"},
-            {"save_on_close",
-                    "closing a bag page in edit mode always saves it, which is what this module has "
-                            + "always done; the switch was removed rather than wired because turning "
-                            + "it off destroyed items the player had dragged into the window, and "
-                            + "UltiKits/UltiRemoteBag#37 records what an implementation would have to "
-                            + "do instead (UltiKits/UltiRemoteBag#18)"},
-            {"messages.bag_saved",
-                    "the '/bag save' confirmation comes from this module's language files, key "
-                            + "'bag_saved_manually' (UltiKits/UltiRemoteBag#17)"},
+    private static final String[] REMOVED = {
+            "auto_save_interval",
+            "gui_title",
+            "messages.no_permission",
+            "messages.page_locked",
+            "rows_per_page",
+            "save_on_close",
+            "messages.bag_saved",
     };
 
     private RemovedConfigKeys() {
     }
 
     /**
-     * Logs one warning per removed key that is still present in the operator's file.
+     * Where one removed key's job went, from the language file. Each removed key names its own entry,
+     * so a key added to {@link #REMOVED} without a case fails loudly instead of being given another
+     * key's explanation.
+     */
+    private static String reasonFor(String removedKey, UltiToolsPlugin plugin) {
+        switch (removedKey) {
+            case "auto_save_interval":
+                return plugin.i18n("removed_key_reason_auto_save_interval");
+            case "gui_title":
+                return plugin.i18n("removed_key_reason_gui_title");
+            case "messages.no_permission":
+                return plugin.i18n("removed_key_reason_no_permission");
+            case "messages.page_locked":
+                return plugin.i18n("removed_key_reason_page_locked");
+            case "rows_per_page":
+                return plugin.i18n("removed_key_reason_rows_per_page");
+            case "save_on_close":
+                return plugin.i18n("removed_key_reason_save_on_close");
+            case "messages.bag_saved":
+                return plugin.i18n("removed_key_reason_bag_saved");
+            default:
+                throw new IllegalStateException("No guidance for removed key " + removedKey);
+        }
+    }
+
+    /**
+     * Logs one warning per removed key that is still present in the operator's file, in the server's
+     * language.
      *
      * <p>Reads {@code config.getConfig()}, which is the parsed file as it is on disk — including
      * keys this entity no longer declares, which is exactly what a residual key is. A fresh install
      * has none of them, so a clean server logs nothing.
      *
      * @param config the module's configuration entity, after the framework has loaded it; may be
-     *               null, or hold no parsed file yet, in which case nothing is reported
+     *               null, or hold no parsed file or plugin yet, in which case nothing is reported
      * @param logger the module's logger; may be null, in which case nothing is reported
      */
     public static void warnIfStillPresent(RemoteBagConfig config, PluginLogger logger) {
@@ -95,13 +92,19 @@ public final class RemovedConfigKeys {
         if (onDisk == null) {
             return;
         }
+        // The plugin the framework bound the configuration to when it loaded the file; it is set
+        // before the file is read, so a parsed file without it is not one the framework loaded.
+        UltiToolsPlugin plugin = config.getUltiToolsPlugin();
+        if (plugin == null) {
+            return;
+        }
         String file = config.getConfigFilePath();
-        for (String[] removed : REMOVED) {
-            if (onDisk.contains(removed[0])) {
-                logger.warn(String.format(
-                        "%s: '%s' in %s no longer has any effect and can be deleted from the file"
-                                + " -- %s.",
-                        MODULE, removed[0], file, removed[1]));
+        for (String removed : REMOVED) {
+            if (onDisk.contains(removed)) {
+                logger.warn(plugin.i18n("removed_key_warning")
+                        .replace("{FILE}", String.valueOf(file))
+                        .replace("{REASON}", reasonFor(removed, plugin))
+                        .replace("{KEY}", removed));
             }
         }
     }

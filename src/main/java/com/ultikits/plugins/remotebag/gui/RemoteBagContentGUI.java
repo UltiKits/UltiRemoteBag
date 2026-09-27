@@ -569,12 +569,12 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             if (accessMode == AccessMode.READ_ONLY) {
                 // In read-only the whole window is guarded, toolbar included, and "read-only" is the
                 // reason for all of it.
-                announceDragRefusal("msg_readonly_no_move");
+                announceDragRefusal(plugin.i18n("msg_readonly_no_move"));
                 return CANCEL;
             }
 
             if (rawSlot >= CONTENT_SIZE) {
-                announceDragRefusal("msg_cannot_drag_toolbar");
+                announceDragRefusal(plugin.i18n("msg_cannot_drag_toolbar"));
                 return CANCEL;
             }
         }
@@ -587,11 +587,12 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     /**
      * Tells the viewer why a drag was refused, and plays the error sound.
      *
-     * @param messageKey the i18n key naming the reason
+     * @param reason the reason, already resolved from the language file by the caller, so every
+     *               key this class displays is a literal at its call site
      */
-    private void announceDragRefusal(String messageKey) {
+    private void announceDragRefusal(String reason) {
         SoundUtil.playErrorSound(player, config);
-        player.sendMessage(ChatColor.RED + plugin.i18n(messageKey));
+        player.sendMessage(ChatColor.RED + reason);
     }
 
     /**

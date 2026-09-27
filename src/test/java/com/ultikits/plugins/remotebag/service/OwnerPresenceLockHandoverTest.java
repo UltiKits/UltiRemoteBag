@@ -42,7 +42,7 @@ import static org.mockito.Mockito.mock;
 /**
  * A bag lock is not reclaimed by its timeout while its holder still has the page open, and the items
  * of both parties survive the scenario in which it used to be
- * (pull request UltiKits/UltiRemoteBag#34, gate-1 review BL-01).
+ * (found reviewing pull request UltiKits/UltiRemoteBag#34).
  *
  * <h2>The defect these cases pin down</h2>
  * {@code lock.timeout_seconds} used to expire a lock purely on wall-clock age, and nothing closed or
@@ -75,7 +75,7 @@ import static org.mockito.Mockito.mock;
  * persist the administrator's item, so a "nothing moved" assertion above cannot pass because the
  * harness never moves anything.
  */
-@DisplayName("A lock is not reclaimed while its page is open (UltiRemoteBag#34 review BL-01)")
+@DisplayName("A lock is not reclaimed while its page is open (UltiRemoteBag#34)")
 class OwnerPresenceLockHandoverTest {
 
     private static final int PAGE = 1;

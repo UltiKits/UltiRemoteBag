@@ -18,7 +18,9 @@ import org.mockito.ArgumentCaptor;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -54,6 +56,7 @@ class RemoteBagDeserializationTest {
     private RemoteBagConfig config;
     private InMemoryRemoteBagStore store;
     private PluginLogger pluginLogger;
+    private UltiToolsPlugin mockPlugin;
     private UUID playerUuid;
 
     @BeforeEach
@@ -67,6 +70,9 @@ class RemoteBagDeserializationTest {
         UltiToolsPlugin mockPlugin = mock(UltiToolsPlugin.class);
         pluginLogger = mock(PluginLogger.class);
         lenient().when(mockPlugin.getLogger()).thenReturn(pluginLogger);
+        // The console lines come from the language file; the assertions quote its English text.
+        lenient().when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("en"));
+        this.mockPlugin = mockPlugin;
 
         service = new RemoteBagService(mockPlugin, config);
         UltiRemoteBagTestHelper.setField(service, "dataOperator", store);
@@ -123,7 +129,7 @@ class RemoteBagDeserializationTest {
         // Both warnings used an inline java.util.logging.Logger while this class holds a plugin whose
         // getLogger() is the framework PluginLogger used everywhere else in the module, so the lines
         // appeared without the [UltiTools] [UltiRemoteBag] prefix that
-        // ultiremotebag.bag.persistence.small-rows-per-page's verdict looks for (gate-1 review, IN-13).
+        // ultiremotebag.bag.persistence.small-rows-per-page's verdict looks for.
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("items.0", new ItemStack(Material.DIAMOND));
         yaml.set("items.not-a-slot", "garbage");
@@ -138,6 +144,62 @@ class RemoteBagDeserializationTest {
                 .anySatisfy(line -> assertThat(line)
                         .contains("Skipping unreadable slot in bag page 1")
                         .contains("not-a-slot"));
+    }
+
+    @Test
+    @DisplayName("Under language: zh the skipped-slot line is the Chinese catalogue text")
+    void aSkippedSlotWarningFollowsTheLanguageSetting() {
+        when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items.0", new ItemStack(Material.DIAMOND));
+        yaml.set("items.not-a-slot", "garbage");
+        store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
+        String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot").replace("{PAGE}", String.valueOf(PAGE))
+                .replace("{REASON}", com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot_not_a_number"))
+                .replace("{KEY}", "not-a-slot");
+
+        service.loadBagIfNeeded(playerUuid);
+
+        ArgumentCaptor<String> warned = ArgumentCaptor.forClass(String.class);
+        verify(pluginLogger, atLeastOnce()).warn(warned.capture());
+        assertThat(warned.getAllValues()).contains(expected);
+    }
+
+    @Test
+    @DisplayName("Under language: zh every skipped-slot reason, and an unreadable page, is the Chinese catalogue text")
+    void everyRoutedDeserializationLineIsTheCatalogueText() {
+        when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("items.0", new ItemStack(Material.DIAMOND));
+        yaml.set("items.-1", "garbage");
+        yaml.set("items.07", "garbage");
+        yaml.set("items.99999", "garbage");
+        store.seed(playerUuid.toString(), PAGE, yaml.saveToString());
+        String line = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot").replace("{PAGE}", String.valueOf(PAGE));
+        String negative = line.replace("{REASON}", com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot_negative")).replace("{KEY}", "-1");
+        String padded = line.replace("{REASON}", com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot_not_canonical")).replace("{KEY}", "07");
+        String beyond = line.replace("{REASON}", com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_skipped_slot_beyond_max")
+                .replace("{MAX}", String.valueOf(com.ultikits.plugins.remotebag.config.RemoteBagConfig.MAX_ADDRESSABLE_SLOTS)))
+                .replace("{KEY}", "99999");
+
+        service.loadBagIfNeeded(playerUuid);
+
+        ArgumentCaptor<String> warned = ArgumentCaptor.forClass(String.class);
+        verify(pluginLogger, atLeastOnce()).warn(warned.capture());
+        assertThat(warned.getAllValues()).contains(negative, padded, beyond);
+        assertThat(String.join("\n", warned.getAllValues())).doesNotContain("{MAX}");
+    }
+
+    @Test
+    @DisplayName("Under language: zh a page whose stored data cannot be read is reported with the Chinese catalogue text")
+    void anUnreadablePageIsReportedInTheServerLanguage() {
+        when(mockPlugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
+        store.seed(playerUuid.toString(), PAGE, "items: [unclosed\n  0: {");
+        String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_bag_deserialize_failed");
+
+        service.loadBagIfNeeded(playerUuid);
+
+        verify(pluginLogger).warn(org.mockito.ArgumentMatchers.any(Throwable.class), org.mockito.ArgumentMatchers.eq(expected));
     }
 
     @Test
@@ -249,7 +311,7 @@ class RemoteBagDeserializationTest {
     void aNonCanonicalKeyDoesNotCollideWithItsPlainForm() {
         // Integer.parseInt("+5") is 5, so items.'+5' and items.'5' used to land on one map entry: the
         // second put won and the first item disappeared with no warning, the only path in the
-        // deserializer that discarded an entry silently (pull request #34 gate-1 review, IN-10).
+        // deserializer that discarded an entry silently.
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.set("items.5", new ItemStack(Material.DIAMOND));
         yaml.set("items.+5", new ItemStack(Material.EMERALD));
