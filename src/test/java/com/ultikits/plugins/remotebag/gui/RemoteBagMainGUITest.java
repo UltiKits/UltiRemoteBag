@@ -11,7 +11,11 @@ import com.ultikits.ultitools.utils.EconomyUtils;
 import com.ultikits.ultitools.utils.XVersionUtils;
 import mc.obliviate.inventory.Icon;
 
+import com.cryptomorin.xseries.XSound;
+import org.bukkit.Location;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.junit.jupiter.api.*;
@@ -378,6 +382,73 @@ class RemoteBagMainGUITest {
                 assertThat(icons).hasSize(1);
                 verify(bagService).getItemCount(playerUuid, 1);
             }
+        }
+    }
+
+    // ==================== open sound (UltiKits/UltiRemoteBag#29) ====================
+
+    /**
+     * UltiKits/UltiRemoteBag#29: the shared test machine has no audio device, so the checklist's
+     * "the configured open sound plays" cannot be observed there. Opening the window (through
+     * {@code afterSetup}, the hook the framework's {@code onOpen} runs last) must play exactly the
+     * configured, non-default sound.
+     */
+    @Nested
+    @DisplayName("Open sound (UltiKits/UltiRemoteBag#29)")
+    class OpenSound {
+
+        @Test
+        @DisplayName("Opening the window plays the configured open sound")
+        void opensWithConfiguredSound() {
+            configureNonDefaultOpenSound(true);
+            RemoteBagMainGUI gui = newWindowWithOnePage();
+
+            openThroughAfterSetup(gui);
+
+            verify(player).playSound(any(Location.class), eq(XSound.BLOCK_BARREL_OPEN.get()), eq(0.5f), eq(1.5f));
+        }
+
+        @Test
+        @DisplayName("With sound.enabled: false, opening the window plays no sound")
+        void opensSilentlyWhenSoundDisabled() {
+            configureNonDefaultOpenSound(false);
+            RemoteBagMainGUI gui = newWindowWithOnePage();
+
+            openThroughAfterSetup(gui);
+
+            verify(player, never()).playSound(any(Location.class), any(Sound.class), anyFloat(), anyFloat());
+        }
+
+        private RemoteBagMainGUI newWindowWithOnePage() {
+            lenient().when(bagService.getPlayerBagPages(playerUuid)).thenReturn(Collections.singletonList(1));
+            lenient().when(bagService.getPlayerMaxPages(player)).thenReturn(1);
+            return new RemoteBagMainGUI(player, mockPlugin, bagService, lockService, config);
+        }
+
+        /**
+         * Runs the page's {@code afterSetup}, the hook the framework's final
+         * {@code BaseInventoryPage#onOpen} calls after {@code setupBottomToolbar} and
+         * {@code setupContent} (measured on the shaded framework jar: {@code onOpen} invokes the
+         * three at offsets 8, 13 and 18). Those two need the inventory a real {@code open()} creates,
+         * which this test's mocked player cannot provide, so the open is driven from the hook that
+         * plays the sound.
+         */
+        private void openThroughAfterSetup(RemoteBagMainGUI gui) {
+            try {
+                java.lang.reflect.Method afterSetup = RemoteBagMainGUI.class.getDeclaredMethod(
+                        "afterSetup", InventoryOpenEvent.class);
+                afterSetup.setAccessible(true); // NOPMD - the framework calls this protected hook
+                afterSetup.invoke(gui, mock(InventoryOpenEvent.class));
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError(e);
+            }
+        }
+
+        private void configureNonDefaultOpenSound(boolean enabled) {
+            when(config.isSoundEnabled()).thenReturn(enabled);
+            lenient().when(config.getOpenSound()).thenReturn("BLOCK_BARREL_OPEN");
+            lenient().when(config.getSoundVolume()).thenReturn(0.5);
+            lenient().when(config.getSoundPitch()).thenReturn(1.5);
         }
     }
 
