@@ -317,17 +317,21 @@ public class RemoteBagService {
     // ==================== GUI 支持方法 ====================
     
     /**
-     * 获取玩家拥有的所有背包页码列表
+     * The player's stored bag pages, sorted; empty when nothing is stored.
+     * <p>
+     * It used to answer page 1 when nothing was stored, so an administrator's {@code /bag list} and
+     * {@code /bag see} could never report that a player has no bags, even after deleting every page
+     * (UltiKits/UltiRemoteBag#26). The owner's own views still offer page 1 through
+     * {@link #pagesOfferedToOwner}.
      *
      * @param playerUuid 玩家 UUID
-     * @return 背包页码列表（已排序）
+     * @return 已存储的背包页码列表（已排序，可能为空）
      */
     public List<Integer> getPlayerBagPages(UUID playerUuid) {
         loadBagIfNeeded(playerUuid);
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
         if (pages == null || pages.isEmpty()) {
-            // 如果没有任何背包，返回默认的第一页
-            return Collections.singletonList(1);
+            return Collections.emptyList();
         }
         return pages.keySet().stream()
                 .sorted()
@@ -487,10 +491,9 @@ public class RemoteBagService {
     public int createBagPage(UUID playerUuid) {
         loadBagIfNeeded(playerUuid);
         
+        // One past the highest STORED page; page 1 when nothing is stored (UltiKits/UltiRemoteBag#26).
         List<Integer> existingPages = getPlayerBagPages(playerUuid);
-        int nextPage = existingPages.isEmpty() || (existingPages.size() == 1 && existingPages.get(0) == 1) 
-                ? (existingPages.isEmpty() ? 1 : Collections.max(existingPages) + 1)
-                : Collections.max(existingPages) + 1;
+        int nextPage = existingPages.isEmpty() ? 1 : Collections.max(existingPages) + 1;
         
         // 创建空的背包页
         ItemStack[] emptyContents = new ItemStack[PAGE_CAPACITY];

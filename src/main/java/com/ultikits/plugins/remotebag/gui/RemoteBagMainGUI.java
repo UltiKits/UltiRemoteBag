@@ -68,7 +68,8 @@ public class RemoteBagMainGUI extends BasePaginationPage {
         this.bagService = bagService;
         this.lockService = lockService;
         this.config = config;
-        this.bagPages = bagService.getPlayerBagPages(player.getUniqueId());
+        // The owner is offered page 1 even before anything is stored (UltiKits/UltiRemoteBag#26).
+        this.bagPages = RemoteBagService.pagesOfferedToOwner(bagService.getPlayerBagPages(player.getUniqueId()));
     }
     
     /**

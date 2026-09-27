@@ -79,7 +79,8 @@ public class BagCommand extends BaseCommandExecutor {
         
         // 检查背包是否存在
         bagService.loadBagIfNeeded(player.getUniqueId());
-        List<Integer> existingPages = bagService.getPlayerBagPages(player.getUniqueId());
+        // The owner is offered page 1 even before anything is stored (UltiKits/UltiRemoteBag#26).
+        List<Integer> existingPages = RemoteBagService.pagesOfferedToOwner(bagService.getPlayerBagPages(player.getUniqueId()));
         
         if (!existingPages.contains(page)) {
             player.sendMessage(ChatColor.RED + i18n("bag_not_exist").replace("{0}", String.valueOf(page)));
