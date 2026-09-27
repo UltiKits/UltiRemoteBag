@@ -18,12 +18,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - The administrator commands `/bag see`, `/bag create`, `/bag delete`, `/bag clear` and `/bag list`
   now accept a player who is online in their very first session: the target is found by exact name
-  among online players first, then in the server's own name cache. Before, all of them answered
+  among online players first, then in the server's own name cache, and a name that cache has since
+  forgotten is still found when this module holds bag pages for that player. Before, all of them answered
   `Player not found` for such a player, because they relied on Bukkit's "played before" record, which is
   not written until the first session ends. A name the server has never seen is still not found, and a
   partial name never matches (UltiKits/UltiRemoteBag#30).
 - 管理员命令 `/bag see`、`/bag create`、`/bag delete`、`/bag clear`、`/bag list` 现在接受首次进服、仍在线的玩家：先按完整名字在在线玩家中查找，
-  再查服务器自己的名字缓存。此前这些命令都依赖 Bukkit 的「曾经进服」记录（首次会话结束前不会写入），对这样的玩家一律回复「找不到玩家」。
+  再查服务器自己的名字缓存；缓存已遗忘的名字，只要本模块存有该玩家的背包页，仍可找到。此前这些命令都依赖 Bukkit 的「曾经进服」记录（首次会话结束前不会写入），对这样的玩家一律回复「找不到玩家」。
   服务器从未见过的名字仍然找不到，部分名字不会匹配（UltiKits/UltiRemoteBag#30）。
 
 - `/bag list <player>` and `/bag see <player>` now report a player with no stored bag page as having
