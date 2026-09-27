@@ -39,6 +39,7 @@ class BagCommandTest {
     private UUID playerUuid;
     private Server mockServer;
     private OfflinePlayer offlinePlayer;
+    private ServerMock realServer;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -61,6 +62,10 @@ class BagCommandTest {
         lenient().when(offlinePlayer.hasPlayedBefore()).thenReturn(true);
         lenient().when(offlinePlayer.getUniqueId()).thenReturn(UUID.randomUUID());
         lenient().doReturn(offlinePlayer).when(mockServer).getOfflinePlayer(anyString());
+        // The server's own name cache, which admin commands use for a target who is not online
+        // (UltiKits/UltiRemoteBag#30).
+        lenient().doReturn(offlinePlayer).when(mockServer).getOfflinePlayerIfCached(anyString());
+        this.realServer = realServer;
 
         bagService = mock(RemoteBagService.class);
         lockService = mock(BagLockService.class);
@@ -351,6 +356,7 @@ class BagCommandTest {
         @DisplayName("Should send error when player not found")
         void errorWhenPlayerNotFound() {
             when(offlinePlayer.hasPlayedBefore()).thenReturn(false);
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("UnknownPlayer");
 
             command.seePlayerBag(player, "UnknownPlayer");
 
@@ -415,6 +421,7 @@ class BagCommandTest {
         @DisplayName("Should send error when player not found")
         void errorWhenPlayerNotFound() {
             when(offlinePlayer.hasPlayedBefore()).thenReturn(false);
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("UnknownPlayer");
 
             command.seePlayerBagPage(player, "UnknownPlayer", 1);
 
@@ -537,6 +544,7 @@ class BagCommandTest {
         @DisplayName("createBag should send error when player not found")
         void createBagErrorWhenPlayerNotFound() {
             when(offlinePlayer.hasPlayedBefore()).thenReturn(false);
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("UnknownPlayer");
 
             command.createBag(player, "UnknownPlayer");
 
@@ -593,6 +601,7 @@ class BagCommandTest {
         @DisplayName("deleteBag should send error when player not found")
         void deleteBagErrorWhenPlayerNotFound() {
             when(offlinePlayer.hasPlayedBefore()).thenReturn(false);
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("UnknownPlayer");
 
             command.deleteBag(player, "UnknownPlayer", 1);
 
@@ -638,6 +647,7 @@ class BagCommandTest {
         @DisplayName("clearBag should send error when player not found")
         void clearBagErrorWhenPlayerNotFound() {
             when(offlinePlayer.hasPlayedBefore()).thenReturn(false);
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("UnknownPlayer");
 
             command.clearBag(player, "UnknownPlayer", 1);
 
@@ -674,6 +684,7 @@ class BagCommandTest {
         @DisplayName("listBags should send error when player not found")
         void listBagsErrorWhenPlayerNotFound() {
             when(offlinePlayer.hasPlayedBefore()).thenReturn(false);
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("UnknownPlayer");
 
             command.listBags(player, "UnknownPlayer");
 
@@ -736,6 +747,146 @@ class BagCommandTest {
             verify(bagService).getItemCount(targetUuid, 2);
             verify(bagService).getStackCount(targetUuid, 1);
             verify(bagService).getStackCount(targetUuid, 2);
+        }
+    }
+
+    // ==================== admin target resolution (UltiKits/UltiRemoteBag#30) ====================
+
+    /**
+     * UltiKits/UltiRemoteBag#30: every administrator command resolves its target the same way --
+     * an online player by exact name first, otherwise the server's own name cache -- and never by
+     * {@code OfflinePlayer#hasPlayedBefore()}, which is false for a player in their first session.
+     */
+    @Nested
+    @DisplayName("Admin target resolution (UltiKits/UltiRemoteBag#30)")
+    class AdminTargetResolution {
+
+        private UUID newbieUuid;
+
+        @BeforeEach
+        void aFirstTimePlayerIsOnline() {
+            newbieUuid = realServer.addPlayer("Newbie").getUniqueId();
+            // Bukkit's own "played before" signal is false in a first session.
+            lenient().when(offlinePlayer.hasPlayedBefore()).thenReturn(false);
+        }
+
+        @Test
+        @DisplayName("/bag list resolves an online first-time player")
+        void listResolvesAnOnlineFirstTimePlayer() {
+            when(bagService.getPlayerBagPages(newbieUuid)).thenReturn(Collections.singletonList(1));
+
+            command.listBags(player, "Newbie");
+
+            verify(player, never()).sendMessage(contains("player_not_found"));
+            verify(bagService).loadBagIfNeeded(newbieUuid);
+        }
+
+        @Test
+        @DisplayName("/bag see resolves an online first-time player")
+        void seeResolvesAnOnlineFirstTimePlayer() {
+            when(bagService.getPlayerBagPages(newbieUuid)).thenReturn(Collections.singletonList(1));
+            when(lockService.adminOpen(eq(newbieUuid), eq(1), eq(player))).thenReturn(BagOpenResult.editMode());
+
+            try {
+                command.seePlayerBag(player, "Newbie");
+            } catch (Exception e) {
+                // Expected: GUI not initialized
+            }
+
+            verify(player, never()).sendMessage(contains("player_not_found"));
+            verify(lockService).adminOpen(eq(newbieUuid), eq(1), eq(player));
+        }
+
+        @Test
+        @DisplayName("/bag see <page> resolves an online first-time player")
+        void seePageResolvesAnOnlineFirstTimePlayer() {
+            when(bagService.getPlayerBagPages(newbieUuid)).thenReturn(Collections.singletonList(1));
+            when(lockService.adminOpen(eq(newbieUuid), eq(1), eq(player))).thenReturn(BagOpenResult.editMode());
+
+            try {
+                command.seePlayerBagPage(player, "Newbie", 1);
+            } catch (Exception e) {
+                // Expected: GUI not initialized
+            }
+
+            verify(player, never()).sendMessage(contains("player_not_found"));
+            verify(lockService).adminOpen(eq(newbieUuid), eq(1), eq(player));
+        }
+
+        @Test
+        @DisplayName("/bag create resolves an online first-time player")
+        void createResolvesAnOnlineFirstTimePlayer() {
+            when(bagService.createBagPage(newbieUuid)).thenReturn(1);
+
+            command.createBag(player, "Newbie");
+
+            verify(bagService).createBagPage(newbieUuid);
+            verify(player).sendMessage(contains("admin_bag_created"));
+        }
+
+        @Test
+        @DisplayName("/bag delete resolves an online first-time player")
+        void deleteResolvesAnOnlineFirstTimePlayer() {
+            when(lockService.canUpgradeToEdit(newbieUuid, 1)).thenReturn(true);
+            when(bagService.deleteBagPage(newbieUuid, 1)).thenReturn(true);
+
+            command.deleteBag(player, "Newbie", 1);
+
+            verify(bagService).deleteBagPage(newbieUuid, 1);
+        }
+
+        @Test
+        @DisplayName("/bag clear resolves an online first-time player")
+        void clearResolvesAnOnlineFirstTimePlayer() {
+            when(lockService.canUpgradeToEdit(newbieUuid, 1)).thenReturn(true);
+            when(bagService.clearBagPage(newbieUuid, 1)).thenReturn(true);
+
+            command.clearBag(player, "Newbie", 1);
+
+            verify(bagService).clearBagPage(newbieUuid, 1);
+        }
+
+        @Test
+        @DisplayName("An offline player with bag data resolves through the server's name cache")
+        void anOfflinePlayerWithDataResolves() {
+            UUID offlineUuid = UUID.randomUUID();
+            OfflinePlayer away = mock(OfflinePlayer.class);
+            when(away.getUniqueId()).thenReturn(offlineUuid);
+            lenient().when(away.hasPlayedBefore()).thenReturn(false);
+            doReturn(away).when(mockServer).getOfflinePlayerIfCached("Away");
+            lenient().doReturn(away).when(mockServer).getOfflinePlayer("Away");
+            when(bagService.getPlayerBagPages(offlineUuid)).thenReturn(Collections.singletonList(1));
+
+            command.listBags(player, "Away");
+
+            verify(player, never()).sendMessage(contains("player_not_found"));
+            verify(bagService).loadBagIfNeeded(offlineUuid);
+        }
+
+        @Test
+        @DisplayName("A partial name never resolves to an online player")
+        void aPartialNameDoesNotResolve() {
+            UUID onlineUuid = realServer.addPlayer("TargetPlayer").getUniqueId();
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("Target");
+            lenient().when(offlinePlayer.hasPlayedBefore()).thenReturn(true);
+
+            command.listBags(player, "Target");
+
+            verify(player).sendMessage(contains("player_not_found"));
+            verify(bagService, never()).loadBagIfNeeded(onlineUuid);
+            verify(bagService, never()).getPlayerBagPages(any());
+        }
+
+        @Test
+        @DisplayName("A name the server does not know is not found")
+        void anUnknownNameIsNotFound() {
+            doReturn(null).when(mockServer).getOfflinePlayerIfCached("Ghost");
+            lenient().when(offlinePlayer.hasPlayedBefore()).thenReturn(true);
+
+            command.createBag(player, "Ghost");
+
+            verify(player).sendMessage(contains("player_not_found"));
+            verify(bagService, never()).createBagPage(any());
         }
     }
 
