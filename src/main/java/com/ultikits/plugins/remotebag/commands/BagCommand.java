@@ -194,15 +194,12 @@ public class BagCommand extends BaseCommandExecutor {
      * Resolves an administrator command's target by name, or tells the sender it was not found and
      * returns {@code null}.
      * <p>
-     * In order: an online player matched by exact name ({@code Bukkit#getPlayerExact}, never a partial
-     * name); a name the server's own name cache knows ({@code Bukkit#getOfflinePlayerIfCached}, no web
-     * request); and, for a name the cache has forgotten -- it drops names of players away for long
-     * enough -- the player that name maps to, accepted only if this module holds bag data for them.
-     * The target used to be gated on {@code OfflinePlayer#hasPlayedBefore()}, which is false
-     * throughout a player's first session even when this module already holds their bag data, so
-     * every administrator command refused a genuinely online first-time player
-     * (UltiKits/UltiRemoteBag#30). Whether the target has any bag page is otherwise each command's
-     * own question.
+     * An online player is matched by exact name ({@code Bukkit#getPlayerExact}, never a partial
+     * name); anyone else is found by Bukkit's own record that the name has joined this server
+     * before. The online match comes first because that record is not written until a player's
+     * first session ends, so every administrator command used to refuse a genuinely online
+     * first-time player (UltiKits/UltiRemoteBag#30). Whether the target has any bag page is each
+     * command's own question.
      *
      * @param admin      the sender, told when the name is not found
      * @param playerName the name as typed
@@ -213,31 +210,12 @@ public class BagCommand extends BaseCommandExecutor {
         if (online != null) {
             return online.getUniqueId();
         }
-        OfflinePlayer known = cachedOfflinePlayer(playerName);
-        if (known != null) {
-            return known.getUniqueId();
-        }
-        OfflinePlayer named = Bukkit.getOfflinePlayer(playerName);
-        if (named != null && holdsBagData(named.getUniqueId())) {
-            return named.getUniqueId();
+        OfflinePlayer target = Bukkit.getOfflinePlayer(playerName);
+        if (target != null && target.hasPlayedBefore()) {
+            return target.getUniqueId();
         }
         admin.sendMessage(ChatColor.RED + i18n("player_not_found").replace("{0}", playerName));
         return null;
-    }
-
-    /** The server's cached entry for {@code name}, or {@code null}; a server without the lookup answers {@code null}. */
-    private static OfflinePlayer cachedOfflinePlayer(String name) {
-        try {
-            return Bukkit.getOfflinePlayerIfCached(name);
-        } catch (NoSuchMethodError e) {
-            return null;
-        }
-    }
-
-    /** Whether this module stores any bag page for {@code playerUuid}. */
-    private boolean holdsBagData(UUID playerUuid) {
-        bagService.loadBagIfNeeded(playerUuid);
-        return !bagService.getPlayerBagPages(playerUuid).isEmpty();
     }
 
     /**
