@@ -20,6 +20,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -68,7 +69,8 @@ public class RemoteBagMainGUI extends BasePaginationPage {
         this.bagService = bagService;
         this.lockService = lockService;
         this.config = config;
-        this.bagPages = bagService.getPlayerBagPages(player.getUniqueId());
+        // The owner is offered page 1 even before anything is stored (UltiKits/UltiRemoteBag#26).
+        this.bagPages = RemoteBagService.pagesOfferedToOwner(bagService.getPlayerBagPages(player.getUniqueId()));
     }
     
     /**
@@ -98,10 +100,17 @@ public class RemoteBagMainGUI extends BasePaginationPage {
             icons.add(createBagIcon(pageNum));
         }
         
-        // 添加购买按钮（如果未达上限且启用经济系统）
+        // Below the page limit, offer the next page: bought when the economy is on and a provider is
+        // present, free otherwise. The free icon is the only way to reach the service's free path;
+        // before it existed, a server with economy off had no way to add a page at all
+        // (UltiKits/UltiRemoteBag#25).
         int maxPages = bagService.getPlayerMaxPages(player);
-        if (bagPages.size() < maxPages && config.isEconomyEnabled() && EconomyUtils.isAvailable()) {
-            icons.add(createPurchaseIcon());
+        if (bagPages.size() < maxPages) {
+            if (pagesArePaid()) {
+                icons.add(createPurchaseIcon());
+            } else {
+                icons.add(createFreeCreateIcon());
+            }
         }
         
         return icons;
@@ -205,6 +214,10 @@ public class RemoteBagMainGUI extends BasePaginationPage {
         final int finalPrice = price;
         Icon icon = new Icon(item);
         icon.onClick(e -> {
+            if (!pagesArePaid()) {
+                refreshAfterPriceChange();
+                return;
+            }
             if (bagService.purchaseBag(player)) {
                 SoundUtil.playPurchaseSound(player, config);
                 player.sendMessage(ChatColor.GREEN + plugin.i18n("purchase_success").replace("{0}", String.valueOf(nextBagNum)));
@@ -219,6 +232,67 @@ public class RemoteBagMainGUI extends BasePaginationPage {
         return icon;
     }
     
+    /** Whether a new page costs money right now: the economy is enabled and a provider is present. */
+    private boolean pagesArePaid() {
+        return config.isEconomyEnabled() && EconomyUtils.isAvailable();
+    }
+
+    /**
+     * Answers a click on a next-page icon drawn under the other pricing mode -- the economy came on or
+     * went off since the window was drawn. The click must not act in a mode the icon did not show (a
+     * "free" icon that charges, or a priced one that does not), so it does nothing, says why and redraws.
+     */
+    private void refreshAfterPriceChange() {
+        SoundUtil.playErrorSound(player, config);
+        player.sendMessage(ChatColor.YELLOW + plugin.i18n("bag_price_changed"));
+        new RemoteBagMainGUI(player, plugin, bagService, lockService, config).open();
+    }
+
+    /**
+     * The icon that adds the next page for free, shown instead of the purchase icon when the economy
+     * is disabled or no economy provider is present (UltiKits/UltiRemoteBag#25).
+     * <p>
+     * Its click acts only while pages are still free: if the economy came on since the window was
+     * drawn (a reload, or a provider registering), the click charges nothing and redraws the window
+     * with the price instead. Otherwise it goes through {@link RemoteBagService#purchaseBag}, which
+     * refuses past the player's page limit.
+     *
+     * @return the free create icon
+     */
+    private Icon createFreeCreateIcon() {
+        // The page the free path creates: one past the highest page offered (RemoteBagService#createNewBagPage).
+        int nextBagNum = Collections.max(bagPages) + 1;
+        ItemStack item = new ItemStack(Material.MINECART);
+        ItemMeta meta = item.getItemMeta();
+
+        if (meta != null) {
+            meta.setDisplayName(ChatColor.GREEN + plugin.i18n("create_button"));
+            List<String> lore = new ArrayList<>();
+            lore.add("");
+            lore.add(ChatColor.GREEN + "▶ " + plugin.i18n("lore_click_create"));
+            meta.setLore(lore);
+            item.setItemMeta(meta);
+        }
+
+        Icon icon = new Icon(item);
+        icon.onClick(e -> {
+            if (pagesArePaid()) {
+                refreshAfterPriceChange();
+                return;
+            }
+            if (bagService.purchaseBag(player)) {
+                SoundUtil.playPurchaseSound(player, config);
+                player.sendMessage(ChatColor.GREEN + plugin.i18n("create_success").replace("{0}", String.valueOf(nextBagNum)));
+                new RemoteBagMainGUI(player, plugin, bagService, lockService, config).open();
+            } else {
+                SoundUtil.playErrorSound(player, config);
+                player.sendMessage(ChatColor.RED + plugin.i18n("create_failed"));
+            }
+        });
+
+        return icon;
+    }
+
     /**
      * 设置导航按钮
      * <p>

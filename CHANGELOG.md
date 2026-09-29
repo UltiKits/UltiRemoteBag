@@ -9,6 +9,50 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- With `economy.enabled: false`, or no economy plugin installed, the bag list window (`/bag`) now shows
+  a green `Create New Bag` icon while the player is under their page limit; clicking it adds the next page
+  for free and answers `Created bag #<n>!`. Before, only the paid purchase icon existed, and it was hidden
+  whenever the economy was off, so such a server had no way to add a bag page (UltiKits/UltiRemoteBag#25).
+  If the economy comes on or goes off while the window is open, a click on either icon does nothing,
+  answers `The price of a new bag has changed. Check the menu again.` and redraws the window, so a free
+  icon never charges and a priced one never acts for free.
+- 当 `economy.enabled: false` 或未安装经济插件时，背包列表窗口（`/bag`）在玩家未达页数上限时会显示绿色的「创建新背包」图标，
+  点击即可免费添加下一页，并提示「已创建背包 #<n>！」。此前只有付费购买图标，且经济关闭时该图标隐藏，这样的服务器无法添加背包页（UltiKits/UltiRemoteBag#25）。
+  窗口打开期间经济开启或关闭时，点击任一图标都不执行，提示「新背包的价格已变化，请重新查看菜单。」并刷新窗口：免费图标不会扣费，付费图标也不会免费生效。
+
+- The administrator commands `/bag see`, `/bag create`, `/bag delete`, `/bag clear` and `/bag list`
+  now accept a player who is online in their very first session: the target is found by exact name
+  among online players first, and anyone else is found, as before, when the name has joined this server
+  before. Before, all of them answered `Player not found` for an online first-time player, because they
+  relied only on Bukkit's "played before" record, which is not written until the first session ends. A
+  name that has never joined is still not found, and a partial name never matches an online player
+  (UltiKits/UltiRemoteBag#30).
+- 管理员命令 `/bag see`、`/bag create`、`/bag delete`、`/bag clear`、`/bag list` 现在接受首次进服、仍在线的玩家：先按完整名字在在线玩家中查找，
+  其他玩家仍按「曾经进服」记录查找，与此前相同。此前这些命令只依赖 Bukkit 的「曾经进服」记录（首次会话结束前不会写入），对这样的玩家一律回复「找不到玩家」。
+  从未进过服的名字仍然找不到，部分名字不会匹配在线玩家（UltiKits/UltiRemoteBag#30）。
+
+- `/bag list <player>` and `/bag see <player>` now report a player with no stored bag page as having
+  none (`No bags` / `Player <player> has no bags`), including after an administrator deletes every
+  page; before, page 1 was always listed. A player's own `/bag` always offers page 1, stored or not, so
+  a player who adds page 2 before ever using page 1 keeps page 1; `/bag create <player>` for a player
+  with no stored page now creates page 1 (UltiKits/UltiRemoteBag#26).
+- `/bag list <玩家>` 和 `/bag see <玩家>` 现在会如实报告没有已存储背包页的玩家（「没有背包」/「玩家 <玩家> 没有背包」），
+  包括管理员删除全部背包页之后；此前总会列出第 1 页。玩家自己的 `/bag` 始终提供第 1 页（无论是否已存储），先添加第 2 页的玩家也不会失去第 1 页；
+  对没有已存储背包页的玩家执行 `/bag create <玩家>` 现在会创建第 1 页（UltiKits/UltiRemoteBag#26）。
+
+- In a read-only bag page, pressing a number key or the off-hand swap key over an empty slot now
+  answers `Read-only mode, cannot move items` and plays the error sound like every other refused move;
+  before, it was refused silently. Nothing could move either way (UltiKits/UltiRemoteBag#35).
+- 只读背包页中，在空格子上按数字键或副手交换键时，现在会像其它被拒绝的移动一样提示「只读模式，无法移动物品」并播放错误音效；
+  此前是静默拒绝。两种情况下物品都不会移动（UltiKits/UltiRemoteBag#35）。
+
+- `lock.timeout_seconds` in `config/remotebag.yml` now follows `/ul reload UltiRemoteBag`: the lock
+  service reads it each time it decides whether a lock can be reclaimed. Before, the value was copied
+  once when the module loaded, so a changed timeout took effect only after a server restart
+  (UltiKits/UltiRemoteBag#39).
+- `config/remotebag.yml` 中的 `lock.timeout_seconds` 现在随 `/ul reload UltiRemoteBag` 生效：锁服务每次判断能否回收锁时都读取该值。
+  此前该值只在模块加载时复制一次，修改后要重启服务器才生效（UltiKits/UltiRemoteBag#39）。
+
 - Re-running `/bag <page>` or `/bag see <player> <page>` on a page you already have open no longer
   releases its lock, so two players can no longer edit the same page at once (UltiKits/UltiRemoteBag#41).
   These two commands, and `/bag see <player>`, now close whatever window you have open before they

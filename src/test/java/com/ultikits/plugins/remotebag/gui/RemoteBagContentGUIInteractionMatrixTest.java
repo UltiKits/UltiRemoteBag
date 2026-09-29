@@ -213,6 +213,62 @@ class RemoteBagContentGUIInteractionMatrixTest {
                     .isEqualTo(new ItemStack(Material.DIRT));
         }
 
+        /**
+         * UltiKits/UltiRemoteBag#35: a number-key press over an EMPTY content slot would move the
+         * viewer's hotbar item into the bag. The refusal names itself, like every other refused
+         * item move; before, the item the gesture carried was never looked at, so it was refused
+         * silently.
+         */
+        @Test
+        @DisplayName("A number-key swap of a hotbar item into an empty content slot is refused and says why (UltiKits/UltiRemoteBag#35)")
+        void hotbarSwapIntoAnEmptySlotIsRefusedAndSaysWhy() {
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
+            viewer.getInventory().setItem(HOTBAR_INDEX, new ItemStack(Material.DIRT));
+            assertThat(gui.getInventory().getItem(CONTENT_SLOT_2))
+                    .as("precondition: the target content slot is empty")
+                    .isNull();
+
+            InventoryClickEvent event = hotbarSwap(gui, CONTENT_SLOT_2);
+
+            assertThat(event.isCancelled()).isTrue();
+            assertThat(gui.getInventory().getItem(CONTENT_SLOT_2)).isNull();
+            assertThat(messagesSentToViewer())
+                    .as("a refused move of the hotbar item has to tell the viewer why")
+                    .contains("msg_readonly_no_move");
+        }
+
+        /** UltiKits/UltiRemoteBag#35's sibling: the off-hand swap key carries the off-hand item. */
+        @Test
+        @DisplayName("An off-hand swap of an item into an empty content slot is refused and says why (UltiKits/UltiRemoteBag#35)")
+        void offHandSwapIntoAnEmptySlotIsRefusedAndSaysWhy() {
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
+            viewer.getInventory().setItemInOffHand(new ItemStack(Material.DIRT));
+
+            InventoryClickEvent event = new InventoryClickEvent(viewer.getOpenInventory(),
+                    InventoryType.SlotType.CONTAINER, CONTENT_SLOT_2, ClickType.SWAP_OFFHAND,
+                    InventoryAction.HOTBAR_SWAP);
+            Bukkit.getPluginManager().callEvent(event);
+
+            assertThat(event.isCancelled()).isTrue();
+            assertThat(messagesSentToViewer())
+                    .as("a refused move of the off-hand item has to tell the viewer why")
+                    .contains("msg_readonly_no_move");
+        }
+
+        @Test
+        @DisplayName("POSITIVE CONTROL: a number-key press with an empty hotbar slot over an empty content slot stays silent")
+        void hotbarSwapCarryingNothingStaysSilent() {
+            RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
+            viewer.getInventory().setItem(HOTBAR_INDEX, null);
+
+            InventoryClickEvent event = hotbarSwap(gui, CONTENT_SLOT_2);
+
+            assertThat(event.isCancelled()).isTrue();
+            assertThat(messagesSentToViewer())
+                    .as("nothing would have moved, so there is nothing to refuse out loud")
+                    .doesNotContain("msg_readonly_no_move");
+        }
+
         @Test
         @DisplayName("A drag of the viewer's own item over content slots puts nothing into the bag, and says why")
         void dragCannotInsertItem() {

@@ -20,6 +20,11 @@ lore_click_purchase: "点击购买"
 lore_insufficient_balance: "余额不足"
 purchase_success: "成功购买背包 #{0}！"
 purchase_failed: "购买失败！余额不足，需要 {0}"
+create_button: "创建新背包"
+lore_click_create: "点击创建（免费）"
+create_success: "已创建背包 #{0}！"
+create_failed: "无法创建新背包。"
+bag_price_changed: "新背包的价格已变化，请重新查看菜单。"
 
 # 背包内容 GUI
 read_only: "只读"

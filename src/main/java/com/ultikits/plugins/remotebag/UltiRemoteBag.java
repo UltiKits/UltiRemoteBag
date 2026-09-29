@@ -2,7 +2,6 @@ package com.ultikits.plugins.remotebag;
 
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.config.RemovedConfigKeys;
-import com.ultikits.plugins.remotebag.service.BagLockService;
 import com.ultikits.plugins.remotebag.service.RemoteBagService;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.UltiToolsModule;
@@ -30,13 +29,9 @@ public class UltiRemoteBag extends UltiToolsPlugin {
             bagService.init();
         }
 
+        // lock.timeout_seconds is read by BagLockService at each use, so /ul reload applies it
+        // (UltiKits/UltiRemoteBag#39); nothing is copied here.
         RemoteBagConfig config = getContext().getBean(RemoteBagConfig.class);
-
-        // 设置锁超时时间
-        BagLockService lockService = getContext().getBean(BagLockService.class);
-        if (lockService != null && config != null) {
-            lockService.setLockTimeout(config.getLockTimeout());
-        }
 
         // Settings removed in 6.3.0 stay in the operator's file until they delete them, so say so
         // once per boot rather than letting an edited value fail silently.

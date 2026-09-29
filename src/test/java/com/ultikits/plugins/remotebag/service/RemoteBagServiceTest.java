@@ -518,14 +518,59 @@ class RemoteBagServiceTest {
             assertThat(pages).containsExactly(1, 2, 3); // Sorted
         }
 
+        /**
+         * UltiKits/UltiRemoteBag#26: a player with no stored page has no pages. The owner's own
+         * views still offer page 1 ({@link RemoteBagService#pagesOfferedToOwner}); the stored list
+         * no longer invents it, so the administrator commands can report "no bags".
+         */
         @Test
-        @DisplayName("Should return default page 1 when no bags")
-        void returnsDefaultWhenEmpty() {
+        @DisplayName("Returns no pages when nothing is stored (UltiKits/UltiRemoteBag#26)")
+        void returnsEmptyWhenNothingIsStored() {
             when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             List<Integer> pages = service.getPlayerBagPages(playerUuid);
 
-            assertThat(pages).containsExactly(1);
+            assertThat(pages).isEmpty();
+        }
+
+        @Test
+        @DisplayName("After every stored page is deleted, the player has no pages (UltiKits/UltiRemoteBag#26)")
+        void deletingEveryPageLeavesNone() {
+            when(mockQuery.list()).thenReturn(Collections.singletonList(
+                    RemoteBagData.create(playerUuid, 1, "")));
+            assertThat(service.getPlayerBagPages(playerUuid))
+                    .as("POSITIVE CONTROL: the stored page is listed")
+                    .containsExactly(1);
+
+            assertThat(service.deleteBagPage(playerUuid, 1)).isTrue();
+
+            assertThat(service.getPlayerBagPages(playerUuid)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("The owner is always offered page 1 as well as every stored page (UltiKits/UltiRemoteBag#26)")
+        void pagesOfferedToOwner() {
+            assertThat(RemoteBagService.pagesOfferedToOwner(Collections.<Integer>emptyList())).containsExactly(1);
+            assertThat(RemoteBagService.pagesOfferedToOwner(Arrays.asList(1, 2))).containsExactly(1, 2);
+            assertThat(RemoteBagService.pagesOfferedToOwner(Arrays.asList(2, 3))).containsExactly(1, 2, 3);
+        }
+
+        /**
+         * A player who never opened page 1 and adds page 2 still has page 1 afterwards: page 1 is
+         * every player's default page, stored or not.
+         */
+        @Test
+        @DisplayName("After a free creation from nothing stored, the owner is offered pages 1 and 2 (UltiKits/UltiRemoteBag#25, #26)")
+        void pageOneStaysOfferedAfterPageTwoIsCreated() {
+            when(config.isEconomyEnabled()).thenReturn(false);
+            when(config.isPermissionBasedPages()).thenReturn(false);
+            when(config.getMaxPages()).thenReturn(10);
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
+
+            assertThat(service.purchaseBag(player)).isTrue();
+
+            assertThat(RemoteBagService.pagesOfferedToOwner(service.getPlayerBagPages(playerUuid)))
+                    .containsExactly(1, 2);
         }
 
         @Test
@@ -761,15 +806,15 @@ class RemoteBagServiceTest {
     class CreateBagPage {
 
         @Test
-        @DisplayName("Should create page for player with no existing bags")
+        @DisplayName("Creates page 1 for a player with no stored page (UltiKits/UltiRemoteBag#26)")
         void createsFirstPage() {
-            // When no data exists in DB, getPlayerBagPages returns [1] as default
-            // So createBagPage creates the next page (2)
+            // An administrator's create is one past the highest STORED page; with nothing stored
+            // that is page 1.
             when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             int pageNum = service.createBagPage(playerUuid);
 
-            assertThat(pageNum).isEqualTo(2);
+            assertThat(pageNum).isEqualTo(1);
             verify(dataOperator).insert(any(RemoteBagData.class));
         }
 
@@ -998,6 +1043,23 @@ class RemoteBagServiceTest {
             boolean result = service.purchaseBag(player);
 
             assertThat(result).isTrue();
+        }
+
+        /**
+         * The owner is offered page 1 before anything is stored, so the free path creates page 2,
+         * exactly as it did while page 1 was invented by the stored list (UltiKits/UltiRemoteBag#26).
+         */
+        @Test
+        @DisplayName("With nothing stored, the free path creates page 2 (UltiKits/UltiRemoteBag#25, #26)")
+        void freeCreationWithNothingStoredCreatesPageTwo() {
+            when(config.isEconomyEnabled()).thenReturn(false);
+            when(config.isPermissionBasedPages()).thenReturn(false);
+            when(config.getMaxPages()).thenReturn(10);
+            when(mockQuery.list()).thenReturn(Collections.emptyList());
+
+            assertThat(service.purchaseBag(player)).isTrue();
+
+            assertThat(service.getPlayerBagPages(playerUuid)).containsExactly(2);
         }
 
         @Test
@@ -1240,15 +1302,14 @@ class RemoteBagServiceTest {
     class EdgeCases {
 
         @Test
-        @DisplayName("createBagPage should handle player with only default page")
+        @DisplayName("createBagPage stores page 1 for a player with no stored page, which the owner is then offered")
         void createBagPageWithDefaultPage() {
-            // When no data in DB, getPlayerBagPages returns [1] as default
             when(mockQuery.list()).thenReturn(Collections.emptyList());
 
             int pageNum = service.createBagPage(playerUuid);
 
-            // Should create page 2 (next after default page 1)
-            assertThat(pageNum).isEqualTo(2);
+            assertThat(pageNum).isEqualTo(1);
+            assertThat(service.getPlayerBagPages(playerUuid)).containsExactly(1);
         }
 
         @Test

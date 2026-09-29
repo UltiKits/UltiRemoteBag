@@ -11,7 +11,11 @@ import com.ultikits.ultitools.utils.EconomyUtils;
 import com.ultikits.ultitools.utils.XVersionUtils;
 import mc.obliviate.inventory.Icon;
 
+import com.cryptomorin.xseries.XSound;
+import org.bukkit.Location;
+import org.bukkit.Sound;
 import org.bukkit.entity.Player;
+import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.junit.jupiter.api.*;
@@ -210,8 +214,8 @@ class RemoteBagMainGUITest {
         }
 
         @Test
-        @DisplayName("Should not add purchase icon when economy disabled")
-        void noPurchaseWhenEconomyDisabled() throws Exception {
+        @DisplayName("With economy disabled, offers a free create icon instead of the purchase icon (UltiKits/UltiRemoteBag#25)")
+        void freeCreateIconWhenEconomyDisabled() throws Exception {
             RemoteBagConfig noEconConfig = UltiRemoteBagTestHelper.createDefaultConfig();
             when(noEconConfig.isEconomyEnabled()).thenReturn(false);
 
@@ -238,14 +242,16 @@ class RemoteBagMainGUITest {
                 @SuppressWarnings("unchecked")
                 List<Icon> icons = (List<Icon>) provideItems.invoke(gui);
 
-                // Only bag icon, no purchase
-                assertThat(icons).hasSize(1);
+                // The page icon plus the free create icon; no priced purchase icon
+                assertThat(icons).hasSize(2);
+                verify(mockPlugin).i18n("create_button");
+                verify(mockPlugin, never()).i18n("purchase_button");
             }
         }
 
         @Test
-        @DisplayName("Should not add purchase icon when economy not available")
-        void noPurchaseWhenEconomyUnavailable() throws Exception {
+        @DisplayName("With no economy provider, offers a free create icon instead of the purchase icon (UltiKits/UltiRemoteBag#25)")
+        void freeCreateIconWhenEconomyUnavailable() throws Exception {
             when(bagService.getPlayerBagPages(playerUuid))
                     .thenReturn(Collections.singletonList(1));
             when(bagService.getPlayerMaxPages(player)).thenReturn(10);
@@ -269,20 +275,170 @@ class RemoteBagMainGUITest {
                 @SuppressWarnings("unchecked")
                 List<Icon> icons = (List<Icon>) provideItems.invoke(gui);
 
-                // Only bag icon, no purchase
-                assertThat(icons).hasSize(1);
+                // The page icon plus the free create icon; no priced purchase icon
+                assertThat(icons).hasSize(2);
+                verify(mockPlugin).i18n("create_button");
+                verify(mockPlugin, never()).i18n("purchase_button");
             }
         }
 
         @Test
-        @DisplayName("Should return empty list when no bag pages")
-        void emptyWhenNoBags() throws Exception {
+        @DisplayName("With economy disabled and the page limit reached, offers no create icon (UltiKits/UltiRemoteBag#25)")
+        void noFreeCreateIconAtThePageLimit() throws Exception {
+            RemoteBagConfig noEconConfig = UltiRemoteBagTestHelper.createDefaultConfig();
+            when(noEconConfig.isEconomyEnabled()).thenReturn(false);
+            when(bagService.getPlayerBagPages(playerUuid)).thenReturn(Arrays.asList(1, 2));
+            when(bagService.getPlayerMaxPages(player)).thenReturn(2);
+            when(bagService.getItemCount(eq(playerUuid), anyInt())).thenReturn(0);
+            when(bagService.getStackCount(eq(playerUuid), anyInt())).thenReturn(0);
+            ItemMeta mockMeta = mock(ItemMeta.class);
+
+            try (MockedConstruction<ItemStack> isMock = mockConstruction(ItemStack.class,
+                    (mock, context) -> when(mock.getItemMeta()).thenReturn(mockMeta))) {
+                RemoteBagMainGUI gui = new RemoteBagMainGUI(
+                        player, mockPlugin, bagService, lockService, noEconConfig);
+
+                Method provideItems = RemoteBagMainGUI.class.getDeclaredMethod("provideItems");
+                provideItems.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                List<Icon> icons = (List<Icon>) provideItems.invoke(gui);
+
+                assertThat(icons).hasSize(2);
+                verify(mockPlugin, never()).i18n("create_button");
+            }
+        }
+
+        /**
+         * UltiKits/UltiRemoteBag#25: the free icon's click takes the service's free path
+         * ({@code purchaseBag}, which creates a page without charging when economy is off) and
+         * reports the page it created.
+         */
+        @Test
+        @DisplayName("Clicking the free create icon creates the next page and says so (UltiKits/UltiRemoteBag#25)")
+        void clickingTheFreeCreateIconCreatesAPage() throws Exception {
+            RemoteBagConfig noEconConfig = UltiRemoteBagTestHelper.createDefaultConfig();
+            when(noEconConfig.isEconomyEnabled()).thenReturn(false);
+            when(bagService.getPlayerBagPages(playerUuid)).thenReturn(Collections.singletonList(1));
+            when(bagService.getPlayerMaxPages(player)).thenReturn(10);
+            when(bagService.getItemCount(eq(playerUuid), anyInt())).thenReturn(0);
+            when(bagService.getStackCount(eq(playerUuid), anyInt())).thenReturn(0);
+            when(bagService.purchaseBag(player)).thenReturn(true);
+            ItemMeta mockMeta = mock(ItemMeta.class);
+
+            List<Icon> icons;
+            RemoteBagMainGUI gui;
+            try (MockedConstruction<ItemStack> isMock = mockConstruction(ItemStack.class,
+                    (mock, context) -> when(mock.getItemMeta()).thenReturn(mockMeta))) {
+                gui = new RemoteBagMainGUI(player, mockPlugin, bagService, lockService, noEconConfig);
+                Method provideItems = RemoteBagMainGUI.class.getDeclaredMethod("provideItems");
+                provideItems.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                List<Icon> provided = (List<Icon>) provideItems.invoke(gui);
+                icons = provided;
+            }
+            assertThat(icons).hasSize(2);
+
+            try {
+                icons.get(1).getClickAction().accept(null);
+            } catch (RuntimeException e) {
+                // Re-opening the refreshed window needs the GUI library, which this test does not start.
+            }
+
+            verify(bagService).purchaseBag(player);
+            verify(player).sendMessage(contains("create_success"));
+        }
+
+        /** Builds the owner's window with {@code economyOn} and returns the icon offering the next page. */
+        private Icon nextPageIcon(RemoteBagConfig cfg, boolean economyOn) throws Exception {
+            when(cfg.isEconomyEnabled()).thenReturn(economyOn);
+            when(bagService.getPlayerBagPages(playerUuid)).thenReturn(Collections.singletonList(1));
+            when(bagService.getPlayerMaxPages(player)).thenReturn(10);
+            lenient().when(bagService.getItemCount(eq(playerUuid), anyInt())).thenReturn(0);
+            lenient().when(bagService.getStackCount(eq(playerUuid), anyInt())).thenReturn(0);
+            lenient().when(bagService.calculatePrice(anyInt())).thenReturn(100);
+            ItemMeta mockMeta = mock(ItemMeta.class);
+            try (MockedConstruction<ItemStack> isMock = mockConstruction(ItemStack.class,
+                    (mock, context) -> when(mock.getItemMeta()).thenReturn(mockMeta))) {
+                RemoteBagMainGUI gui = new RemoteBagMainGUI(player, mockPlugin, bagService, lockService, cfg);
+                Method provideItems = RemoteBagMainGUI.class.getDeclaredMethod("provideItems");
+                provideItems.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                List<Icon> icons = (List<Icon>) provideItems.invoke(gui);
+                assertThat(icons).hasSize(2);
+                return icons.get(1);
+            }
+        }
+
+        private void click(Icon icon) {
+            try {
+                icon.getClickAction().accept(null);
+            } catch (RuntimeException e) {
+                // Re-opening the refreshed window needs the GUI library, which this test does not start.
+            }
+        }
+
+        /**
+         * A free icon clicked after the economy came on (a reload, or a provider registering) must not
+         * charge the player: the icon said the page was free.
+         */
+        @Test
+        @DisplayName("A free icon clicked after the economy came on charges nothing and refreshes")
+        void aStaleFreeIconDoesNotCharge() throws Exception {
+            RemoteBagConfig cfg = UltiRemoteBagTestHelper.createDefaultConfig();
+            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(1000.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$100");
+                Icon free = nextPageIcon(cfg, false);
+                when(cfg.isEconomyEnabled()).thenReturn(true);
+
+                click(free);
+
+                verify(bagService, never()).purchaseBag(player);
+                verify(player).sendMessage(contains("bag_price_changed"));
+            }
+        }
+
+        /** The mirror case: a purchase icon clicked after the economy went off does not act either. */
+        @Test
+        @DisplayName("A purchase icon clicked after the economy went off does nothing and refreshes")
+        void aStalePurchaseIconDoesNotAct() throws Exception {
+            RemoteBagConfig cfg = UltiRemoteBagTestHelper.createDefaultConfig();
+            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(1000.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$100");
+                Icon paid = nextPageIcon(cfg, true);
+                when(cfg.isEconomyEnabled()).thenReturn(false);
+
+                click(paid);
+
+                verify(bagService, never()).purchaseBag(player);
+                verify(player).sendMessage(contains("bag_price_changed"));
+            }
+        }
+
+        /**
+         * UltiKits/UltiRemoteBag#26: with nothing stored the owner's own window still offers page 1,
+         * as it did while the stored list invented it.
+         */
+        @Test
+        @DisplayName("Offers page 1 when nothing is stored (UltiKits/UltiRemoteBag#26)")
+        void offersPageOneWhenNothingIsStored() throws Exception {
             when(bagService.getPlayerBagPages(playerUuid))
                     .thenReturn(Collections.emptyList());
-            when(bagService.getPlayerMaxPages(player)).thenReturn(10);
+            when(bagService.getPlayerMaxPages(player)).thenReturn(1);
+            when(bagService.getItemCount(eq(playerUuid), anyInt())).thenReturn(0);
+            when(bagService.getStackCount(eq(playerUuid), anyInt())).thenReturn(0);
 
-            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
-                econMock.when(EconomyUtils::isAvailable).thenReturn(false);
+            ItemMeta mockMeta = mock(ItemMeta.class);
+
+            try (MockedConstruction<ItemStack> isMock = mockConstruction(ItemStack.class,
+                    (mock, context) -> when(mock.getItemMeta()).thenReturn(mockMeta));
+                 MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(0.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$0");
 
                 RemoteBagMainGUI gui = new RemoteBagMainGUI(
                         player, mockPlugin, bagService, lockService, config);
@@ -292,9 +448,77 @@ class RemoteBagMainGUITest {
                 @SuppressWarnings("unchecked")
                 List<Icon> icons = (List<Icon>) provideItems.invoke(gui);
 
-                // No bags, economy unavailable = empty
-                assertThat(icons).isEmpty();
+                // Page 1's icon; at the one-page limit, no purchase icon
+                assertThat(icons).hasSize(1);
+                verify(bagService).getItemCount(playerUuid, 1);
             }
+        }
+    }
+
+    // ==================== open sound (UltiKits/UltiRemoteBag#29) ====================
+
+    /**
+     * UltiKits/UltiRemoteBag#29: the shared test machine has no audio device, so the checklist's
+     * "the configured open sound plays" cannot be observed there. Opening the window (through
+     * {@code afterSetup}, the hook the framework's {@code onOpen} runs last) must play exactly the
+     * configured, non-default sound.
+     */
+    @Nested
+    @DisplayName("Open sound (UltiKits/UltiRemoteBag#29)")
+    class OpenSound {
+
+        @Test
+        @DisplayName("Opening the window plays the configured open sound")
+        void opensWithConfiguredSound() {
+            configureNonDefaultOpenSound(true);
+            RemoteBagMainGUI gui = newWindowWithOnePage();
+
+            openThroughAfterSetup(gui);
+
+            verify(player).playSound(any(Location.class), eq(XSound.BLOCK_BARREL_OPEN.get()), eq(0.5f), eq(1.5f));
+        }
+
+        @Test
+        @DisplayName("With sound.enabled: false, opening the window plays no sound")
+        void opensSilentlyWhenSoundDisabled() {
+            configureNonDefaultOpenSound(false);
+            RemoteBagMainGUI gui = newWindowWithOnePage();
+
+            openThroughAfterSetup(gui);
+
+            verify(player, never()).playSound(any(Location.class), any(Sound.class), anyFloat(), anyFloat());
+        }
+
+        private RemoteBagMainGUI newWindowWithOnePage() {
+            lenient().when(bagService.getPlayerBagPages(playerUuid)).thenReturn(Collections.singletonList(1));
+            lenient().when(bagService.getPlayerMaxPages(player)).thenReturn(1);
+            return new RemoteBagMainGUI(player, mockPlugin, bagService, lockService, config);
+        }
+
+        /**
+         * Runs the page's {@code afterSetup}, the hook the framework's final
+         * {@code BaseInventoryPage#onOpen} calls after {@code setupBottomToolbar} and
+         * {@code setupContent} (measured on the shaded framework jar: {@code onOpen} invokes the
+         * three at offsets 8, 13 and 18). Those two need the inventory a real {@code open()} creates,
+         * which this test's mocked player cannot provide, so the open is driven from the hook that
+         * plays the sound.
+         */
+        private void openThroughAfterSetup(RemoteBagMainGUI gui) {
+            try {
+                java.lang.reflect.Method afterSetup = RemoteBagMainGUI.class.getDeclaredMethod(
+                        "afterSetup", InventoryOpenEvent.class);
+                afterSetup.setAccessible(true); // NOPMD - the framework calls this protected hook
+                afterSetup.invoke(gui, mock(InventoryOpenEvent.class));
+            } catch (ReflectiveOperationException e) {
+                throw new AssertionError(e);
+            }
+        }
+
+        private void configureNonDefaultOpenSound(boolean enabled) {
+            when(config.isSoundEnabled()).thenReturn(enabled);
+            lenient().when(config.getOpenSound()).thenReturn("BLOCK_BARREL_OPEN");
+            lenient().when(config.getSoundVolume()).thenReturn(0.5);
+            lenient().when(config.getSoundPitch()).thenReturn(1.5);
         }
     }
 

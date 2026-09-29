@@ -640,26 +640,27 @@ class BagLockServiceTest {
         }
     }
 
-    // ==================== setLockTimeout ====================
+    // ==================== lock.timeout_seconds (UltiKits/UltiRemoteBag#39) ====================
 
     @Nested
-    @DisplayName("setLockTimeout")
-    class SetLockTimeout {
+    @DisplayName("lock.timeout_seconds is read at each use (UltiKits/UltiRemoteBag#39)")
+    class LockTimeoutFollowsConfiguration {
 
         @Test
-        @DisplayName("Should update timeout value")
-        void updatesTimeout() {
-            service.setLockTimeout(600);
+        @DisplayName("A long timeout keeps a lock alive")
+        void longTimeoutKeepsLocksAlive() throws Exception {
+            when(config.getLockTimeout()).thenReturn(3600); // 1 hour
 
-            // Indirectly verify by checking lock expiration behavior
             service.ownerOpen(ownerUuid, 1, owner);
+
+            Thread.sleep(100);
             assertThat(service.isLocked(ownerUuid, 1)).isTrue();
         }
 
         @Test
-        @DisplayName("Short timeout should cause locks to expire quickly")
+        @DisplayName("A short timeout lets a lock expire quickly")
         void shortTimeoutExpiresQuickly() throws Exception {
-            service.setLockTimeout(1); // 1 second
+            when(config.getLockTimeout()).thenReturn(1); // 1 second
 
             service.ownerOpen(ownerUuid, 1, owner);
             assertThat(service.isLocked(ownerUuid, 1)).isTrue();
@@ -668,16 +669,26 @@ class BagLockServiceTest {
             assertThat(service.isLocked(ownerUuid, 1)).isFalse();
         }
 
+        /**
+         * {@code /ul reload UltiRemoteBag} re-reads the file into this same configuration bean and
+         * does not re-create the lock service, so a lowered timeout applies only if the service
+         * reads it at each use rather than keeping the value it was given at load.
+         */
         @Test
-        @DisplayName("Long timeout should keep locks alive")
-        void longTimeoutKeepsLocksAlive() throws Exception {
-            service.setLockTimeout(3600); // 1 hour
-
+        @DisplayName("Lowering the timeout on the same configuration bean applies without re-creating the service (reload)")
+        void aLoweredTimeoutAppliesWithoutRecreatingTheService() throws Exception {
+            when(config.getLockTimeout()).thenReturn(300);
             service.ownerOpen(ownerUuid, 1, owner);
+            Thread.sleep(1100);
+            assertThat(service.isLocked(ownerUuid, 1))
+                    .as("POSITIVE CONTROL: under 300 seconds the lock is still held")
+                    .isTrue();
 
-            // Even after a short wait, the lock should still be valid
-            Thread.sleep(100);
-            assertThat(service.isLocked(ownerUuid, 1)).isTrue();
+            when(config.getLockTimeout()).thenReturn(1); // what /ul reload leaves in the bean
+
+            assertThat(service.isLocked(ownerUuid, 1))
+                    .as("the lowered timeout must apply to the lock already held")
+                    .isFalse();
         }
     }
 
@@ -851,7 +862,8 @@ class BagLockServiceTest {
         lenient().when(mockPlugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
         UltiRemoteBagTestHelper.setField(created, "plugin", mockPlugin);
         UltiRemoteBagTestHelper.setFieldIfPresent(created, "config", config);
-        created.setLockTimeout(timeoutSeconds);
+        // The timeout is read from the configuration at each use (UltiKits/UltiRemoteBag#39).
+        lenient().when(config.getLockTimeout()).thenReturn(timeoutSeconds);
         return created;
     }
 }

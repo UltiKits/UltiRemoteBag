@@ -317,23 +317,45 @@ public class RemoteBagService {
     // ==================== GUI 支持方法 ====================
     
     /**
-     * 获取玩家拥有的所有背包页码列表
+     * The player's stored bag pages, sorted; empty when nothing is stored.
+     * <p>
+     * It used to answer page 1 when nothing was stored, so an administrator's {@code /bag list} and
+     * {@code /bag see} could never report that a player has no bags, even after deleting every page
+     * (UltiKits/UltiRemoteBag#26). The owner's own views still offer page 1 through
+     * {@link #pagesOfferedToOwner}.
      *
-     * @param playerUuid 玩家 UUID
-     * @return 背包页码列表（已排序）
+     * @param playerUuid the player's UUID / 玩家 UUID
+     * @return the stored page numbers, sorted; empty when nothing is stored / 已存储的背包页码列表（已排序，可能为空）
      */
     public List<Integer> getPlayerBagPages(UUID playerUuid) {
         loadBagIfNeeded(playerUuid);
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
         if (pages == null || pages.isEmpty()) {
-            // 如果没有任何背包，返回默认的第一页
-            return Collections.singletonList(1);
+            return Collections.emptyList();
         }
         return pages.keySet().stream()
                 .sorted()
                 .collect(Collectors.toList());
     }
     
+    /**
+     * The pages a player is offered in their own views ({@code /bag}, {@code /bag <page>}, and the
+     * next page a purchase or free creation adds): every stored page plus page 1, which is every
+     * player's default page whether or not anything has been stored on it yet. A player who adds
+     * page 2 before ever opening page 1 therefore keeps page 1 (UltiKits/UltiRemoteBag#26).
+     *
+     * @param storedPages the player's stored pages, as {@link #getPlayerBagPages} returns them
+     * @return the pages offered to their owner, sorted
+     */
+    public static List<Integer> pagesOfferedToOwner(List<Integer> storedPages) {
+        TreeSet<Integer> offered = new TreeSet<>();
+        offered.add(1);
+        if (storedPages != null) {
+            offered.addAll(storedPages);
+        }
+        return new ArrayList<>(offered);
+    }
+
     /**
      * 获取指定背包页的物品总数量
      *
@@ -406,7 +428,7 @@ public class RemoteBagService {
             return createNewBagPage(player);
         }
         
-        List<Integer> existingPages = getPlayerBagPages(player.getUniqueId());
+        List<Integer> existingPages = pagesOfferedToOwner(getPlayerBagPages(player.getUniqueId()));
         int nextBagNum = existingPages.size() + 1;
         
         // 检查是否超过上限
@@ -436,8 +458,8 @@ public class RemoteBagService {
         UUID playerUuid = player.getUniqueId();
         loadBagIfNeeded(playerUuid);
         
-        List<Integer> existingPages = getPlayerBagPages(playerUuid);
-        int nextPage = existingPages.isEmpty() ? 1 : Collections.max(existingPages) + 1;
+        List<Integer> existingPages = pagesOfferedToOwner(getPlayerBagPages(playerUuid));
+        int nextPage = Collections.max(existingPages) + 1;
         
         // 检查是否超过上限
         int maxPages = getPlayerMaxPages(player);
@@ -472,10 +494,9 @@ public class RemoteBagService {
     public int createBagPage(UUID playerUuid) {
         loadBagIfNeeded(playerUuid);
         
+        // One past the highest STORED page; page 1 when nothing is stored (UltiKits/UltiRemoteBag#26).
         List<Integer> existingPages = getPlayerBagPages(playerUuid);
-        int nextPage = existingPages.isEmpty() || (existingPages.size() == 1 && existingPages.get(0) == 1) 
-                ? (existingPages.isEmpty() ? 1 : Collections.max(existingPages) + 1)
-                : Collections.max(existingPages) + 1;
+        int nextPage = existingPages.isEmpty() ? 1 : Collections.max(existingPages) + 1;
         
         // 创建空的背包页
         ItemStack[] emptyContents = new ItemStack[PAGE_CAPACITY];
