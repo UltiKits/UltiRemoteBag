@@ -9,6 +9,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A bag save whose stored row has been deleted in the meantime is now reported as not saved. On a MySQL
+  database shared by several servers, an administrator on another server who deletes a bag page at the moment
+  this server saves it made that save write nothing while `/bag save` still answered that the bag was saved;
+  now the save logs `Failed to update bag data`, the other pages are still saved, and the save is reported as
+  failed (UltiKits/UltiRemoteBag#50).
+- 已存储的背包行在保存时已被删除，现在会报告为未保存。多个服务器共用同一个 MySQL 数据库时，若另一台服务器上的管理员恰好在本服务器保存时
+  删除了某一页背包，该次保存什么也没写入，`/bag save` 却仍回复背包已保存；现在会记录 `Failed to update bag data`，其余页面照常保存，
+  并且报告保存失败（UltiKits/UltiRemoteBag#50）。
+
 - `config/remotebag.yml` now writes its comments in the server's language. Thirteen comments (the `economy.*`,
   `sound.*` and `lock.*` settings) used to be Chinese-only, so a fresh install under `language: en` got a file
   with Chinese comments. Each is now a language-file key that the framework resolves in the server's `language`

@@ -4,6 +4,7 @@ import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.RemoteBagData;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Service;
+import com.ultikits.ultitools.exceptions.DataAccessException;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.utils.EconomyUtils;
 
@@ -155,9 +156,22 @@ public class RemoteBagService {
                 data.setContents(contents);
                 data.setLastUpdated(System.currentTimeMillis());
                 try {
-                    dataOperator.update(data);
-                } catch (IllegalAccessException e) {
-                    plugin.getLogger().error(plugin.i18n("log_bag_update_failed"), e);
+                    // Counted: a row deleted between the read above and this write (another server on a
+                    // shared database) matches nothing, and update(T) would return normally for it
+                    // (UltiKits/UltiRemoteBag#50, UltiTools-Reborn#558).
+                    if (dataOperator.updateCounted(data) == 0) {
+                        plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
+                        // Same outcome as an unwritable page: keep going, but do not report a completed save.
+                        written = false;
+                    }
+                } catch (DataAccessException e) {
+                    // updateCounted wraps a field-access failure of the write in this exception; that is the
+                    // one the old update(T) threw as IllegalAccessException. Any other storage failure
+                    // propagates exactly as it did.
+                    if (!(e.getCause() instanceof IllegalAccessException)) {
+                        throw e;
+                    }
+                    plugin.getLogger().error(plugin.i18n("log_bag_update_failed"), e.getCause());
                     // Keep going -- one unwritable page must not cost the others -- but do not let the
                     // caller report a completed save.
                     written = false;
