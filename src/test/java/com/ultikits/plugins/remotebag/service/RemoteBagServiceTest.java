@@ -696,7 +696,7 @@ class RemoteBagServiceTest {
             service.saveBag(playerUuid);
 
             verify(dataOperator, never()).insert(any());
-            verify(dataOperator, never()).update(any());
+            verify(dataOperator, never()).updateCounted(any());
         }
 
         @Test
@@ -715,11 +715,68 @@ class RemoteBagServiceTest {
         void updatesExistingData() throws Exception {
             RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
             when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
+            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenReturn(1);
+
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            boolean saved = service.saveBag(playerUuid);
+
+            assertThat(saved).isTrue();
+            verify(dataOperator).updateCounted(any(RemoteBagData.class));
+        }
+
+        /**
+         * UltiKits/UltiRemoteBag#50 (UltiTools-Reborn#558): a stored row that is gone by the time of the
+         * write -- another server on a shared database deleted the page between this server's read and its
+         * write -- is not a completed save. Before, {@code update} returned normally for it.
+         */
+        @Test
+        @DisplayName("A write that matches no stored row is reported as not saved, and the other pages are still saved (UltiKits/UltiRemoteBag#50)")
+        void aVanishedRowIsNotReportedAsSaved() {
+            RemoteBagData gone = RemoteBagData.create(playerUuid, 1, "old-content");
+            // page 1 has a stored row (read), page 2 has none (insert)
+            when(mockQuery.list()).thenReturn(Collections.singletonList(gone), Collections.emptyList());
+            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenReturn(0);
+
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            service.setBagPage(playerUuid, 2, new ItemStack[45]);
+            boolean saved = service.saveBag(playerUuid);
+
+            assertThat(saved).as("one page was not written").isFalse();
+            verify(dataOperator).updateCounted(any(RemoteBagData.class));
+            verify(dataOperator).insert(any(RemoteBagData.class));
+        }
+
+        @Test
+        @DisplayName("A write that matches no stored row logs the same line a thrown write logs (UltiKits/UltiRemoteBag#50)")
+        @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
+        void aVanishedRowLogsTheUpdateFailedLine() throws Exception {
+            java.lang.reflect.Field pluginField = RemoteBagService.class.getDeclaredField("plugin");
+            pluginField.setAccessible(true);
+            UltiToolsPlugin plugin = (UltiToolsPlugin) pluginField.get(service);
+            when(plugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("en"));
+            RemoteBagData gone = RemoteBagData.create(playerUuid, 1, "old-content");
+            when(mockQuery.list()).thenReturn(Collections.singletonList(gone));
+            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenReturn(0);
 
             service.setBagPage(playerUuid, 1, new ItemStack[45]);
             service.saveBag(playerUuid);
 
-            verify(dataOperator).update(any(RemoteBagData.class));
+            verify(plugin.getLogger()).error(eq("Failed to update bag data"));
+        }
+
+        @Test
+        @DisplayName("A storage failure that is not a field-access failure still propagates, as before")
+        void otherStorageFailuresStillPropagate() {
+            RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
+            when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
+            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenThrow(
+                    new com.ultikits.ultitools.exceptions.DataAccessException(
+                            com.ultikits.ultitools.exceptions.ErrorCode.DATA_ENTITY_INVALID, "database is down"));
+
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+
+            assertThatThrownBy(() -> service.saveBag(playerUuid))
+                    .isInstanceOf(com.ultikits.ultitools.exceptions.DataAccessException.class);
         }
 
         @Test
@@ -734,12 +791,20 @@ class RemoteBagServiceTest {
             verify(dataOperator, times(2)).insert(any(RemoteBagData.class));
         }
 
+        /** What {@code DataOperator#updateCounted} throws when the entity's fields cannot be read. */
+        private com.ultikits.ultitools.exceptions.DataAccessException accessFailure() {
+            return new com.ultikits.ultitools.exceptions.DataAccessException(
+                    com.ultikits.ultitools.exceptions.ErrorCode.DATA_ENTITY_INVALID, "Failed to access entity fields",
+                    new IllegalAccessException("Test error"));
+        }
+
         @Test
         @DisplayName("Should handle update exception gracefully")
         void handlesUpdateException() throws Exception {
             RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
             when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
-            doThrow(new IllegalAccessException("Test error")).when(dataOperator).update(any(RemoteBagData.class));
+            // updateCounted wraps a field-access failure of the write in a DataAccessException
+            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenThrow(accessFailure());
 
             service.setBagPage(playerUuid, 1, new ItemStack[45]);
 
@@ -757,7 +822,7 @@ class RemoteBagServiceTest {
             when(plugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
             RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
             when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
-            doThrow(new IllegalAccessException("Test error")).when(dataOperator).update(any(RemoteBagData.class));
+            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenThrow(accessFailure());
             String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_bag_update_failed");
 
             service.setBagPage(playerUuid, 1, new ItemStack[45]);
@@ -795,7 +860,7 @@ class RemoteBagServiceTest {
             service.saveAllBags();
 
             verify(dataOperator, never()).insert(any());
-            verify(dataOperator, never()).update(any(RemoteBagData.class));
+            verify(dataOperator, never()).updateCounted(any(RemoteBagData.class));
         }
     }
 
