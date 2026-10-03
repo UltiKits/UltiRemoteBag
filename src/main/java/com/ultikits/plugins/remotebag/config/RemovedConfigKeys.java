@@ -3,8 +3,6 @@ package com.ultikits.plugins.remotebag.config;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
 
-import org.bukkit.configuration.file.YamlConfiguration;
-
 /**
  * Settings this module used to declare in {@code config/remotebag.yml} and no longer reads, and the
  * warning that tells an operator whose file still holds one.
@@ -76,31 +74,30 @@ public final class RemovedConfigKeys {
      * Logs one warning per removed key that is still present in the operator's file, in the server's
      * language.
      *
-     * <p>Reads {@code config.getConfig()}, which is the parsed file as it is on disk — including
-     * keys this entity no longer declares, which is exactly what a residual key is. A fresh install
-     * has none of them, so a clean server logs nothing.
+     * <p>Asks the framework whether each removed key is present in the file it last loaded
+     * ({@code AbstractConfigEntity#isPresentInFile}). That answer covers keys this entity no longer
+     * declares, which is exactly what a residual key is, and a key holding an explicit null. It is
+     * {@code false} for every key when the file could not be read or parsed, so an unreadable file
+     * is never reported as holding removed keys. A fresh install has none of them, so a clean
+     * server logs nothing.
      *
      * @param config the module's configuration entity, after the framework has loaded it; may be
-     *               null, or hold no parsed file or plugin yet, in which case nothing is reported
+     *               null, or not yet bound to a plugin, in which case nothing is reported
      * @param logger the module's logger; may be null, in which case nothing is reported
      */
     public static void warnIfStillPresent(RemoteBagConfig config, PluginLogger logger) {
         if (config == null || logger == null) {
             return;
         }
-        YamlConfiguration onDisk = config.getConfig();
-        if (onDisk == null) {
-            return;
-        }
-        // The plugin the framework bound the configuration to when it loaded the file; it is set
-        // before the file is read, so a parsed file without it is not one the framework loaded.
+        // The plugin the framework bound the configuration to when it loaded the file; without it
+        // the framework never loaded this entity, so there is no file to ask about.
         UltiToolsPlugin plugin = config.getUltiToolsPlugin();
         if (plugin == null) {
             return;
         }
         String file = config.getConfigFilePath();
         for (String removed : REMOVED) {
-            if (onDisk.contains(removed)) {
+            if (config.isPresentInFile(removed)) {
                 logger.warn(plugin.i18n("removed_key_warning")
                         .replace("{FILE}", String.valueOf(file))
                         .replace("{REASON}", reasonFor(removed, plugin))

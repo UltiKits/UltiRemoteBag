@@ -9,6 +9,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The module loads on UltiTools-API 6.3.0 again. Its start-up warning about settings removed in 6.3.0 that
+  are still in `config/remotebag.yml` used to read the configuration object that 6.3.0 removes, so on 6.3.0
+  the module was refused at load with a `NoSuchMethodError`. It now asks the framework whether each removed
+  key is present in the file (`isPresentInFile`), with the same warnings in the same order and language as
+  before: one per removed key still in the file, none for a file without them, and none for a file the
+  framework could not parse (UltiKits/UltiRemoteBag#49).
+- 本模块可再次在 UltiTools-API 6.3.0 上加载。此前启动时关于「6.3.0 已移除、但仍留在 `config/remotebag.yml` 中的设置」的警告读取的是
+  6.3.0 移除的配置对象，因此在 6.3.0 上模块加载时被拒绝并抛出 `NoSuchMethodError`。现在改为向框架询问每个已移除的键是否出现在文件中
+  （`isPresentInFile`），警告内容、顺序和语言与之前相同：文件中仍有的已移除键各一条，没有则不警告，框架无法解析的文件也不警告（UltiKits/UltiRemoteBag#49）。
+
 - With `economy.enabled: false`, or no economy plugin installed, the bag list window (`/bag`) now shows
   a green `Create New Bag` icon while the player is under their page limit; clicking it adds the next page
   for free and answers `Created bag #<n>!`. Before, only the paid purchase icon existed, and it was hidden
