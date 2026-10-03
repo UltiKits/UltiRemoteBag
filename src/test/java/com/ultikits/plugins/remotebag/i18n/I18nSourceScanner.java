@@ -116,9 +116,11 @@ final class I18nSourceScanner {
         /** True when the framework looks this literal up as a catalogue key. */
         boolean key;
         /**
-         * True when the literal is part of the value of a {@code @ConfigEntry} annotation's
-         * {@code comment} element -- and of nothing else. Guard 2 skips these; the reason is written
-         * next to the skip in {@code UltiRemoteBagCjkLiteralScopeTest#reportable}.
+         * True when the literal is part of the value of the framework's {@code @ConfigEntry}
+         * annotation's {@code comment} element -- and of nothing else. Guard 2 judges these like any
+         * other literal (since UltiRemoteBag#48 a Chinese comment fails the build); guard 1 reads a
+         * comment that is exactly one {@code {key}} token as a catalogue key site
+         * ({@link SiteKind#CONFIG_COMMENT}).
          */
         boolean configComment;
         /** For a {@link #configComment} literal: the field its annotation sits on, and how it was written. */
@@ -142,12 +144,15 @@ final class I18nSourceScanner {
         final String written;
         /** Whether the same field carries an annotation written with the framework's full name. */
         final boolean fieldHasFullName;
+        /** How many literals the {@code comment} value is made of; a token comment is exactly one. */
+        final int literalCount;
 
-        ConfigSite(String owner, String field, String written, boolean fieldHasFullName) {
+        ConfigSite(String owner, String field, String written, boolean fieldHasFullName, int literalCount) {
             this.owner = owner;
             this.field = field;
             this.written = written;
             this.fieldHasFullName = fieldHasFullName;
+            this.literalCount = literalCount;
         }
     }
 
@@ -165,7 +170,14 @@ final class I18nSourceScanner {
          * {@code plugin.i18n(suggest)} as the hint. Found by {@link #scanCompiledSuggestValues}, never
          * by the parser.
          */
-        SUGGEST_HINT
+        SUGGEST_HINT,
+        /**
+         * A framework {@code @ConfigEntry(comment = "{key}")}: a comment that is exactly one trimmed
+         * {@code {key}} token, which the framework resolves through {@code plugin.i18n(key)} each time it
+         * writes the file (UltiTools-Reborn#542). Added by {@link #confirmConfigComments}, once the
+         * compiled field has confirmed the annotation is the framework's.
+         */
+        CONFIG_COMMENT
     }
 
     /** One place a key reaches the framework's catalogue lookup. */
@@ -374,9 +386,22 @@ final class I18nSourceScanner {
             for (Literal l : f.literals) {
                 if (l.configComment) {
                     l.configComment = isFrameworkConfigEntry(l.configSite, classes);
+                    String token = l.configComment && l.configSite.literalCount == 1 ? commentToken(l.value) : null;
+                    if (token != null) {
+                        f.sites.add(new KeySite(SiteKind.CONFIG_COMMENT, l.line, token, "\"" + l.raw + "\"", false));
+                    }
                 }
             }
         }
+    }
+
+    /**
+     * The key of a comment that is exactly one trimmed {@code {key}} token, or {@code null}: the
+     * framework's own test, {@code comment().trim().matches("\\{[^{}]+\\}")}.
+     */
+    static String commentToken(String comment) {
+        String trimmed = comment.trim();
+        return trimmed.matches("\\{[^{}]+\\}") ? trimmed.substring(1, trimmed.length() - 1) : null;
     }
 
     static boolean isFrameworkConfigEntry(ConfigSite site, Function<String, Class<?>> classes) {
@@ -570,8 +595,16 @@ final class I18nSourceScanner {
                     }
                 } else if ("ConfigEntry".equals(type) && "comment".equals(element)) {
                     String owner = classNames.peek();
+                    final int[] count = {0};
+                    new TreeScanner<Void, Void>() {
+                        @Override
+                        public Void visitLiteral(LiteralTree literal, Void q) {
+                            count[0]++;
+                            return null;
+                        }
+                    }.scan(value, null);
                     final ConfigSite site = new ConfigSite(owner == null || owner.isEmpty() ? null : owner,
-                            currentField, node.getAnnotationType().toString(), currentFieldHasFullName);
+                            currentField, node.getAnnotationType().toString(), currentFieldHasFullName, count[0]);
                     new TreeScanner<Void, Void>() {
                         @Override
                         public Void visitLiteral(LiteralTree literal, Void q) {

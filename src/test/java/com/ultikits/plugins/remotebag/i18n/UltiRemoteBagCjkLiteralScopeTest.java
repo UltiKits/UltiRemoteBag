@@ -39,11 +39,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * the source; the reason is required. Lines starting with {@code #} and blank lines are ignored. An
  * exemption that no longer matches a literal fails the build, so the file cannot drift.
  * <p>
- * One structural category is skipped without an exemption line: the value of a {@code @ConfigEntry}
- * annotation's {@code comment} element, and nothing else. The reason is written next to the skip in
- * {@link #reportable}.
+ * Nothing is skipped by structure. Until UltiRemoteBag#48 the value of a {@code @ConfigEntry}
+ * annotation's {@code comment} element was skipped, because the framework wrote it verbatim into the
+ * operator's file and a module had no way to translate it. The framework now resolves a comment that is
+ * exactly one {@code {key}} token through the module's catalogue (UltiTools-Reborn#542), so a Chinese
+ * comment is a Chinese literal like any other and fails this guard; the token's own key and both of its
+ * catalogue entries are guard 1's business.
  * <p>
- * This file is copied unchanged into every module; only its package line and class name differ.
+ * This file is copied into the modules that have not adopted translatable comments with one deliberate
+ * difference: they still skip the {@code comment} element of {@code @ConfigEntry}. UltiRemoteBag has
+ * adopted them, and does not skip it.
  */
 @DisplayName("Language guard 2: Chinese literals")
 class UltiRemoteBagCjkLiteralScopeTest {
@@ -163,19 +168,9 @@ class UltiRemoteBagCjkLiteralScopeTest {
         return problems;
     }
 
-    /** Whether guard 2 judges this literal: Chinese text that is neither a key nor a config comment. */
+    /** Whether guard 2 judges this literal: Chinese text that is not a catalogue key. */
     static boolean reportable(Literal l) {
-        if (l.key || !I18nSourceScanner.containsCjk(l.value)) {
-            return false;
-        }
-        // Skipped by structure, not by exemption line: @ConfigEntry(comment = ...) text. The
-        // framework writes comment() verbatim into the operator's YAML and the panel
-        // (AbstractConfigEntity#setComments); there is no catalogue path for it, and a module
-        // cannot add one without a framework change. Translatable config comments are requested in
-        // UltiKits/UltiTools-Reborn#542. Only that one element of that one annotation is
-        // skipped -- not @ConfigEntry's path, not another annotation's comment, not the
-        // field's default value (pinned by the ConfigEntryComment tests below).
-        return !l.configComment;
+        return !l.key && I18nSourceScanner.containsCjk(l.value);
     }
 
     static List<String> violations(List<SourceFile> files, List<Exemption> exemptions) {
@@ -476,29 +471,31 @@ class UltiRemoteBagCjkLiteralScopeTest {
         }
     }
 
-    /** The compiled class for {@code skipIsBoundToTheResolvedAnnotation}: only {@code a} carries the framework's annotation. */
-    static final class ConfigCommentFixture {
-        @com.ultikits.ultitools.annotations.ConfigEntry(path = "a", comment = "\u4e2d\u6587\u8bf4\u660e")
-        private String a;
-        private String b;
-        private String c;
-        private String d;
-
-        private ConfigCommentFixture() {
-        }
-    }
-
     @Nested
-    @DisplayName("@ConfigEntry(comment = ...) is skipped, and nothing else is")
+    @DisplayName("@ConfigEntry(comment = ...) is judged like any other literal (UltiRemoteBag#48)")
     class ConfigEntryComment {
 
         @Test
-        @DisplayName("Chinese in @ConfigEntry's comment element does not count, even concatenated")
-        void configEntryCommentIsSkipped() {
+        @DisplayName("Chinese in @ConfigEntry's comment element is reported, plain, concatenated and fully qualified")
+        void chineseConfigEntryCommentIsReported() {
             assertThat(check("@ConfigEntry(path = \"a.b\", comment = \"\u4e2d\u6587\") private String s = \"ok\";\n"
                     + "@ConfigEntry(path = \"a.c\", comment = \"\u4e2d\" + \"\u6587\") private int n = 1;\n"
                     + "@com.ultikits.ultitools.annotations.ConfigEntry(path = \"a.d\", comment = \"\u4e2d\") int m;"))
-                    .isEmpty();
+                    .hasSize(4);
+        }
+
+        @Test
+        @DisplayName("the English half of a bilingual comment does not hide its Chinese half")
+        void bilingualCommentIsReported() {
+            assertThat(check("@ConfigEntry(path = \"a\", comment = \"Timeout in seconds. \"\n"
+                    + " + \"\u8d85\u65f6\uff08\u79d2\uff09\") int t;")).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a {key} token comment and an English comment pass: neither holds Chinese text")
+        void tokenAndEnglishCommentsPass() {
+            assertThat(check("@ConfigEntry(path = \"a\", comment = \"{config.a}\") int a;\n"
+                    + "@ConfigEntry(path = \"b\", comment = \"Maximum number of pages\") int b;")).isEmpty();
         }
 
         @Test
@@ -516,26 +513,9 @@ class UltiRemoteBagCjkLiteralScopeTest {
         }
 
         @Test
-        @DisplayName("the skip is bound to the field and the annotation the compiler resolved, not to matching text")
-        void skipIsBoundToTheResolvedAnnotation() {
-            SourceFile f = SourceFile.of("src/main/java/Sample.java", "class Sample {\n"
-                    + "@ConfigEntry(path = \"a\", comment = \"\u4e2d\u6587\u8bf4\u660e\") String a;\n"
-                    + "@other.ConfigEntry(comment = \"\u4e2d\u6587\") String b;\n"
-                    + "@ConfigEntry(path = \"c\", comment = \"\u6ce8\u91ca\") String c;\n"
-                    + "@com.ultikits.ultitools.annotations.ConfigEntry(path = \"d\", comment = \"\u8bf4\u660e\") String d;\n}\n");
-            I18nSourceScanner.confirmConfigComments(Collections.singletonList(f),
-                    name -> "Sample".equals(name) ? ConfigCommentFixture.class : null);
-            // a: the compiled field carries the framework's annotation. b: another type, although its text
-            // is part of a's comment. c and d: the compiled fields carry no framework annotation.
-            assertThat(violations(Collections.singletonList(f), parseExemptions(Collections.<String>emptyList())))
-                    .hasSize(3).anyMatch(v -> v.contains(":3 ")).anyMatch(v -> v.contains(":4 "))
-                    .anyMatch(v -> v.contains(":5 "));
-        }
-
-        @Test
         @DisplayName("negative control: the field's default value still counts")
         void fieldDefaultStillCounts() {
-            assertThat(check("@ConfigEntry(path = \"p\", comment = \"\u6ce8\u91ca\") private String s = \"\u4e2d\";"))
+            assertThat(check("@ConfigEntry(path = \"p\", comment = \"c\") private String s = \"\u4e2d\";"))
                     .singleElement().asString().contains("\"\u4e2d\"");
         }
     }
