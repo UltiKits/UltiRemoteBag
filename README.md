@@ -345,6 +345,10 @@ CREATE TABLE ulti_remote_bag (
 > 1. 修改 `max-pages` 配置增加全局上限
 > 2. 启用 `permission-based-pages` 并给玩家相应权限
 
+**Q: Why does a player's own bag window still offer page 1 after an administrator deletes only page 1? / 管理员只删除了第 1 页后，玩家自己的背包窗口为什么仍然显示第 1 页？**
+> By design (UltiKits/UltiRemoteBag#47). A player's own window always offers page 1, whether or not anything is stored on it, because page 1 is every player's default page; deleting a page removes its stored row and items, not the player's right to open page 1. The next page a player adds is always numbered one past their highest page, so after pages 1 and 3 the next one is page 4 (UltiKits/UltiRemoteBag#46).
+> 这是设计如此（UltiKits/UltiRemoteBag#47）：玩家自己的窗口始终提供第 1 页，无论其中是否有存储内容，因为第 1 页是所有玩家的默认页；删除背包页只会删除该页的存储记录和物品，不会取消玩家打开第 1 页的权利。玩家新增的下一页页码始终是其最高页的下一页，因此只剩第 1、3 页时，下一页是第 4 页（UltiKits/UltiRemoteBag#46）。
+
 **Q: 管理员查看背包时为什么是只读的？**
 > 当背包所有者正在使用时，管理员会自动进入只读模式。等所有者关闭后，点击刷新按钮即可切换为编辑模式。
 

@@ -357,6 +357,25 @@ public class RemoteBagService {
     }
 
     /**
+     * The number the next page a purchase or a free creation adds gets: one past the highest page
+     * the owner is offered, whatever gaps an administrator's deletions left below it.
+     * <p>
+     * The owner's window (the icon and its price), {@link #purchaseBag} (the limit check and the
+     * price) and the creation itself all take this one number, so what the player is shown, what
+     * they are charged for and what they are given are the same page. They used to count pages
+     * instead ({@code size + 1}), which disagrees with the created page as soon as the pages are
+     * not contiguous: with pages 1 and 3 the icon and the price said page 3 and page 4 was
+     * created (UltiKits/UltiRemoteBag#46).
+     *
+     * @param pagesOffered the pages offered to the owner, as {@link #pagesOfferedToOwner} returns
+     *                     them; never empty
+     * @return the page number a new page gets
+     */
+    public static int nextPageNumber(List<Integer> pagesOffered) {
+        return Collections.max(pagesOffered) + 1;
+    }
+
+    /**
      * 获取指定背包页的物品总数量
      *
      * @param playerUuid 玩家 UUID
@@ -429,7 +448,7 @@ public class RemoteBagService {
         }
         
         List<Integer> existingPages = pagesOfferedToOwner(getPlayerBagPages(player.getUniqueId()));
-        int nextBagNum = existingPages.size() + 1;
+        int nextBagNum = nextPageNumber(existingPages);
         
         // 检查是否超过上限
         int maxPages = getPlayerMaxPages(player);
@@ -459,7 +478,7 @@ public class RemoteBagService {
         loadBagIfNeeded(playerUuid);
         
         List<Integer> existingPages = pagesOfferedToOwner(getPlayerBagPages(playerUuid));
-        int nextPage = Collections.max(existingPages) + 1;
+        int nextPage = nextPageNumber(existingPages);
         
         // 检查是否超过上限
         int maxPages = getPlayerMaxPages(player);

@@ -9,6 +9,16 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- When an administrator has deleted one of a player's middle bag pages (for example the player keeps pages 1
+  and 3), the next-page icon, its price, the page limit and the page that is created now all use the same page
+  number, the one after the highest page the player has (page 4 in the example). Before, the icon and the price
+  counted pages instead and said "page 3" while page 4 was created, and at a limit of 3 the purchase took the
+  money and then refused to create page 4. Now the icon is not offered when the next page number is above the
+  limit, so nothing is charged for a page that cannot be created (UltiKits/UltiRemoteBag#46).
+- 管理员删除了玩家中间的某一页背包后（例如玩家只剩第 1、3 页），下一页图标、价格、页数上限检查和实际创建的页码现在统一使用同一个页码：
+  玩家现有最高页的下一页（例子中为第 4 页）。此前图标和价格按「页数」计算，显示「第 3 页」而实际创建的是第 4 页；页数上限为 3 时，购买会先扣款、
+  再因无法创建第 4 页而失败。现在下一页页码超过上限时不再显示该图标，因此不会为无法创建的页扣款（UltiKits/UltiRemoteBag#46）。
+
 - The module loads on UltiTools-API 6.3.0 again. Its start-up warning about settings removed in 6.3.0 that
   are still in `config/remotebag.yml` used to read the configuration object that 6.3.0 removes, so on 6.3.0
   the module was refused at load with a `NoSuchMethodError`. It now asks the framework whether each removed
