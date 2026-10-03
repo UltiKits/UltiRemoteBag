@@ -123,11 +123,15 @@ public class RemoteBagService {
     /**
      * Save bag to database.
      * <p>
-     * Reports whether EVERY cached page reached the database. Two ways it can be false, and a caller
-     * that announces a save has to be able to tell both apart from success: nothing is cached at all
-     * for a player who has not opened a bag this session, so no row is written; and an update can fail
-     * with {@link IllegalAccessException}, which is logged and swallowed here because one bad page
-     * must not cost the others. Use {@link #hasCachedPages(UUID)} to distinguish the two.
+     * Reports whether EVERY cached page reached the database. Ways it can be false, and a caller
+     * that announces a save has to be able to tell them apart from success: nothing is cached at all
+     * for a player who has not opened a bag this session, so no row is written; an update can fail
+     * because the entity's fields cannot be read (the {@link com.ultikits.ultitools.exceptions.DataAccessException}
+     * that {@code DataOperator#updateCounted} wraps an {@link IllegalAccessException} in); or the
+     * page's stored row is gone by the time of the write (another server on a shared database deleted
+     * it), which {@code updateCounted} reports as 0 rows (UltiKits/UltiRemoteBag#50). The last two are
+     * logged and swallowed here because one bad page must not cost the others. Any other storage
+     * failure propagates. Use {@link #hasCachedPages(UUID)} to tell "nothing to write" from "a write failed".
      *
      * @param playerUuid 玩家 UUID
      * @return true if every cached page was inserted or updated; false if there was nothing to write
