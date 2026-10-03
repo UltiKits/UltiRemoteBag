@@ -1171,6 +1171,101 @@ class RemoteBagServiceTest {
                 unregisterVaultEconomy(vault);
             }
         }
+
+        // ---- UltiKits/UltiRemoteBag#46: one page number for the limit check, the price and the created page ----
+
+        /** Pages {1, 3}: an administrator deleted page 2. The page a purchase creates is page 4 (max + 1). */
+        private void storePagesOneAndThree() {
+            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            service.setBagPage(playerUuid, 3, new ItemStack[45]);
+        }
+
+        @Test
+        @DisplayName("With pages 1 and 3 and a limit of 3, the purchase is refused before any money moves: the page it would create is 4 (UltiKits/UltiRemoteBag#46)")
+        void nonContiguousPagesAtTheLimitRefuseBeforeCharging() throws Exception {
+            Economy mockEconomy = mock(Economy.class);
+            when(mockEconomy.has(any(OfflinePlayer.class), anyDouble())).thenReturn(true);
+            when(mockEconomy.withdrawPlayer(any(OfflinePlayer.class), anyDouble())).thenReturn(
+                    new EconomyResponse(10000, 90000, EconomyResponse.ResponseType.SUCCESS, ""));
+            Plugin vault = registerVaultEconomy(mockEconomy);
+
+            try {
+                when(config.isEconomyEnabled()).thenReturn(true);
+                when(config.isPermissionBasedPages()).thenReturn(false);
+                when(config.getMaxPages()).thenReturn(3);
+                when(config.getBasePrice()).thenReturn(10000);
+                when(config.isPriceIncreaseEnabled()).thenReturn(false);
+                storePagesOneAndThree();
+
+                boolean result = service.purchaseBag(player);
+
+                assertThat(result).isFalse();
+                // Before the fix the limit check counted two pages (2 + 1 = 3 <= 3), took the money, and only
+                // then refused to create page 4.
+                verify(mockEconomy, never()).withdrawPlayer(any(OfflinePlayer.class), anyDouble());
+                assertThat(service.getPlayerBagPages(playerUuid)).containsExactly(1, 3);
+            } finally {
+                unregisterVaultEconomy(vault);
+            }
+        }
+
+        @Test
+        @DisplayName("With pages 1 and 3 the price is the price of page 4, and page 4 is the page created (UltiKits/UltiRemoteBag#46)")
+        void nonContiguousPagesPriceAndCreateTheSamePage() throws Exception {
+            Economy mockEconomy = mock(Economy.class);
+            when(mockEconomy.has(any(OfflinePlayer.class), anyDouble())).thenReturn(true);
+            when(mockEconomy.withdrawPlayer(any(OfflinePlayer.class), anyDouble())).thenReturn(
+                    new EconomyResponse(33750, 90000, EconomyResponse.ResponseType.SUCCESS, ""));
+            Plugin vault = registerVaultEconomy(mockEconomy);
+
+            try {
+                when(config.isEconomyEnabled()).thenReturn(true);
+                when(config.isPermissionBasedPages()).thenReturn(false);
+                when(config.getMaxPages()).thenReturn(10);
+                when(config.getBasePrice()).thenReturn(10000);
+                when(config.isPriceIncreaseEnabled()).thenReturn(true);
+                when(config.getPriceIncreaseRate()).thenReturn(0.5);
+                storePagesOneAndThree();
+
+                boolean result = service.purchaseBag(player);
+
+                assertThat(result).isTrue();
+                // calculatePrice(4) = 10000 * 1.5^3 = 33750; page 3's price would be 22500.
+                verify(mockEconomy).withdrawPlayer(eq(player), eq(33750.0));
+                verify(mockEconomy, never()).withdrawPlayer(any(OfflinePlayer.class), eq(22500.0));
+                assertThat(service.getPlayerBagPages(playerUuid)).containsExactly(1, 3, 4);
+            } finally {
+                unregisterVaultEconomy(vault);
+            }
+        }
+
+        @Test
+        @DisplayName("Control: contiguous pages 1 and 2 still price and create page 3 (UltiKits/UltiRemoteBag#46)")
+        void contiguousPagesStillPriceAndCreateTheNextPage() throws Exception {
+            Economy mockEconomy = mock(Economy.class);
+            when(mockEconomy.has(any(OfflinePlayer.class), anyDouble())).thenReturn(true);
+            when(mockEconomy.withdrawPlayer(any(OfflinePlayer.class), anyDouble())).thenReturn(
+                    new EconomyResponse(22500, 90000, EconomyResponse.ResponseType.SUCCESS, ""));
+            Plugin vault = registerVaultEconomy(mockEconomy);
+
+            try {
+                when(config.isEconomyEnabled()).thenReturn(true);
+                when(config.isPermissionBasedPages()).thenReturn(false);
+                when(config.getMaxPages()).thenReturn(10);
+                when(config.getBasePrice()).thenReturn(10000);
+                when(config.isPriceIncreaseEnabled()).thenReturn(true);
+                when(config.getPriceIncreaseRate()).thenReturn(0.5);
+                service.setBagPage(playerUuid, 1, new ItemStack[45]);
+                service.setBagPage(playerUuid, 2, new ItemStack[45]);
+
+                assertThat(service.purchaseBag(player)).isTrue();
+
+                verify(mockEconomy).withdrawPlayer(eq(player), eq(22500.0));
+                assertThat(service.getPlayerBagPages(playerUuid)).containsExactly(1, 2, 3);
+            } finally {
+                unregisterVaultEconomy(vault);
+            }
+        }
     }
 
     // ==================== deserializeItems ====================

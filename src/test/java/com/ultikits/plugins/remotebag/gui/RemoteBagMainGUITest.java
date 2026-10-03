@@ -625,6 +625,107 @@ class RemoteBagMainGUITest {
         }
     }
 
+    // ==================== pages that are not contiguous (UltiKits/UltiRemoteBag#46) ====================
+
+    /**
+     * After an administrator deletes page 2 the player keeps pages 1 and 3, and the page a purchase
+     * creates is page 4 (one past the highest). The icon, its price, its limit and its message must all
+     * name that page.
+     */
+    @Nested
+    @DisplayName("next page when the owner's pages are not contiguous")
+    class NonContiguousPages {
+
+        private List<Icon> provide(RemoteBagConfig cfg, int maxPages) throws Exception {
+            when(bagService.getPlayerBagPages(playerUuid)).thenReturn(Arrays.asList(1, 3));
+            when(bagService.getPlayerMaxPages(player)).thenReturn(maxPages);
+            lenient().when(bagService.getItemCount(eq(playerUuid), anyInt())).thenReturn(0);
+            lenient().when(bagService.getStackCount(eq(playerUuid), anyInt())).thenReturn(0);
+            ItemMeta mockMeta = mock(ItemMeta.class);
+            try (MockedConstruction<ItemStack> isMock = mockConstruction(ItemStack.class,
+                    (mock, context) -> when(mock.getItemMeta()).thenReturn(mockMeta))) {
+                RemoteBagMainGUI gui = new RemoteBagMainGUI(player, mockPlugin, bagService, lockService, cfg);
+                Method provideItems = RemoteBagMainGUI.class.getDeclaredMethod("provideItems");
+                provideItems.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                List<Icon> icons = (List<Icon>) provideItems.invoke(gui);
+                return icons;
+            }
+        }
+
+        private void click(Icon icon) {
+            try {
+                icon.getClickAction().accept(null);
+            } catch (RuntimeException e) {
+                // Re-opening the refreshed window needs the GUI library, which this test does not start.
+            }
+        }
+
+        @Test
+        @DisplayName("The purchase icon prices page 4, not page 3, and its success message names page 4")
+        void purchaseIconPricesAndNamesPageFour() throws Exception {
+            RemoteBagConfig cfg = UltiRemoteBagTestHelper.createDefaultConfig();
+            when(cfg.isEconomyEnabled()).thenReturn(true);
+            when(mockPlugin.i18n("purchase_success")).thenReturn("bought bag #{0}");
+            when(bagService.purchaseBag(player)).thenReturn(true);
+            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(1000000.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$");
+
+                List<Icon> icons = provide(cfg, 10);
+
+                // pages 1 and 3, plus the purchase icon
+                assertThat(icons).hasSize(3);
+                verify(bagService).calculatePrice(4);
+                verify(bagService, never()).calculatePrice(3);
+
+                click(icons.get(2));
+
+                verify(player).sendMessage(contains("bought bag #4"));
+            }
+        }
+
+        @Test
+        @DisplayName("At a limit of 3 no next-page icon is offered, because the page it would create is 4 (paid)")
+        void noPaidIconWhenTheNextPageNumberExceedsTheLimit() throws Exception {
+            RemoteBagConfig cfg = UltiRemoteBagTestHelper.createDefaultConfig();
+            when(cfg.isEconomyEnabled()).thenReturn(true);
+            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(1000000.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$");
+
+                assertThat(provide(cfg, 3)).as("only the two page icons").hasSize(2);
+            }
+        }
+
+        @Test
+        @DisplayName("At a limit of 3 no next-page icon is offered, because the page it would create is 4 (free)")
+        void noFreeIconWhenTheNextPageNumberExceedsTheLimit() throws Exception {
+            RemoteBagConfig cfg = UltiRemoteBagTestHelper.createDefaultConfig();
+            when(cfg.isEconomyEnabled()).thenReturn(false);
+
+            assertThat(provide(cfg, 3)).as("only the two page icons").hasSize(2);
+        }
+
+        @Test
+        @DisplayName("Control: at a limit of 4 the next-page icon is offered (paid and free)")
+        void iconIsOfferedWhenPageFourFits() throws Exception {
+            RemoteBagConfig paid = UltiRemoteBagTestHelper.createDefaultConfig();
+            when(paid.isEconomyEnabled()).thenReturn(true);
+            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(1000000.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$");
+                assertThat(provide(paid, 4)).hasSize(3);
+            }
+            RemoteBagConfig free = UltiRemoteBagTestHelper.createDefaultConfig();
+            when(free.isEconomyEnabled()).thenReturn(false);
+            assertThat(provide(free, 4)).hasSize(3);
+        }
+    }
+
     // ==================== afterSetup ====================
 
     @Nested
