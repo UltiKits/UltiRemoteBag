@@ -25,22 +25,30 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Language guard 2: no Chinese text in a {@code src/main/java} literal unless it is a catalogue key
  * or listed, with a written reason, in {@code src/test/resources/i18n/cjk-literal-exemptions.tsv}.
  * <p>
- * Detection contract, the same as the framework's {@code .github/scripts/check-cjk-scope.sh}: the
- * CJK Unified Ideographs block, U+4E00 through U+9FFF, and nothing wider. Unlike that script, this
- * guard is about literals, not comments: comments never count, and every string, character and
- * text-block literal counts after its Unicode and escape sequences are decoded. The literals come
- * from {@code javac}'s own syntax tree ({@link I18nSourceScanner}), not from a pattern match.
+ * Detection contract, the same as the framework's {@code .github/scripts/check-cjk-scope.sh}: a
+ * code point in the Han script ({@code Character.UnicodeScript.HAN}: the CJK Unified Ideographs
+ * block, its extensions, the supplementary ideograph planes, the compatibility ideographs and the
+ * radicals), in CJK Symbols and Punctuation (U+3000-U+303F), or in Halfwidth and Fullwidth Forms
+ * (U+FF00-U+FFEF). Kana (U+3040-U+30FF) is outside it. Unlike that script, this guard is about
+ * literals, not comments: comments never count, and every string, character and text-block literal
+ * counts after its Unicode and escape sequences are decoded. The literals come from {@code javac}'s
+ * own syntax tree ({@link I18nSourceScanner}), not from a pattern match.
  * <p>
  * Exemption file format: one line per literal, {@code path<TAB>exact literal<TAB>reason}. The path
  * is relative to the module root; the literal is the text between the quotes exactly as written in
  * the source; the reason is required. Lines starting with {@code #} and blank lines are ignored. An
  * exemption that no longer matches a literal fails the build, so the file cannot drift.
  * <p>
- * One structural category is skipped without an exemption line: the value of a {@code @ConfigEntry}
- * annotation's {@code comment} element, and nothing else. The reason is written next to the skip in
- * {@link #reportable}.
+ * Nothing is skipped by structure. Until UltiRemoteBag#48 the value of a {@code @ConfigEntry}
+ * annotation's {@code comment} element was skipped, because the framework wrote it verbatim into the
+ * operator's file and a module had no way to translate it. The framework now resolves a comment that is
+ * exactly one {@code {key}} token through the module's catalogue (UltiTools-Reborn#542), so a Chinese
+ * comment is a Chinese literal like any other and fails this guard; the token's own key and both of its
+ * catalogue entries are guard 1's business.
  * <p>
- * This file is copied unchanged into every module; only its package line and class name differ.
+ * This file is copied into the modules that have not adopted translatable comments with one deliberate
+ * difference: they still skip the {@code comment} element of {@code @ConfigEntry}. UltiRemoteBag has
+ * adopted them, and does not skip it.
  */
 @DisplayName("Language guard 2: Chinese literals")
 class UltiRemoteBagCjkLiteralScopeTest {
@@ -160,19 +168,9 @@ class UltiRemoteBagCjkLiteralScopeTest {
         return problems;
     }
 
-    /** Whether guard 2 judges this literal: Chinese text that is neither a key nor a config comment. */
+    /** Whether guard 2 judges this literal: Chinese text that is not a catalogue key. */
     static boolean reportable(Literal l) {
-        if (l.key || !I18nSourceScanner.containsCjk(l.value)) {
-            return false;
-        }
-        // Skipped by structure, not by exemption line: @ConfigEntry(comment = ...) text. The
-        // framework writes comment() verbatim into the operator's YAML and the panel
-        // (AbstractConfigEntity#setComments); there is no catalogue path for it, and a module
-        // cannot add one without a framework change. Translatable config comments are requested in
-        // UltiKits/UltiTools-Reborn#542. Only that one element of that one annotation is
-        // skipped -- not @ConfigEntry's path, not another annotation's comment, not the
-        // field's default value (pinned by the ConfigEntryComment tests below).
-        return !l.configComment;
+        return !l.key && I18nSourceScanner.containsCjk(l.value);
     }
 
     static List<String> violations(List<SourceFile> files, List<Exemption> exemptions) {
@@ -334,6 +332,84 @@ class UltiRemoteBagCjkLiteralScopeTest {
     }
 
     @Nested
+    @DisplayName("the detection contract: the framework's check-cjk-scope.sh, character for character")
+    class DetectionContract {
+
+        @Test
+        @DisplayName("CJK Extension A (U+3400, a planted character) is detected, in a catalogue value and in a literal")
+        void extensionAIsDetected() {
+            assertThat(I18nSourceScanner.containsCjk("\u3400")).isTrue();
+            assertThat(check("String s = \"\u3400\";")).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a supplementary-plane ideograph (U+20000, a surrogate pair) is detected as one code point")
+        void supplementaryIdeographIsDetected() {
+            assertThat(I18nSourceScanner.containsCjk("\uD840\uDC00")).isTrue();
+            assertThat(check("String s = \"a\uD840\uDC00b\";")).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a Kangxi radical (U+2F00) and a CJK radical supplement character (U+2E80) are detected")
+        void radicalsAreDetected() {
+            assertThat(I18nSourceScanner.containsCjk("\u2F00")).isTrue();
+            assertThat(I18nSourceScanner.containsCjk("\u2E80")).isTrue();
+        }
+
+        @Test
+        @DisplayName("a compatibility ideograph (U+F900) is detected")
+        void compatibilityIdeographIsDetected() {
+            assertThat(I18nSourceScanner.containsCjk("\uF900")).isTrue();
+            assertThat(check("String s = \"\uF900\";")).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("CJK symbols and punctuation (U+3001, the ideographic comma) are detected")
+        void cjkPunctuationIsDetected() {
+            assertThat(I18nSourceScanner.containsCjk("\u3001")).isTrue();
+            assertThat(check("String s = \"a\u3001b\";")).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a full-width form (U+FF1A, the full-width colon) is detected")
+        void fullWidthFormIsDetected() {
+            assertThat(I18nSourceScanner.containsCjk("\uFF1A")).isTrue();
+            assertThat(check("String s = \"a\uFF1Ab\";")).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("the edges of the two ranges: U+3000, U+303F, U+FF00 and U+FFEF are in; U+2FFF, U+3040, U+FEFF and U+FFF0 are out")
+        void rangeEdges() {
+            for (String in : new String[] {"\u3000", "\u303F", "\uFF00", "\uFFEF"}) {
+                assertThat(I18nSourceScanner.containsCjk(in)).as("in: " + in.codePointAt(0)).isTrue();
+            }
+            for (String out : new String[] {"\u2FFF", "\u3040", "\uFEFF", "\uFFF0"}) {
+                assertThat(I18nSourceScanner.containsCjk(out)).as("out: " + out.codePointAt(0)).isFalse();
+            }
+        }
+
+        @Test
+        @DisplayName("control: kana (hiragana U+3042, katakana U+30A2) is not detected, so the widening did not swallow it")
+        void kanaIsNotDetected() {
+            assertThat(I18nSourceScanner.containsCjk("\u3042\u30A2")).isFalse();
+            assertThat(check("String s = \"\u3042\u30A2\";")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("control: ASCII, Latin text, a lone surrogate and the symbols this module prints are not detected")
+        void ordinaryTextIsNotDetected() {
+            assertThat(I18nSourceScanner.containsCjk("Bag #1: 45/45 \u25B6 \u2716 \u00A7e caf\u00E9")).isFalse();
+            assertThat(I18nSourceScanner.containsCjk("\uD840")).as("a lone high surrogate is not a code point of Han").isFalse();
+        }
+
+        @Test
+        @DisplayName("control: the original range (U+4E2D) is still detected")
+        void originalRangeIsStillDetected() {
+            assertThat(I18nSourceScanner.containsCjk("\u4e2d")).isTrue();
+        }
+    }
+
+    @Nested
     @DisplayName("what is allowed")
     class Allowed {
 
@@ -402,29 +478,31 @@ class UltiRemoteBagCjkLiteralScopeTest {
         }
     }
 
-    /** The compiled class for {@code skipIsBoundToTheResolvedAnnotation}: only {@code a} carries the framework's annotation. */
-    static final class ConfigCommentFixture {
-        @com.ultikits.ultitools.annotations.ConfigEntry(path = "a", comment = "\u4e2d\u6587\u8bf4\u660e")
-        private String a;
-        private String b;
-        private String c;
-        private String d;
-
-        private ConfigCommentFixture() {
-        }
-    }
-
     @Nested
-    @DisplayName("@ConfigEntry(comment = ...) is skipped, and nothing else is")
+    @DisplayName("@ConfigEntry(comment = ...) is judged like any other literal (UltiRemoteBag#48)")
     class ConfigEntryComment {
 
         @Test
-        @DisplayName("Chinese in @ConfigEntry's comment element does not count, even concatenated")
-        void configEntryCommentIsSkipped() {
+        @DisplayName("Chinese in @ConfigEntry's comment element is reported, plain, concatenated and fully qualified")
+        void chineseConfigEntryCommentIsReported() {
             assertThat(check("@ConfigEntry(path = \"a.b\", comment = \"\u4e2d\u6587\") private String s = \"ok\";\n"
                     + "@ConfigEntry(path = \"a.c\", comment = \"\u4e2d\" + \"\u6587\") private int n = 1;\n"
                     + "@com.ultikits.ultitools.annotations.ConfigEntry(path = \"a.d\", comment = \"\u4e2d\") int m;"))
-                    .isEmpty();
+                    .hasSize(4);
+        }
+
+        @Test
+        @DisplayName("the English half of a bilingual comment does not hide its Chinese half")
+        void bilingualCommentIsReported() {
+            assertThat(check("@ConfigEntry(path = \"a\", comment = \"Timeout in seconds. \"\n"
+                    + " + \"\u8d85\u65f6\uff08\u79d2\uff09\") int t;")).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("a {key} token comment and an English comment pass: neither holds Chinese text")
+        void tokenAndEnglishCommentsPass() {
+            assertThat(check("@ConfigEntry(path = \"a\", comment = \"{config.a}\") int a;\n"
+                    + "@ConfigEntry(path = \"b\", comment = \"Maximum number of pages\") int b;")).isEmpty();
         }
 
         @Test
@@ -442,26 +520,9 @@ class UltiRemoteBagCjkLiteralScopeTest {
         }
 
         @Test
-        @DisplayName("the skip is bound to the field and the annotation the compiler resolved, not to matching text")
-        void skipIsBoundToTheResolvedAnnotation() {
-            SourceFile f = SourceFile.of("src/main/java/Sample.java", "class Sample {\n"
-                    + "@ConfigEntry(path = \"a\", comment = \"\u4e2d\u6587\u8bf4\u660e\") String a;\n"
-                    + "@other.ConfigEntry(comment = \"\u4e2d\u6587\") String b;\n"
-                    + "@ConfigEntry(path = \"c\", comment = \"\u6ce8\u91ca\") String c;\n"
-                    + "@com.ultikits.ultitools.annotations.ConfigEntry(path = \"d\", comment = \"\u8bf4\u660e\") String d;\n}\n");
-            I18nSourceScanner.confirmConfigComments(Collections.singletonList(f),
-                    name -> "Sample".equals(name) ? ConfigCommentFixture.class : null);
-            // a: the compiled field carries the framework's annotation. b: another type, although its text
-            // is part of a's comment. c and d: the compiled fields carry no framework annotation.
-            assertThat(violations(Collections.singletonList(f), parseExemptions(Collections.<String>emptyList())))
-                    .hasSize(3).anyMatch(v -> v.contains(":3 ")).anyMatch(v -> v.contains(":4 "))
-                    .anyMatch(v -> v.contains(":5 "));
-        }
-
-        @Test
         @DisplayName("negative control: the field's default value still counts")
         void fieldDefaultStillCounts() {
-            assertThat(check("@ConfigEntry(path = \"p\", comment = \"\u6ce8\u91ca\") private String s = \"\u4e2d\";"))
+            assertThat(check("@ConfigEntry(path = \"p\", comment = \"c\") private String s = \"\u4e2d\";"))
                     .singleElement().asString().contains("\"\u4e2d\"");
         }
     }

@@ -10,8 +10,13 @@ import org.assertj.core.api.Condition;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -101,6 +106,65 @@ class RemovedConfigKeyWarningTest {
                 .areExactly(1, containing("messages.bag_saved"));
     }
 
+
+    // ==================== presence is read through the framework (UltiRemoteBag#49) ====================
+
+    @Test
+    @DisplayName("A removed key written with no value (an explicit null) is still present, so it is warned about")
+    void warnsAboutAResidualKeyHoldingAnExplicitNull() {
+        List<String> warnings = bootWithText("gui_title:\n");
+
+        assertThat(warnings).hasSize(1);
+        assertThat(warnings.get(0)).contains("gui_title");
+    }
+
+    @Test
+    @DisplayName("A removed key is read by its whole path: 'messages' alone is not 'messages.no_permission'")
+    void aParentSectionAloneIsNotAResidualKey() {
+        assertThat(bootWithText("messages:\n  unrelated: 1\n")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Control: a file the framework could not parse reports no presence, so nothing is warned and the module still boots")
+    void warnsNothingWhenTheFileCouldNotBeParsed() {
+        assertThat(bootWithText("gui_title: [unclosed\n")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Control: a configuration the framework never bound to a plugin warns nothing")
+    void warnsNothingWithoutABoundPlugin() {
+        PluginLogger logger = mock(PluginLogger.class);
+
+        RemovedConfigKeys.warnIfStillPresent(new RemoteBagConfig(CONFIG_FILE), logger);
+
+        org.mockito.Mockito.verifyNoInteractions(logger);
+    }
+
+    @Test
+    @DisplayName("Control: a null configuration or a null logger warns nothing and does not throw")
+    void warnsNothingForNullArguments() {
+        PluginLogger logger = mock(PluginLogger.class);
+
+        RemovedConfigKeys.warnIfStillPresent(null, logger);
+        RemovedConfigKeys.warnIfStillPresent(new RemoteBagConfig(CONFIG_FILE), null);
+
+        org.mockito.Mockito.verifyNoInteractions(logger);
+    }
+
+    @Test
+    @DisplayName("The warning order is the declared order, whatever order the file lists the keys in")
+    void warningsFollowTheDeclaredOrder() {
+        List<String> warnings = bootWithText("messages:\n  bag_saved: x\n  page_locked: x\n  no_permission: x\n"
+                + "save_on_close: true\nrows_per_page: 6\ngui_title: t\nauto_save_interval: 300\n");
+
+        assertThat(warnings).hasSize(7);
+        String[] order = {"auto_save_interval", "gui_title", "messages.no_permission", "messages.page_locked",
+                "rows_per_page", "save_on_close", "messages.bag_saved"};
+        for (int i = 0; i < order.length; i++) {
+            assertThat(warnings.get(i)).contains("'" + order[i] + "'");
+        }
+    }
+
     // ==================== controls ====================
 
     @Test
@@ -160,43 +224,58 @@ class RemovedConfigKeyWarningTest {
                 .contains(removedKey);
     }
 
+    @TempDir
+    Path tempDir;
+
     /**
      * Boots the module against an operator file whose contents are {@code onDisk}, and returns
      * every line the module logged at WARN level while doing so.
      *
-     * <p>{@code AbstractConfigEntity#getConfig()} is the parsed operator file, including keys the
-     * entity no longer declares — which is exactly what a residual key is — so stubbing it is how
-     * a unit test presents "this key is still on disk".
+     * <p>The configuration is a real {@link RemoteBagConfig} loaded by the framework from a real
+     * file ({@code init}), so presence is whatever {@code AbstractConfigEntity#isPresentInFile}
+     * reports for that file, including keys the entity no longer declares -- which is exactly what a
+     * residual key is.
      */
     private List<String> bootWith(YamlConfiguration onDisk) {
         return bootWith(onDisk, "en");
     }
 
     private List<String> bootWith(YamlConfiguration onDisk, String language) {
-        UltiRemoteBag plugin = mock(UltiRemoteBag.class);
-        PluginLogger logger = mock(PluginLogger.class);
-        when(plugin.getLogger()).thenReturn(logger);
+        return boot(onDisk.saveToString(), language);
+    }
 
-        RemoteBagConfig config = mock(RemoteBagConfig.class);
-        when(config.getConfig()).thenReturn(onDisk);
-        when(config.getConfigFilePath()).thenReturn(CONFIG_FILE);
-        // The framework binds the configuration to the plugin that loaded it; the warning's text comes
-        // from that plugin's language file, answered here from the real catalogue for `language`.
-        when(config.getUltiToolsPlugin()).thenReturn(plugin);
-        when(plugin.i18n(org.mockito.ArgumentMatchers.anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer(language));
+    private List<String> bootWithText(String fileText) {
+        return boot(fileText, "en");
+    }
 
-        SimpleContainer context = mock(SimpleContainer.class);
-        when(plugin.getContext()).thenReturn(context);
-        when(context.getBean(RemoteBagService.class)).thenReturn(null);
-        when(context.getBean(BagLockService.class)).thenReturn(null);
-        when(context.getBean(RemoteBagConfig.class)).thenReturn(config);
+    private List<String> boot(String fileText, String language) {
+        try {
+            File file = new File(tempDir.toFile(), CONFIG_FILE);
+            Files.createDirectories(file.getParentFile().toPath());
+            Files.write(file.toPath(), fileText.getBytes(StandardCharsets.UTF_8));
 
-        when(plugin.registerSelf()).thenCallRealMethod();
-        plugin.registerSelf();
+            UltiRemoteBag plugin = ConfigFileFixture.plugin(tempDir, language);
+            PluginLogger logger = mock(PluginLogger.class);
+            when(plugin.getLogger()).thenReturn(logger);
 
-        ArgumentCaptor<String> warned = ArgumentCaptor.forClass(String.class);
-        verify(logger, atLeast(0)).warn(warned.capture());
-        return warned.getAllValues();
+            // The framework loads the file and binds the entity to the plugin, as the module's start does.
+            RemoteBagConfig config = ConfigFileFixture.load(plugin);
+
+            SimpleContainer context = mock(SimpleContainer.class);
+            when(plugin.getContext()).thenReturn(context);
+            when(context.getBean(RemoteBagService.class)).thenReturn(null);
+            when(context.getBean(BagLockService.class)).thenReturn(null);
+            when(context.getBean(RemoteBagConfig.class)).thenReturn(config);
+
+            when(plugin.registerSelf()).thenCallRealMethod();
+            plugin.registerSelf();
+
+            ArgumentCaptor<String> warned = ArgumentCaptor.forClass(String.class);
+            verify(logger, atLeast(0)).warn(warned.capture());
+            return warned.getAllValues();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("could not boot the module against the test file", e);
+        }
     }
 
     private static Condition<String> containing(String needle) {
