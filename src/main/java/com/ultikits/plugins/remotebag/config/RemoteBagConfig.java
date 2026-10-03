@@ -79,61 +79,56 @@ public class RemoteBagConfig extends AbstractConfigEntity {
 
     // ==================== 经济设置 ====================
 
-    @ConfigEntry(path = "economy.enabled", comment = "是否启用购买背包功能（需要 Vault）")
+    @ConfigEntry(path = "economy.enabled", comment = "{config_comment_economy_enabled}")
     private boolean economyEnabled = true;
 
     @Range(min = 0, max = 1000000000)
-    @ConfigEntry(path = "economy.base_price", comment = "购买背包的基础价格")
+    @ConfigEntry(path = "economy.base_price", comment = "{config_comment_economy_base_price}")
     private int basePrice = 10000;
 
-    @ConfigEntry(path = "economy.price_increase_enabled", comment = "是否启用价格递增（每购买一个背包价格增加）")
+    @ConfigEntry(path = "economy.price_increase_enabled", comment = "{config_comment_economy_price_increase_enabled}")
     private boolean priceIncreaseEnabled = true;
 
     @Range(min = 0.0, max = 10.0)
-    @ConfigEntry(path = "economy.price_increase_rate", comment = "价格递增比率（0.1 = 每个背包增加10%）")
+    @ConfigEntry(path = "economy.price_increase_rate", comment = "{config_comment_economy_price_increase_rate}")
     private double priceIncreaseRate = 0.1;
     
     // ==================== 音效设置 ====================
 
-    @ConfigEntry(path = "sound.enabled", comment = "是否启用音效")
+    @ConfigEntry(path = "sound.enabled", comment = "{config_comment_sound_enabled}")
     private boolean soundEnabled = true;
 
     @NotEmpty
-    @ConfigEntry(path = "sound.open", comment = "打开背包音效")
+    @ConfigEntry(path = "sound.open", comment = "{config_comment_sound_open}")
     private String openSound = "BLOCK_CHEST_OPEN";
 
     @NotEmpty
-    @ConfigEntry(path = "sound.close", comment = "关闭背包音效")
+    @ConfigEntry(path = "sound.close", comment = "{config_comment_sound_close}")
     private String closeSound = "BLOCK_CHEST_CLOSE";
 
     @NotEmpty
-    @ConfigEntry(path = "sound.purchase", comment = "购买成功音效")
+    @ConfigEntry(path = "sound.purchase", comment = "{config_comment_sound_purchase}")
     private String purchaseSound = "ENTITY_PLAYER_LEVELUP";
 
     @NotEmpty
-    @ConfigEntry(path = "sound.error", comment = "错误提示音效")
+    @ConfigEntry(path = "sound.error", comment = "{config_comment_sound_error}")
     private String errorSound = "ENTITY_VILLAGER_NO";
 
     @Range(min = 0.0, max = 1.0)
-    @ConfigEntry(path = "sound.volume", comment = "音量 (0.0-1.0)")
+    @ConfigEntry(path = "sound.volume", comment = "{config_comment_sound_volume}")
     private double soundVolume = 1.0;
 
     @Range(min = 0.5, max = 2.0)
-    @ConfigEntry(path = "sound.pitch", comment = "音调 (0.5-2.0)")
+    @ConfigEntry(path = "sound.pitch", comment = "{config_comment_sound_pitch}")
     private double soundPitch = 1.0;
 
     // ==================== 锁定设置 ====================
 
     @Range(min = 10, max = 3600)
-    @ConfigEntry(path = "lock.timeout_seconds",
-            comment = "Bag lock recovery timeout in seconds. Reclaims a lock whose holder's session "
-                    + "ended without releasing it; a holder who is online with the page open keeps "
-                    + "the lock however long they idle. "
-                    + "背包锁的回收超时时间（秒）。仅用于回收持有者会话异常结束而未释放的锁；"
-                    + "持有者在线且页面仍打开时，无论空闲多久都会保留该锁")
+    @ConfigEntry(path = "lock.timeout_seconds", comment = "{config_comment_lock_timeout_seconds}")
     private int lockTimeout = 300;
     
-    @ConfigEntry(path = "lock.notify_readonly_viewers", comment = "所有者开始使用背包时是否通知只读查看者")
+    @ConfigEntry(path = "lock.notify_readonly_viewers", comment = "{config_comment_lock_notify_readonly_viewers}")
     private boolean notifyReadonlyViewers = true;
 
     public RemoteBagConfig(String configFilePath) {

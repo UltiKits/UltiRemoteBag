@@ -129,3 +129,18 @@ removed_key_reason_page_locked: "asking for a page you may not open answers with
 removed_key_reason_rows_per_page: "a bag page holds a fixed 45 slots; the setting was removed rather than documented because it did not decide that in either direction -- it was the denominator of the main menu's 'Slots Used' line, which at its own default read 45/54 for a full page, and UltiKits/UltiRemoteBag#38 records making capacity genuinely configurable (UltiKits/UltiRemoteBag#24)"
 removed_key_reason_save_on_close: "closing a bag page in edit mode always saves it, which is what this module has always done; the switch was removed rather than wired because turning it off destroyed items the player had dragged into the window, and UltiKits/UltiRemoteBag#37 records what an implementation would have to do instead (UltiKits/UltiRemoteBag#18)"
 removed_key_reason_bag_saved: "the '/bag save' confirmation comes from this module's language files, key 'bag_saved_manually' (UltiKits/UltiRemoteBag#17)"
+
+# Comments written into config/remotebag.yml, resolved by the framework in the server's language
+config_comment_economy_enabled: "Whether buying bags is enabled (requires Vault)"
+config_comment_economy_base_price: "Base price for buying a bag"
+config_comment_economy_price_increase_enabled: "Whether the price increases with each bag bought"
+config_comment_economy_price_increase_rate: "Price increase rate (0.1 = the price rises 10% for each bag bought)"
+config_comment_sound_enabled: "Whether sound effects are enabled"
+config_comment_sound_open: "Sound played when a bag opens"
+config_comment_sound_close: "Sound played when a bag closes"
+config_comment_sound_purchase: "Sound played after a successful purchase"
+config_comment_sound_error: "Sound played when something goes wrong"
+config_comment_sound_volume: "Volume (0.0-1.0)"
+config_comment_sound_pitch: "Pitch (0.5-2.0)"
+config_comment_lock_timeout_seconds: "Bag lock recovery timeout in seconds. Reclaims a lock whose holder's session ended without releasing it; a holder who is online with the page open keeps the lock however long they idle."
+config_comment_lock_notify_readonly_viewers: "Whether read-only viewers are notified when the owner starts using the bag"

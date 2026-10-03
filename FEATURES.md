@@ -195,6 +195,16 @@ documentation. Confirmed for each remaining key by
 itself; the control for that query is `grep -rn getBagSavedMessage src/main/java`, which returns
 nothing at all because the field is gone.
 
+**Comments follow the server's `language`.** Thirteen settings (`economy.enabled`, `economy.base_price`,
+`economy.price_increase_enabled`, `economy.price_increase_rate`, `sound.enabled`, `sound.open`, `sound.close`,
+`sound.purchase`, `sound.error`, `sound.volume`, `sound.pitch`, `lock.timeout_seconds`,
+`lock.notify_readonly_viewers`) declare their comment as one `{config_comment_<path>}` language key
+(`lang/en.yml`, `lang/zh.yml`), which the framework resolves in the server's `language` each time it writes
+the file (`UltiTools-Reborn#542`), so a fresh install under `language: en` writes English comments. The
+other four settings' comments were already English. On an existing file the comments on those thirteen
+settings switch at the next start, values untouched, and a hand-written comment there is replaced
+(`UltiKits/UltiRemoteBag#48`).
+
 A removed key is not removed from an operator's file — the framework never deletes a key it no
 longer declares — so all seven are still on disk on every server that has run this module. See
 `ultiremotebag.lifecycle.removed-key-warning` below for what the module now says about that.
