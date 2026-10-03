@@ -350,6 +350,13 @@ class UltiRemoteBagCjkLiteralScopeTest {
         }
 
         @Test
+        @DisplayName("a Kangxi radical (U+2F00) and a CJK radical supplement character (U+2E80) are detected")
+        void radicalsAreDetected() {
+            assertThat(I18nSourceScanner.containsCjk("\u2F00")).isTrue();
+            assertThat(I18nSourceScanner.containsCjk("\u2E80")).isTrue();
+        }
+
+        @Test
         @DisplayName("a compatibility ideograph (U+F900) is detected")
         void compatibilityIdeographIsDetected() {
             assertThat(I18nSourceScanner.containsCjk("\uF900")).isTrue();

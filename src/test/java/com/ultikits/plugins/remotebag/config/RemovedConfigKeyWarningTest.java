@@ -3,7 +3,6 @@ package com.ultikits.plugins.remotebag.config;
 import com.ultikits.plugins.remotebag.UltiRemoteBag;
 import com.ultikits.plugins.remotebag.service.BagLockService;
 import com.ultikits.plugins.remotebag.service.RemoteBagService;
-import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.context.SimpleContainer;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
 
@@ -15,7 +14,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
 import java.io.File;
-import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -250,27 +248,18 @@ class RemovedConfigKeyWarningTest {
         return boot(fileText, "en");
     }
 
-    @SuppressWarnings("PMD.AvoidAccessibilityAlteration") // getConfigFile is protected final on the framework base class
     private List<String> boot(String fileText, String language) {
         try {
             File file = new File(tempDir.toFile(), CONFIG_FILE);
             Files.createDirectories(file.getParentFile().toPath());
             Files.write(file.toPath(), fileText.getBytes(StandardCharsets.UTF_8));
 
-            UltiRemoteBag plugin = mock(UltiRemoteBag.class);
+            UltiRemoteBag plugin = ConfigFileFixture.plugin(tempDir, language);
             PluginLogger logger = mock(PluginLogger.class);
             when(plugin.getLogger()).thenReturn(logger);
-            when(plugin.getPluginName()).thenReturn("UltiRemoteBag");
-            when(plugin.i18n(org.mockito.ArgumentMatchers.anyString()))
-                    .thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer(language));
-            Method configFile = UltiToolsPlugin.class.getDeclaredMethod("getConfigFile", String.class);
-            configFile.setAccessible(true);
-            when(configFile.invoke(plugin, org.mockito.ArgumentMatchers.anyString())).thenAnswer(
-                    inv -> new File(tempDir.toFile(), inv.<String>getArgument(0)));
 
             // The framework loads the file and binds the entity to the plugin, as the module's start does.
-            RemoteBagConfig config = new RemoteBagConfig(CONFIG_FILE);
-            config.init(plugin);
+            RemoteBagConfig config = ConfigFileFixture.load(plugin);
 
             SimpleContainer context = mock(SimpleContainer.class);
             when(plugin.getContext()).thenReturn(context);
@@ -284,7 +273,7 @@ class RemovedConfigKeyWarningTest {
             ArgumentCaptor<String> warned = ArgumentCaptor.forClass(String.class);
             verify(logger, atLeast(0)).warn(warned.capture());
             return warned.getAllValues();
-        } catch (Exception e) {
+        } catch (java.io.IOException e) {
             throw new IllegalStateException("could not boot the module against the test file", e);
         }
     }

@@ -361,14 +361,16 @@ final class I18nSourceScanner {
         return scan;
     }
 
-    /** The framework's annotation, whose {@code comment} guard 2 skips. */
+    /** The framework's annotation, whose {@code comment} this scanner reads (guard 1: token comments are key sites). */
     static final String FRAMEWORK_CONFIG_ENTRY = "com.ultikits.ultitools.annotations.ConfigEntry";
 
     /**
-     * Keeps guard 2's {@code @ConfigEntry(comment = ...)} skip only where the annotation is the
-     * framework's. The parser marks a literal by the annotation's written name, which an unrelated
+     * Keeps the {@code @ConfigEntry(comment = ...)} mark on a literal only where the annotation is the
+     * framework's, and turns a comment that is exactly one {@code {key}} token into a
+     * {@link SiteKind#CONFIG_COMMENT} key site for guard 1. (Guard 2 no longer skips these literals:
+     * UltiRemoteBag#48.) The parser marks a literal by the annotation's written name, which an unrelated
      * annotation called {@code ConfigEntry} also matches. Each marked literal is bound to the field
-     * its annotation sits on, and the skip stays only when all of these hold:
+     * its annotation sits on, and the mark stays only when all of these hold:
      * <ul>
      * <li>the annotation is written {@code ConfigEntry} or with the framework's full name;</li>
      * <li>that field, read from the compiled class, carries the framework's {@code ConfigEntry};</li>
