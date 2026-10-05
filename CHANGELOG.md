@@ -9,6 +9,51 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- A bag save whose stored row has been deleted in the meantime is now reported as not saved. On a MySQL
+  database shared by several servers, an administrator on another server who deletes a bag page at the moment
+  this server saves it made that save write nothing while `/bag save` still answered that the bag was saved;
+  now the save logs `Failed to update bag data`, the other pages are still saved, and the save is reported as
+  failed (UltiKits/UltiRemoteBag#50).
+- 已存储的背包行在保存时已被删除，现在会报告为未保存。多个服务器共用同一个 MySQL 数据库时，若另一台服务器上的管理员恰好在本服务器保存时
+  删除了某一页背包，该次保存什么也没写入，`/bag save` 却仍回复背包已保存；现在会记录 `Failed to update bag data`，其余页面照常保存，
+  并且报告保存失败（UltiKits/UltiRemoteBag#50）。
+
+- `config/remotebag.yml` now writes its comments in the server's language. Thirteen comments (the `economy.*`,
+  `sound.*` and `lock.*` settings) used to be Chinese-only, so a fresh install under `language: en` got a file
+  with Chinese comments. Each is now a language-file key that the framework resolves in the server's `language`
+  every time it writes the file, with an English and a Chinese entry in `lang/en.yml` and `lang/zh.yml`. On an
+  existing server the comments the framework wrote on these thirteen settings, the ones earlier versions wrote
+  included (also the two older comments above `lock.timeout_seconds`, release v1.0.0's and the later bilingual
+  one, UltiKits/UltiRemoteBag#52), switch to the server's language at the next start, and after you change
+  `language` and run a bare `/ul reload`; values are
+  untouched, and a comment you wrote yourself is kept as you wrote it (UltiKits/UltiTools-Reborn#611)
+  (UltiKits/UltiRemoteBag#48).
+- `config/remotebag.yml` 的注释现在跟随服务器语言。此前有十三条注释（`economy.*`、`sound.*`、`lock.*` 各设置）只有中文，`language: en`
+  的全新安装得到的文件注释是中文。现在每条注释都是一个语言文件键，框架每次写入文件时按服务器的 `language` 解析，`lang/en.yml` 与 `lang/zh.yml`
+  各有英文和中文条目。已有服务器上框架在这十三个设置上写下的注释（包括旧版本写下的注释，`lock.timeout_seconds` 上方的两种旧注释——v1.0.0 版本的和之后的中英双语注释——也在内，
+  UltiKits/UltiRemoteBag#52）会在下次启动时、以及你修改 `language` 并执行不带参数的 `/ul reload` 后切换为服务器语言；设置值不受影响，
+  你自己写的注释保持原样（UltiKits/UltiTools-Reborn#611）（UltiKits/UltiRemoteBag#48）。
+
+- When an administrator has deleted one of a player's middle bag pages (for example the player keeps pages 1
+  and 3), the next-page icon, its price, the page limit and the page that is created now all use the same page
+  number, the one after the highest page the player has (page 4 in the example). Before, the icon and the price
+  counted pages instead and said "page 3" while page 4 was created, and at a limit of 3 the purchase took the
+  money and then refused to create page 4. Now the icon is not offered when the next page number is above the
+  limit, so nothing is charged for a page that cannot be created (UltiKits/UltiRemoteBag#46).
+- 管理员删除了玩家中间的某一页背包后（例如玩家只剩第 1、3 页），下一页图标、价格、页数上限检查和实际创建的页码现在统一使用同一个页码：
+  玩家现有最高页的下一页（例子中为第 4 页）。此前图标和价格按「页数」计算，显示「第 3 页」而实际创建的是第 4 页；页数上限为 3 时，购买会先扣款、
+  再因无法创建第 4 页而失败。现在下一页页码超过上限时不再显示该图标，因此不会为无法创建的页扣款（UltiKits/UltiRemoteBag#46）。
+
+- The module loads on UltiTools-API 6.3.0 again. Its start-up warning about settings removed in 6.3.0 that
+  are still in `config/remotebag.yml` used to read the configuration object that 6.3.0 removes, so on 6.3.0
+  the module was refused at load with a `NoSuchMethodError`. It now asks the framework whether each removed
+  key is present in the file (`isPresentInFile`), with the same warnings in the same order and language as
+  before: one per removed key still in the file, none for a file without them, and none for a file the
+  framework could not parse (UltiKits/UltiRemoteBag#49).
+- 本模块可再次在 UltiTools-API 6.3.0 上加载。此前启动时关于「6.3.0 已移除、但仍留在 `config/remotebag.yml` 中的设置」的警告读取的是
+  6.3.0 移除的配置对象，因此在 6.3.0 上模块加载时被拒绝并抛出 `NoSuchMethodError`。现在改为向框架询问每个已移除的键是否出现在文件中
+  （`isPresentInFile`），警告内容、顺序和语言与之前相同：文件中仍有的已移除键各一条，没有则不警告，框架无法解析的文件也不警告（UltiKits/UltiRemoteBag#49）。
+
 - With `economy.enabled: false`, or no economy plugin installed, the bag list window (`/bag`) now shows
   a green `Create New Bag` icon while the player is under their page limit; clicking it adds the next page
   for free and answers `Created bag #<n>!`. Before, only the paid purchase icon existed, and it was hidden

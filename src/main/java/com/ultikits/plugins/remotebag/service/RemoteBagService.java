@@ -4,6 +4,7 @@ import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.RemoteBagData;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Service;
+import com.ultikits.ultitools.exceptions.DataAccessException;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.utils.EconomyUtils;
 
@@ -122,11 +123,15 @@ public class RemoteBagService {
     /**
      * Save bag to database.
      * <p>
-     * Reports whether EVERY cached page reached the database. Two ways it can be false, and a caller
-     * that announces a save has to be able to tell both apart from success: nothing is cached at all
-     * for a player who has not opened a bag this session, so no row is written; and an update can fail
-     * with {@link IllegalAccessException}, which is logged and swallowed here because one bad page
-     * must not cost the others. Use {@link #hasCachedPages(UUID)} to distinguish the two.
+     * Reports whether EVERY cached page reached the database. Ways it can be false, and a caller
+     * that announces a save has to be able to tell them apart from success: nothing is cached at all
+     * for a player who has not opened a bag this session, so no row is written; an update can fail
+     * because the entity's fields cannot be read (the {@link com.ultikits.ultitools.exceptions.DataAccessException}
+     * that {@code DataOperator#updateCounted} wraps an {@link IllegalAccessException} in); or the
+     * page's stored row is gone by the time of the write (another server on a shared database deleted
+     * it), which {@code updateCounted} reports as 0 rows (UltiKits/UltiRemoteBag#50). The last two are
+     * logged and swallowed here because one bad page must not cost the others. Any other storage
+     * failure propagates. Use {@link #hasCachedPages(UUID)} to tell "nothing to write" from "a write failed".
      *
      * @param playerUuid 玩家 UUID
      * @return true if every cached page was inserted or updated; false if there was nothing to write
@@ -155,9 +160,22 @@ public class RemoteBagService {
                 data.setContents(contents);
                 data.setLastUpdated(System.currentTimeMillis());
                 try {
-                    dataOperator.update(data);
-                } catch (IllegalAccessException e) {
-                    plugin.getLogger().error(plugin.i18n("log_bag_update_failed"), e);
+                    // Counted: a row deleted between the read above and this write (another server on a
+                    // shared database) matches nothing, and update(T) would return normally for it
+                    // (UltiKits/UltiRemoteBag#50, UltiTools-Reborn#558).
+                    if (dataOperator.updateCounted(data) == 0) {
+                        plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
+                        // Same outcome as an unwritable page: keep going, but do not report a completed save.
+                        written = false;
+                    }
+                } catch (DataAccessException e) {
+                    // updateCounted wraps a field-access failure of the write in this exception; that is the
+                    // one the old update(T) threw as IllegalAccessException. Any other storage failure
+                    // propagates exactly as it did.
+                    if (!(e.getCause() instanceof IllegalAccessException)) {
+                        throw e;
+                    }
+                    plugin.getLogger().error(plugin.i18n("log_bag_update_failed"), e.getCause());
                     // Keep going -- one unwritable page must not cost the others -- but do not let the
                     // caller report a completed save.
                     written = false;
@@ -357,6 +375,25 @@ public class RemoteBagService {
     }
 
     /**
+     * The number the next page a purchase or a free creation adds gets: one past the highest page
+     * the owner is offered, whatever gaps an administrator's deletions left below it.
+     * <p>
+     * The owner's window (the icon and its price), {@link #purchaseBag} (the limit check and the
+     * price) and the creation itself all take this one number, so what the player is shown, what
+     * they are charged for and what they are given are the same page. They used to count pages
+     * instead ({@code size + 1}), which disagrees with the created page as soon as the pages are
+     * not contiguous: with pages 1 and 3 the icon and the price said page 3 and page 4 was
+     * created (UltiKits/UltiRemoteBag#46).
+     *
+     * @param pagesOffered the pages offered to the owner, as {@link #pagesOfferedToOwner} returns
+     *                     them; never empty
+     * @return the page number a new page gets
+     */
+    public static int nextPageNumber(List<Integer> pagesOffered) {
+        return Collections.max(pagesOffered) + 1;
+    }
+
+    /**
      * 获取指定背包页的物品总数量
      *
      * @param playerUuid 玩家 UUID
@@ -429,7 +466,7 @@ public class RemoteBagService {
         }
         
         List<Integer> existingPages = pagesOfferedToOwner(getPlayerBagPages(player.getUniqueId()));
-        int nextBagNum = existingPages.size() + 1;
+        int nextBagNum = nextPageNumber(existingPages);
         
         // 检查是否超过上限
         int maxPages = getPlayerMaxPages(player);
@@ -459,7 +496,7 @@ public class RemoteBagService {
         loadBagIfNeeded(playerUuid);
         
         List<Integer> existingPages = pagesOfferedToOwner(getPlayerBagPages(playerUuid));
-        int nextPage = Collections.max(existingPages) + 1;
+        int nextPage = nextPageNumber(existingPages);
         
         // 检查是否超过上限
         int maxPages = getPlayerMaxPages(player);

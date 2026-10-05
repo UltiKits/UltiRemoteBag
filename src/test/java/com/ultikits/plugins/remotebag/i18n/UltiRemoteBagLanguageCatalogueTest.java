@@ -854,6 +854,60 @@ class UltiRemoteBagLanguageCatalogueTest {
                             "cmd.description"));
         }
 
+        /** The compiled class for the comment-token tests: only {@code a} carries the framework's annotation. */
+        final class ConfigCommentFixture {
+            @com.ultikits.ultitools.annotations.ConfigEntry(path = "a", comment = "{config.a}")
+            private int a;
+            @com.ultikits.ultitools.annotations.ConfigEntry(path = "c", comment = "{config.c1}{config.c2}")
+            private int c;
+            private int b;
+            private int d;
+        }
+
+        private SourceFile confirmed(String body) {
+            SourceFile f = source(body);
+            I18nSourceScanner.confirmConfigComments(Collections.singletonList(f),
+                    name -> "Sample".equals(name) ? ConfigCommentFixture.class : null);
+            return f;
+        }
+
+        @Test
+        @DisplayName("a @ConfigEntry comment that is one {key} token is a key site, trimmed as the framework trims it (UltiRemoteBag#48)")
+        void configCommentTokenIsAKeySite() {
+            SourceFile f = confirmed("@ConfigEntry(path = \"a\", comment = \"  {config.a} \") private int a;");
+            assertThat(f.sites).extracting(s -> s.kind, s -> s.literalKey)
+                    .containsExactly(org.assertj.core.api.Assertions.tuple(SiteKind.CONFIG_COMMENT, "config.a"));
+        }
+
+        @Test
+        @DisplayName("a token comment whose key is missing from a catalogue is reported, naming key, file and language")
+        void missingCommentKeyIsReported() throws IOException {
+            SourceFile f = confirmed("@ConfigEntry(path = \"a\", comment = \"{config.a}\") private int a;");
+            assertThat(missingLiteralKeys(Collections.singletonList(f),
+                    Arrays.asList(yaml("en", "config.a: \"x\"\n"), yaml("zh", "other: \"y\"\n"))))
+                    .containsExactly("key \"config.a\" (src/main/java/Sample.java:2) is missing from lang/zh.yml");
+        }
+
+        @Test
+        @DisplayName("a catalogue entry only a comment token uses is reachable; one nothing uses is not")
+        void commentKeyMakesAnEntryReachable() throws IOException {
+            SourceFile f = confirmed("@ConfigEntry(path = \"a\", comment = \"{config.a}\") private int a;");
+            assertThat(unreachableCatalogueKeys(Collections.singletonList(f), Collections.<DynamicSite>emptyList(),
+                    Collections.singletonList(yaml("en", "config.a: \"x\"\nconfig.dead: \"y\"\n"))))
+                    .containsExactly("lang/en.yml declares \"config.dead\", which no code can produce");
+        }
+
+        @Test
+        @DisplayName("negative controls: a literal comment, a comment that is two literals, another annotation and an unconfirmed field are not key sites")
+        void otherCommentsAreNotKeySites() {
+            assertThat(confirmed("@ConfigEntry(path = \"b\", comment = \"Price ({0})\") private int b;").sites).isEmpty();
+            assertThat(confirmed("@ConfigEntry(path = \"c\", comment = \"{config.c1}\" + \"{config.c2}\") private int c;")
+                    .sites).isEmpty();
+            assertThat(confirmed("@other.ConfigEntry(comment = \"{config.a}\") private int a;").sites).isEmpty();
+            assertThat(confirmed("@ConfigEntry(path = \"d\", comment = \"{config.d}\") private int d;").sites)
+                    .as("the compiled field d carries no framework annotation").isEmpty();
+        }
+
         @Test
         @DisplayName("a catalogue key nothing produces is reported; one a matched dynamic site produces is not")
         void unreachableKeys() throws IOException {
@@ -883,6 +937,18 @@ class UltiRemoteBagLanguageCatalogueTest {
             List<String> problems = chineseTextInEnglish(Arrays.asList(
                     yaml("en", "a: \"ok\"\nb: \"\u4e2d\"\n"), yaml("zh", "a: \"\u4e2d\"\n")));
             assertThat(problems).singleElement().asString().contains("lang/en.yml").contains("\"b\"");
+        }
+
+        @Test
+        @DisplayName("full-width punctuation, a symbol and an extension-plane ideograph in the English catalogue are reported (UltiRemoteBag#44)")
+        void widenedRangesAreReportedInEnglish() throws IOException {
+            List<String> problems = chineseTextInEnglish(Arrays.asList(
+                    yaml("en", "a: \"Saved\uFF1A\"\nb: \"x\u3001y\"\nc: \"\uD840\uDC00\"\nd: \"\u3400\"\ne: \"\u3042\"\nf: \"Bag #1\"\n"),
+                    yaml("zh", "a: \"\u4e2d\"\n")));
+            // Kana (e) and plain text (f) are the controls; a-d each hold a character outside U+4E00-U+9FFF only.
+            assertThat(problems).hasSize(4);
+            assertThat(problems).anyMatch(p -> p.contains("\"a\"")).anyMatch(p -> p.contains("\"b\""))
+                    .anyMatch(p -> p.contains("\"c\"")).anyMatch(p -> p.contains("\"d\""));
         }
 
         @Test

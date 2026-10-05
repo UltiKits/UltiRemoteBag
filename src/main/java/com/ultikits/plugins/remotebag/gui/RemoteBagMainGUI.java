@@ -20,7 +20,6 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -104,8 +103,10 @@ public class RemoteBagMainGUI extends BasePaginationPage {
         // present, free otherwise. The free icon is the only way to reach the service's free path;
         // before it existed, a server with economy off had no way to add a page at all
         // (UltiKits/UltiRemoteBag#25).
+        // The page the icon would add is the next page NUMBER, the number the service checks against the limit
+        // (UltiKits/UltiRemoteBag#46); with pages 1 and 3 that is page 4, not "the third page".
         int maxPages = bagService.getPlayerMaxPages(player);
-        if (bagPages.size() < maxPages) {
+        if (RemoteBagService.nextPageNumber(bagPages) <= maxPages) {
             if (pagesArePaid()) {
                 icons.add(createPurchaseIcon());
             } else {
@@ -182,7 +183,7 @@ public class RemoteBagMainGUI extends BasePaginationPage {
      * @return 购买按钮图标
      */
     private Icon createPurchaseIcon() {
-        int nextBagNum = bagPages.size() + 1;
+        int nextBagNum = RemoteBagService.nextPageNumber(bagPages);
         int price = bagService.calculatePrice(nextBagNum);
         double balance = EconomyUtils.getBalance(player);
         boolean canAfford = balance >= price;
@@ -261,7 +262,7 @@ public class RemoteBagMainGUI extends BasePaginationPage {
      */
     private Icon createFreeCreateIcon() {
         // The page the free path creates: one past the highest page offered (RemoteBagService#createNewBagPage).
-        int nextBagNum = Collections.max(bagPages) + 1;
+        int nextBagNum = RemoteBagService.nextPageNumber(bagPages);
         ItemStack item = new ItemStack(Material.MINECART);
         ItemMeta meta = item.getItemMeta();
 
