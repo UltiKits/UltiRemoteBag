@@ -120,6 +120,38 @@ class RemoteBagConfigCommentsTest {
         assertCommentsIn("zh");
     }
 
+    /** The comment every earlier version wrote above {@code lock.timeout_seconds}: English, then Chinese (master 4cac234). */
+    private static final String OLD_LOCK_TIMEOUT_COMMENT = "Bag lock recovery timeout in seconds. Reclaims a lock whose holder's session "
+            + "ended without releasing it; a holder who is online with the page open keeps "
+            + "the lock however long they idle. "
+            + "\u80cc\u5305\u9501\u7684\u56de\u6536\u8d85\u65f6\u65f6\u95f4\uff08\u79d2\uff09\u3002"
+            + "\u4ec5\u7528\u4e8e\u56de\u6536\u6301\u6709\u8005\u4f1a\u8bdd\u5f02\u5e38\u7ed3\u675f\u800c\u672a\u91ca\u653e\u7684\u9501\uff1b"
+            + "\u6301\u6709\u8005\u5728\u7ebf\u4e14\u9875\u9762\u4ecd\u6253\u5f00\u65f6\uff0c"
+            + "\u65e0\u8bba\u7a7a\u95f2\u591a\u4e45\u90fd\u4f1a\u4fdd\u7559\u8be5\u9501";
+
+    @Test
+    @DisplayName("an upgraded file holding the bilingual lock.timeout_seconds comment earlier versions wrote gets the server language's comment (#52)")
+    void upgradedLockTimeoutCommentFollowsTheLanguage() throws Exception {
+        for (String language : new String[] {"en", "zh"}) {
+            YamlConfiguration old = new YamlConfiguration();
+            old.options().parseComments(true);
+            old.set("lock.timeout_seconds", 120);
+            old.setComments("lock.timeout_seconds", Collections.singletonList(OLD_LOCK_TIMEOUT_COMMENT));
+            File file = new File(tempDir.toFile(), ConfigFileFixture.CONFIG_FILE);
+            Files.createDirectories(file.getParentFile().toPath());
+            old.save(file);
+            assertThat(fileOnDisk().getComments("lock.timeout_seconds")).as("the old comment, as written")
+                    .containsExactly(OLD_LOCK_TIMEOUT_COMMENT);
+
+            RemoteBagConfig config = ConfigFileFixture.load(ConfigFileFixture.plugin(tempDir, language));
+
+            assertThat(fileOnDisk().getComments("lock.timeout_seconds")).as(language)
+                    .containsExactly(CatalogueText.text(language, keyOf(declaredComments().get("lock.timeout_seconds"))));
+            assertThat(config.getLockTimeout()).as("the operator's value").isEqualTo(120);
+            Files.delete(file.toPath());
+        }
+    }
+
     @Test
     @DisplayName("an upgraded file written with the old Chinese comments gets English ones at the next start, keeps its values, and then stays byte-identical")
     void upgradedFileSwitchesToTheServerLanguageAndKeepsValues() throws Exception {
