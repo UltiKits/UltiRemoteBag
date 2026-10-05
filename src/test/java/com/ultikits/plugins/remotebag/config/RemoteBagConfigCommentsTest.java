@@ -120,7 +120,10 @@ class RemoteBagConfigCommentsTest {
         assertCommentsIn("zh");
     }
 
-    /** The comment every earlier version wrote above {@code lock.timeout_seconds}: English, then Chinese (master 4cac234). */
+    /**
+     * The comment {@code master} wrote above {@code lock.timeout_seconds} from {@code bd168a2} (2026-09-21) to {@code 4cac234}:
+     * English, then Chinese.
+     */
     private static final String OLD_LOCK_TIMEOUT_COMMENT = "Bag lock recovery timeout in seconds. Reclaims a lock whose holder's session "
             + "ended without releasing it; a holder who is online with the page open keeps "
             + "the lock however long they idle. "
@@ -129,26 +132,32 @@ class RemoteBagConfigCommentsTest {
             + "\u6301\u6709\u8005\u5728\u7ebf\u4e14\u9875\u9762\u4ecd\u6253\u5f00\u65f6\uff0c"
             + "\u65e0\u8bba\u7a7a\u95f2\u591a\u4e45\u90fd\u4f1a\u4fdd\u7559\u8be5\u9501";
 
+    /** The comment release {@code v1.0.0} (and every {@code master} build before {@code bd168a2}) wrote above {@code lock.timeout_seconds}. */
+    private static final String V1_LOCK_TIMEOUT_COMMENT =
+            "\u80cc\u5305\u9501\u8d85\u65f6\u65f6\u95f4\uff08\u79d2\uff09\uff0c\u8d85\u65f6\u540e\u81ea\u52a8\u91ca\u653e";
+
     @Test
-    @DisplayName("an upgraded file holding the bilingual lock.timeout_seconds comment earlier versions wrote gets the server language's comment (#52)")
+    @DisplayName("an upgraded file holding either lock.timeout_seconds comment an earlier version wrote (release v1.0.0's, or master's bilingual one) gets the server language's comment (#52)")
     void upgradedLockTimeoutCommentFollowsTheLanguage() throws Exception {
-        for (String language : new String[] {"en", "zh"}) {
-            YamlConfiguration old = new YamlConfiguration();
-            old.options().parseComments(true);
-            old.set("lock.timeout_seconds", 120);
-            old.setComments("lock.timeout_seconds", Collections.singletonList(OLD_LOCK_TIMEOUT_COMMENT));
-            File file = new File(tempDir.toFile(), ConfigFileFixture.CONFIG_FILE);
-            Files.createDirectories(file.getParentFile().toPath());
-            old.save(file);
-            assertThat(fileOnDisk().getComments("lock.timeout_seconds")).as("the old comment, as written")
-                    .containsExactly(OLD_LOCK_TIMEOUT_COMMENT);
+        for (String oldComment : new String[] {V1_LOCK_TIMEOUT_COMMENT, OLD_LOCK_TIMEOUT_COMMENT}) {
+            for (String language : new String[] {"en", "zh"}) {
+                YamlConfiguration old = new YamlConfiguration();
+                old.options().parseComments(true);
+                old.set("lock.timeout_seconds", 120);
+                old.setComments("lock.timeout_seconds", Collections.singletonList(oldComment));
+                File file = new File(tempDir.toFile(), ConfigFileFixture.CONFIG_FILE);
+                Files.createDirectories(file.getParentFile().toPath());
+                old.save(file);
+                assertThat(fileOnDisk().getComments("lock.timeout_seconds")).as("the old comment, as written")
+                        .containsExactly(oldComment);
 
-            RemoteBagConfig config = ConfigFileFixture.load(ConfigFileFixture.plugin(tempDir, language));
+                RemoteBagConfig config = ConfigFileFixture.load(ConfigFileFixture.plugin(tempDir, language));
 
-            assertThat(fileOnDisk().getComments("lock.timeout_seconds")).as(language)
-                    .containsExactly(CatalogueText.text(language, keyOf(declaredComments().get("lock.timeout_seconds"))));
-            assertThat(config.getLockTimeout()).as("the operator's value").isEqualTo(120);
-            Files.delete(file.toPath());
+                assertThat(fileOnDisk().getComments("lock.timeout_seconds")).as(language + " after " + oldComment)
+                        .containsExactly(CatalogueText.text(language, keyOf(declaredComments().get("lock.timeout_seconds"))));
+                assertThat(config.getLockTimeout()).as("the operator's value").isEqualTo(120);
+                Files.delete(file.toPath());
+            }
         }
     }
 
