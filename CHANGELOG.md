@@ -23,14 +23,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with Chinese comments. Each is now a language-file key that the framework resolves in the server's `language`
   every time it writes the file, with an English and a Chinese entry in `lang/en.yml` and `lang/zh.yml`. On an
   existing server the comments the framework wrote on these thirteen settings, the ones earlier versions wrote
-  included (also the old bilingual comment above `lock.timeout_seconds`, UltiKits/UltiRemoteBag#52), switch to
-  the server's language at the next start, and after you change `language` and run `/ul reload`; values are
+  included (also the two older comments above `lock.timeout_seconds`, release v1.0.0's and the later bilingual
+  one, UltiKits/UltiRemoteBag#52), switch to the server's language at the next start, and after you change
+  `language` and run a bare `/ul reload`; values are
   untouched, and a comment you wrote yourself is kept as you wrote it (UltiKits/UltiTools-Reborn#611)
   (UltiKits/UltiRemoteBag#48).
 - `config/remotebag.yml` 的注释现在跟随服务器语言。此前有十三条注释（`economy.*`、`sound.*`、`lock.*` 各设置）只有中文，`language: en`
   的全新安装得到的文件注释是中文。现在每条注释都是一个语言文件键，框架每次写入文件时按服务器的 `language` 解析，`lang/en.yml` 与 `lang/zh.yml`
-  各有英文和中文条目。已有服务器上框架在这十三个设置上写下的注释（包括旧版本写下的注释，`lock.timeout_seconds` 上方旧的中英双语注释也在内，
-  UltiKits/UltiRemoteBag#52）会在下次启动时、以及你修改 `language` 并执行 `/ul reload` 后切换为服务器语言；设置值不受影响，
+  各有英文和中文条目。已有服务器上框架在这十三个设置上写下的注释（包括旧版本写下的注释，`lock.timeout_seconds` 上方的两种旧注释——v1.0.0 版本的和之后的中英双语注释——也在内，
+  UltiKits/UltiRemoteBag#52）会在下次启动时、以及你修改 `language` 并执行不带参数的 `/ul reload` 后切换为服务器语言；设置值不受影响，
   你自己写的注释保持原样（UltiKits/UltiTools-Reborn#611）（UltiKits/UltiRemoteBag#48）。
 
 - When an administrator has deleted one of a player's middle bag pages (for example the player keeps pages 1

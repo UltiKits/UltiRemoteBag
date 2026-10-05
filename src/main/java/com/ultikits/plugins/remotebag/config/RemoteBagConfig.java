@@ -124,16 +124,18 @@ public class RemoteBagConfig extends AbstractConfigEntity {
 
     // ==================== 锁定设置 ====================
 
-    // previousComments: the bilingual comment every earlier version wrote here. The catalogues now hold its
-    // English and Chinese halves separately, so neither equals it; registering it lets the framework recognise
-    // an upgraded server's comment as its own and rewrite it in the server's language (UltiKits/UltiRemoteBag#52).
+    // previousComments: the two comments earlier versions wrote here -- release v1.0.0's (and every master build's
+    // before bd168a2), and the bilingual one master wrote from bd168a2 to 4cac234. Neither equals a text the
+    // catalogues hold now; registering them lets the framework recognise an upgraded server's comment as its own
+    // and rewrite it in the server's language (UltiKits/UltiRemoteBag#52).
     @Range(min = 10, max = 3600)
     @ConfigEntry(path = "lock.timeout_seconds", comment = "{config_comment_lock_timeout_seconds}",
-            previousComments = "Bag lock recovery timeout in seconds. Reclaims a lock whose holder's session "
+            previousComments = {"背包锁超时时间（秒），超时后自动释放",
+                    "Bag lock recovery timeout in seconds. Reclaims a lock whose holder's session "
                     + "ended without releasing it; a holder who is online with the page open keeps "
                     + "the lock however long they idle. "
                     + "背包锁的回收超时时间（秒）。仅用于回收持有者会话异常结束而未释放的锁；"
-                    + "持有者在线且页面仍打开时，无论空闲多久都会保留该锁")
+                    + "持有者在线且页面仍打开时，无论空闲多久都会保留该锁"})
     private int lockTimeout = 300;
     
     @ConfigEntry(path = "lock.notify_readonly_viewers", comment = "{config_comment_lock_notify_readonly_viewers}")

@@ -203,8 +203,9 @@ nothing at all because the field is gone.
 the file (`UltiTools-Reborn#542`), so a fresh install under `language: en` writes English comments. The
 other four settings' comments were already English. On an existing file the comments the framework wrote on
 those thirteen settings (recognised only by exact equality with a text one of the module's shipped catalogues
-holds, or with the bilingual comment earlier versions wrote above `lock.timeout_seconds`, registered through
-`@ConfigEntry(previousComments)`, `UltiKits/UltiRemoteBag#52`) switch at the next start and after the
+holds, or with one of the two comments earlier versions wrote above `lock.timeout_seconds` -- release
+`v1.0.0`'s and the later bilingual one -- registered through `@ConfigEntry(previousComments)`,
+`UltiKits/UltiRemoteBag#52`) switch at the next start and after the
 framework rebuilds the language on a bare `/ul reload`, values untouched; a comment an operator wrote by hand
 is kept byte for byte (`UltiKits/UltiTools-Reborn#611`, `UltiKits/UltiRemoteBag#48`).
 
