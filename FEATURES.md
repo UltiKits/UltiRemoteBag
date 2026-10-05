@@ -201,9 +201,12 @@ nothing at all because the field is gone.
 `lock.notify_readonly_viewers`) declare their comment as one `{config_comment_<path>}` language key
 (`lang/en.yml`, `lang/zh.yml`), which the framework resolves in the server's `language` each time it writes
 the file (`UltiTools-Reborn#542`), so a fresh install under `language: en` writes English comments. The
-other four settings' comments were already English. On an existing file the comments on those thirteen
-settings switch at the next start, values untouched, and a hand-written comment there is replaced
-(`UltiKits/UltiRemoteBag#48`).
+other four settings' comments were already English. On an existing file the comments the framework wrote on
+those thirteen settings (recognised only by exact equality with a text one of the module's shipped catalogues
+holds, or with the bilingual comment earlier versions wrote above `lock.timeout_seconds`, registered through
+`@ConfigEntry(previousComments)`, `UltiKits/UltiRemoteBag#52`) switch at the next start and after the
+framework rebuilds the language on a bare `/ul reload`, values untouched; a comment an operator wrote by hand
+is kept byte for byte (`UltiKits/UltiTools-Reborn#611`, `UltiKits/UltiRemoteBag#48`).
 
 A removed key is not removed from an operator's file — the framework never deletes a key it no
 longer declares — so all seven are still on disk on every server that has run this module. See
