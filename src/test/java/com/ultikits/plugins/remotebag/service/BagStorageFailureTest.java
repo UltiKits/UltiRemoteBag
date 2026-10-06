@@ -881,6 +881,49 @@ class BagStorageFailureTest {
                 .as("the cache does not show the rolled-back page").isZero();
     }
 
+    @Test
+    @DisplayName("R4-1: the stop-time decision writes the claim row before it reads anything (on MySQL a read first would miss a save still running)")
+    void theStopDecisionWritesTheClaimRowBeforeItReads() throws Exception {
+        StorageFaults bagsA = bagsOf(serverA).onlyMethods("transaction", "updateIf");
+        Window editing = ownerEditsPage(serverA);
+        bagsA.set(StorageFaults.Mode.COMMIT_THEN_THROW);
+        editing.close();
+        bagsA.onlyMethods();
+        bagsA.set(StorageFaults.Mode.THROW);
+        // Records, in order, the claims calls made inside a transaction of the claims store: the stop-time decision.
+        List<String> insideDecision = new java.util.concurrent.CopyOnWriteArrayList<>();
+        ThreadLocal<Boolean> deciding = ThreadLocal.withInitial(() -> false);
+        Object real = com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.getField(serverA.claimService, "claims");
+        Object recorder = java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
+                new Class<?>[] {com.ultikits.ultitools.interfaces.DataOperator.class}, (self, method, args) -> {
+                    boolean outer = method.getName().equals("transaction") && !deciding.get();
+                    if (deciding.get()) {
+                        insideDecision.add(method.getName());
+                    }
+                    if (outer) {
+                        deciding.set(true);
+                    }
+                    try {
+                        return method.invoke(real, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    } finally {
+                        if (outer) {
+                            deciding.set(false);
+                        }
+                    }
+                });
+        com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.setField(serverA.claimService, "claims", recorder);
+
+        serverA.shutdown();
+        bagsA.heal();
+
+        assertThat(insideDecision).as("the decision made claims calls").isNotEmpty();
+        assertThat(insideDecision.get(0)).as("its first call is the claim-row write").isEqualTo("updateIf");
+        assertThat(insideDecision).as("and it reads the receipt after it").contains("getById");
+        assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).isEqualTo(1);
+    }
+
     private PlayerMock otherPlayer() {
         PlayerMock other = (PlayerMock) servers.live().getPlayerExact("OtherAdmin");
         return other != null ? other : servers.live().addPlayer("OtherAdmin");

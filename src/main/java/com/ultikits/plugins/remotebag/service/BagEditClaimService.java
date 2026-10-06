@@ -86,7 +86,7 @@ import java.util.function.LongSupplier;
  *       while the claim is this session's, however late it runs. A save that threw or did not answer may have
  *       committed: whether it did is read from that record row, never guessed -- by the retry and by the abandon
  *       after a lost claim, both ordered after the save's transaction by the claim row's lock, and by the abandon at
- *       disable inside a transaction that first locks the claim row ({@link #decideAtDisable}), so it waits for a
+ *       disable inside a transaction that first locks the claim row ({@link #startDecision}), so it waits for a
  *       save still running on the database. A save that cannot be decided in time is not given back, and logged.</li>
  *   <li><b>Release.</b> Closing the window, quitting and module disable end the session; its claim is released
  *       then, or, while a kept write is pending, as soon as that write lands or is refused. Module disable flushes
@@ -472,8 +472,17 @@ public class BagEditClaimService {
         flushKept(FINAL_FLUSH_MILLIS);
         // One deadline for every record read below, however many writes are left.
         long recordsUntil = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(mainThreadDeadlineMillis());
-        for (Kept write : new ArrayList<>(kept.values())) {
-            abandonAtDisable(write, recordsUntil);
+        // Every decision is started before any is waited for (R4-3): one held up behind a save still running on the
+        // database does not use up the deadline of the others.
+        List<Kept> left = new ArrayList<>(kept.values());
+        Map<Kept, Future<Boolean>> decisions = new LinkedHashMap<>();
+        for (Kept write : left) {
+            if (needsDecision(write)) {
+                decisions.put(write, startDecision(write));
+            }
+        }
+        for (Kept write : left) {
+            abandonAtDisable(write, decisions.get(write), recordsUntil);
         }
         // Every give-back still queued -- including one the scheduler dropped because the framework was already
         // disabled -- is made here, synchronously (R2-3); a player who is not online is logged as owed.
@@ -1361,33 +1370,53 @@ public class BagEditClaimService {
         return null;
     }
 
+    /** Whether a kept write left at disable must be decided by its receipt: no attempt running, one in doubt. */
+    private static boolean needsDecision(Kept write) {
+        Future<WriteOutcome> running = write.inFlight;
+        return (running == null || running.isDone()) && (write.uncertain || running != null);
+    }
+
     /**
-     * Decides a write in doubt at module disable (R3-1; maintainer decision 2026-10-06): one transaction that first
-     * releases the session's claim -- an {@code updateIf} on the session's token and this run, a write to the claim
-     * row, so it waits behind any transaction of the session still running on the database, which holds that row
+     * Starts deciding a write in doubt at module disable (R3-1; maintainer decision 2026-10-06): one transaction that
+     * first releases the session's claim -- an {@code updateIf} on the session's token and this run, a write to the
+     * claim row, so it waits behind any transaction of the session still running on the database, which holds that row
      * from its fence to its commit -- then reads the session's receipt and deletes it. A save the database is still
      * running when the client gave up on it (MySQL's {@code socketTimeout}) is therefore decided only after it
      * committed or rolled back, and none of the session's saves can land after this transaction, because the claim
      * no longer carries its token.
      *
-     * @return whether a save of {@code write} landed; {@code null} if this could not be decided within
-     *         {@code waitMillis} (nothing is given back then)
+     * @return the decision: whether a save of {@code write} landed
      */
-    private Boolean decideAtDisable(Kept write, long waitMillis) {
+    private Future<Boolean> startDecision(Kept write) {
         Held claim = held.get(write.id);
-        boolean ours = claim != null && claim.token.equals(write.token);
         // Any counter: a released row carries no token, so another server may take it at once.
-        long counter = ours ? claim.renewals + 2 : 0L;
+        long counter = claim != null && claim.token.equals(write.token) ? claim.renewals + 2 : 0L;
+        return submit(() -> claims.transaction(() -> {
+            // ESSENTIAL ORDER (R4-1): the claim-row write comes first, before any read in this transaction. On MySQL a
+            // consistent read made before it would not see the receipt of a save still running on the database --
+            // the write is what waits for that save. SQLite would hide a wrong order (it refuses a read-then-write
+            // with SQLITE_BUSY), so BagStorageFailureTest#theStopDecisionWritesTheClaimRowBeforeItReads asserts it.
+            claims.updateIf(claimRow(write.ownerUuid, write.page, "", counter),
+                    WhereCondition.builder().column("holder_token").value(write.token).build(),
+                    WhereCondition.builder().column("holder_run").value(run).build());
+            boolean wasLanded = landedEarlier(write.token, write.attempts);
+            forgetRecord(write.token);
+            return wasLanded;
+        }));
+    }
+
+    /**
+     * Waits for a decision started by {@link #startDecision}, at most {@code waitMillis}.
+     *
+     * @return whether a save of {@code write} landed; {@code null} if this could not be decided in time (nothing is
+     *         given back then)
+     */
+    private Boolean awaitDecision(Kept write, Future<Boolean> decision, long waitMillis) {
         try {
-            Boolean landed = submit(() -> claims.transaction(() -> {
-                claims.updateIf(claimRow(write.ownerUuid, write.page, "", counter),
-                        WhereCondition.builder().column("holder_token").value(write.token).build(),
-                        WhereCondition.builder().column("holder_run").value(run).build());
-                boolean wasLanded = landedEarlier(write.token, write.attempts);
-                forgetRecord(write.token);
-                return wasLanded;
-            })).get(Math.max(1L, waitMillis), TimeUnit.MILLISECONDS);
-            if (ours && held.remove(write.id, claim)) {
+            Boolean landed = decision.get(Math.max(1L, waitMillis), TimeUnit.MILLISECONDS);
+            Held claim = held.get(write.id);
+            if (claim != null && claim.token.equals(write.token) && held.remove(write.id, claim)) {
+                // Released by the decision itself.
                 claim.released = true;
             }
             return landed;
@@ -1500,14 +1529,14 @@ public class BagEditClaimService {
      * row read now says none landed (R2-1); one it names landed gives nothing back, and an unreadable record gives
      * nothing back either.
      */
-    private void abandonAtDisable(Kept write, long recordsUntilNanos) {
+    private void abandonAtDisable(Kept write, Future<Boolean> decision, long recordsUntilNanos) {
         kept.remove(write.id, write);
         Future<WriteOutcome> running = write.inFlight;
         List<ItemStack> returned = new ArrayList<>();
         if (running == null || running.isDone()) {
             long left = TimeUnit.NANOSECONDS.toMillis(recordsUntilNanos - System.nanoTime());
-            Boolean landed = !write.uncertain && running == null ? Boolean.FALSE
-                    : left > 0 ? decideAtDisable(write, left) : null;
+            Boolean landed = decision == null ? Boolean.FALSE
+                    : left > 0 ? awaitDecision(write, decision, left) : null;
             if (Boolean.TRUE.equals(landed)) {
                 logLanded(write);
                 return;
