@@ -217,6 +217,10 @@ class BagEditClaimTest {
     @Test
     @DisplayName("A main-thread stall longer than the timeout does not lose the claim: the background renewal keeps the counter moving and the other server stays read-only")
     void aMainThreadStallDoesNotLoseTheClaim() throws Exception {
+        // This case is about the main thread, not about storage deadlines: the harness's 300 ms deadline is shorter
+        // than a SQLite write can take on a busy CI runner (measured: one renewal overran it and turned the window
+        // read-only, CI run 37459927081), so A gets a deadline no healthy call overruns.
+        com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.setField(serverA.claimService, "callDeadlineMillis", 10_000L);
         Window editing = serverA.openAsOwner(owner, PAGE);
         assertThat(editing.isEdit()).isTrue();
         serverA.startClaimService(20L);
