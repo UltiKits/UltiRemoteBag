@@ -924,6 +924,119 @@ class BagStorageFailureTest {
         assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).isEqualTo(1);
     }
 
+    // ==================== Gate 2, Codex run 1 ====================
+
+    @Test
+    @DisplayName("Codex P1: a Save's baseline is a copy, not the window's live stacks -- items stacked on after a Save are given back exactly when the claim is lost")
+    void itemsStackedOnAfterASaveAreGivenBackExactly() throws Exception {
+        servers.writePageElsewhere(ownerId(), PAGE, pageWith(SLOT, new ItemStack(Material.DIAMOND, 32)));
+        owner.getInventory().addItem(new ItemStack(Material.DIAMOND, 32));
+        Window editing = serverA.openAsOwner(owner, PAGE);
+        editing.save();
+        // Vanilla stacking onto an existing stack changes that stack in place: the inventory's own item grows.
+        owner.getInventory().removeItem(new ItemStack(Material.DIAMOND, 32));
+        editing.gui.getInventory().getItem(SLOT).setAmount(64);
+        assertThat(editing.shown(SLOT).getAmount()).as("precondition: the window's stack grew in place").isEqualTo(64);
+        // Something outside this server rewrites the claim: the claim is lost.
+        RemoteBagEditClaim stolen = claim();
+        stolen.setHolderRun("intruder-run");
+        stolen.setHolderToken("intruder-token");
+        stolen.setRenewals(stolen.getRenewals() + 1);
+        servers.claimStore().updateCounted(stolen);
+
+        backgroundPass(serverA);
+
+        assertThat(count(owner.getInventory(), Material.DIAMOND)).as("the 32 stacked on after the Save are given back").isEqualTo(32);
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.DIAMOND)).as("the saved 32 stay stored").isEqualTo(32);
+        assertThat(servers.total(Material.DIAMOND, ownerId(), owner, admin)).as("64 diamonds, none lost").isEqualTo(64);
+    }
+
+    @Test
+    @DisplayName("Codex P2: receipt reads of several abandoned saves share one deadline")
+    void receiptReadsOfAbandonedSavesShareOneDeadline() throws Exception {
+        servers.seedPage(ownerId(), 2, pageWith(SLOT, new ItemStack(Material.EMERALD)));
+        servers.seedPage(ownerId(), 3, pageWith(SLOT, new ItemStack(Material.EMERALD)));
+        StorageFaults bagsA = bagsOf(serverA);
+        StorageFaults claimsA = claimsOf(serverA);
+        Window one = serverA.openAsOwner(owner, PAGE);
+        Window two = serverA.openAsAdmin(admin, ownerId(), 2);
+        Window three = serverA.openAsAdmin(otherPlayer(), ownerId(), 3);
+        bagsA.set(StorageFaults.Mode.THROW);
+        one.close();
+        two.close();
+        three.close();
+        claimsA.set(StorageFaults.Mode.THROW);
+        backgroundPass(serverA);
+        for (int page = 1; page <= 3; page++) {
+            Window look = serverB.openAsAdmin(admin, ownerId(), page);
+            if (look.gui != null) {
+                look.close();
+            }
+        }
+        serverB.advance(TIMEOUT_MS + 1);
+        for (int page = 1; page <= 3; page++) {
+            Window taken = serverB.openAsAdmin(admin, ownerId(), page);
+            assertThat(taken.isEdit()).as("B took page %d over", page).isTrue();
+            taken.close();
+        }
+        bagsA.heal();
+        // A's claims answer again, but every receipt read (a receipt's id is a bare token) hangs.
+        claimsA.onlyMethods("getById").onlyFirstArgument(id -> !String.valueOf(id).contains(":"));
+        claimsA.set(StorageFaults.Mode.HANG);
+
+        serverA.advance(TIMEOUT_MS / 3 + 1);
+        long started = System.currentTimeMillis();
+        serverA.renewOffMainThread();
+        long took = System.currentTimeMillis() - started;
+
+        assertThat(took).as("one shared deadline (%d ms each), not one per page (ms)", SharedDatabaseServers.CALL_DEADLINE_MILLIS)
+                .isLessThan(3 * SharedDatabaseServers.CALL_DEADLINE_MILLIS - 100);
+        claimsA.heal();
+    }
+
+    @Test
+    @DisplayName("Codex P2: /bag <page> and /bag see reopen a page whose save is kept read-only from the kept content, without reading the database")
+    void reopeningAKeptPageDoesNotReadTheDatabase() throws Exception {
+        StorageFaults bagsA = bagsOf(serverA);
+        Window editing = ownerEditsPage(serverA);
+        bagsA.set(StorageFaults.Mode.THROW);
+        editing.close();
+        messages(owner);
+        BagCommand commandOnA = new BagCommand(serverA.plugin, serverA.bagService, serverA.lockService, servers.config());
+
+        commandOnA.openPage(owner, PAGE);
+
+        assertThat(messages(owner)).as("the owner is told").contains("bag_read_only_save_pending");
+        org.bukkit.inventory.InventoryView view = owner.getOpenInventory();
+        assertThat(view.getTopInventory().getItem(OTHER_SLOT)).as("the kept content is shown").isNotNull();
+        assertThat(view.getTopInventory().getItem(OTHER_SLOT).getType()).isEqualTo(Material.EMERALD);
+        owner.closeInventory();
+
+        commandOnA.seePlayerBagPage(admin, "Owner", PAGE);
+        assertThat(messages(admin)).as("the administrator too").contains("bag_read_only_save_pending");
+        admin.closeInventory();
+        bagsA.heal();
+    }
+
+    @Test
+    @DisplayName("Codex P2: /bag save answers 'not saved yet' while a save of the sender's is kept")
+    void bagSaveSaysNotSavedYetWhileASaveIsKept() throws Exception {
+        StorageFaults bagsA = bagsOf(serverA);
+        serverA.bagService.loadBagIfNeeded(ownerId());
+        Window editing = ownerEditsPage(serverA);
+        bagsA.set(StorageFaults.Mode.THROW);
+        editing.save();
+        messages(owner);
+        BagCommand commandOnA = new BagCommand(serverA.plugin, serverA.bagService, serverA.lockService, servers.config());
+
+        commandOnA.saveBag(owner);
+
+        List<String> said = messages(owner);
+        assertThat(said).as("not reported as saved").doesNotContain("bag_saved_manually");
+        assertThat(said).as("told it is not saved yet").contains("msg_save_pending");
+        bagsA.heal();
+    }
+
     private PlayerMock otherPlayer() {
         PlayerMock other = (PlayerMock) servers.live().getPlayerExact("OtherAdmin");
         return other != null ? other : servers.live().addPlayer("OtherAdmin");
