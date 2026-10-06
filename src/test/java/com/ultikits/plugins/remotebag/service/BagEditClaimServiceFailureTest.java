@@ -13,7 +13,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.function.LongSupplier;
 
@@ -100,8 +102,10 @@ class BagEditClaimServiceFailureTest {
     }
 
     @Test
-    @DisplayName("A renewal or release that throws is logged and the claim is kept for the next pass; isLost stays false when unknown")
-    void renewalAndReleaseFailures() {
+    @DisplayName("Maintainer decision 3 (2026-10-06): a renewal that throws turns the window read-only at once; the claim is kept and renewed again; a release that throws is logged")
+    void renewalAndReleaseFailures() throws Exception {
+        List<Object[]> troubled = new CopyOnWriteArrayList<>();
+        installListener("troubleListener", troubled);
         when(claims.getById(any())).thenReturn(null, stored("ignored", "ignored", 0L));
         // Claim: insert, then read back -- make the read-back return this run's own row.
         org.mockito.Mockito.doAnswer(inv -> {
@@ -114,14 +118,42 @@ class BagEditClaimServiceFailureTest {
         when(claims.updateIf(any(), any(WhereCondition[].class))).thenThrow(down());
         nanos += 400_000_000_000L;
         service.renewDue();
-        verify(logger).warn(any(Throwable.class), anyString());
 
-        when(claims.getById(any())).thenThrow(down());
-        assertThat(service.isLost(OWNER, 1)).as("unknown is not lost").isFalse();
+        // Decision 3: "a failed renewal puts the window into read-only immediately" -- a renewal that throws is a
+        // failed renewal, not only one that finds the claim changed (gate 1 of plan 17-84, finding F1).
+        assertThat(troubled).as("the holder's window is told at once").hasSize(1);
+        assertThat(troubled.get(0)).containsExactly(HOLDER, OWNER, 1);
+        verify(logger, org.mockito.Mockito.atLeastOnce()).warn(any(Throwable.class), anyString());
+        assertThat(service.isLost(OWNER, 1)).as("unknown is not lost: the claim is kept").isFalse();
+
+        // Kept: the next pass renews it again (and the window is not told twice).
+        nanos += 400_000_000_000L;
+        service.renewDue();
+        verify(claims, org.mockito.Mockito.times(2)).updateIf(any(), any(WhereCondition[].class));
+        assertThat(troubled).hasSize(1);
 
         service.release(OWNER, 1);
         verify(logger, org.mockito.Mockito.atLeast(3)).warn(any(Throwable.class), anyString());
         verify(logger, never()).error(anyString());
+    }
+
+    /** Records every call of the service's listener field {@code field}, if the service has it. */
+    private void installListener(String field, List<Object[]> calls) throws Exception {
+        java.lang.reflect.Field target;
+        try {
+            target = BagEditClaimService.class.getDeclaredField(field);
+        } catch (NoSuchFieldException absent) {
+            return;
+        }
+        Object listener = java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
+                new Class<?>[] {target.getType()}, (self, method, args) -> {
+                    if (method.getDeclaringClass().equals(Object.class)) {
+                        return null;
+                    }
+                    calls.add(args);
+                    return null;
+                });
+        UltiRemoteBagTestHelper.setField(service, field, listener);
     }
 
     @Test
