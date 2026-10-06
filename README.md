@@ -217,25 +217,41 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
   owner and for administrators alike ("This bag page is being edited on another server; it is open in read-only
   mode"). On one server nothing changes: the owner still outranks an administrator. Across servers the first
   server to claim the page edits it, owner or not.
-- **Release and expiry.** The claim is released when the window closes, when its player quits, and when the
-  module stops. A claim left by a crash expires after `lock.timeout_seconds` (default 300); while a window is
-  open, its server renews the claim every third of that.
+- **Release and renewal.** The claim is released when the window closes, when its player quits, and when the
+  module stops. While a window is open, its server renews the claim on a background task every third of
+  `lock.timeout_seconds` (default 300), adding one to the claim's counter; a stalled main thread does not stop it.
+- **Expiry does not depend on clocks.** Another server may take a claim over only after it has seen the same
+  counter for a full `lock.timeout_seconds` on its own clock. A crashed server's claim is taken over one timeout
+  after another server first sees it; a running server keeps its claim however far the servers' clocks disagree.
 - **No stale copies.** A page is written only by its own window, only if the stored page is still what the
   window read; nothing is written from a cached copy at quit, at shutdown or by `/bag save` without an open page.
-- **Limits.** Expiry compares the holding server's timestamp with the reading server's clock, so keep the
-  servers' clocks in sync: a difference shifts the expiry by that much. A server that stalls for longer than
-  `lock.timeout_seconds` can lose its claim while a window is open; the console then logs one error naming the
-  player and the page, and that window's save is not written if the other server changed the page.
+  If a save is refused, the items put into the window since it last read or saved the page are given back to the
+  player (what does not fit drops at their feet). If the claim is ever lost, the window turns read-only at once
+  and gives those items back.
 - **Upgrading** needs no migration: the `remote_bag_claims` table is created on the first start, no existing
   table changes, and a page without a claim row is free.
 
+#### Known limitations
+
+- A writer that does not use the claim can still change a page while a window has it open: a server running an
+  older version of this module (for example during a rolling upgrade -- upgrade every server together), another
+  plugin writing `remote_bags`, or someone editing the table by hand (`sqlite3`, a MySQL client). The window's
+  save is then refused and its put-in items are given back, but an item taken out of the page during that session
+  stays with the player while the other writer's page may still hold it: that item can exist twice.
+- A server process frozen as a whole (its background threads included) for longer than `lock.timeout_seconds`, or
+  cut off from a database that another server still reaches, can have its claim taken over; its window then turns
+  read-only and gives back the put-in items, with the same limitation for items taken out.
+- On MySQL the comparison of a page's stored contents follows the column's collation, which ignores letter case.
+
 多台服务器共享 MySQL 时（UltiKits/UltiRemoteBag#54）：同一背包页同一时间只能在一台服务器上编辑——打开编辑时在数据库表
 `remote_bag_claims` 中占用该页；另一台服务器占用期间，本服务器对所有者和管理员都以只读方式打开。单台服务器上的规则不变（所有者优先于
-管理员）；跨服务器时先占用者编辑。窗口关闭、玩家退出、模块停止时释放占用；崩溃遗留的占用在 `lock.timeout_seconds`（默认 300）后过期，
-窗口打开期间每过三分之一时间续期一次。背包页只由它自己的窗口写入，且仅当存储内容仍是窗口读取时的内容；退出、关服、无打开页面的
-`/bag save` 不会写入缓存副本。限制：过期时间以持有者的时间戳与读取方服务器的时钟比较，请保持各服务器时钟同步；某台服务器停顿超过
-超时时间可能在窗口打开时失去占用，控制台会记录一条指明玩家与页码的错误，且若另一台服务器改动过该页，该窗口的保存不会写入。升级无需
-迁移：首次启动时创建 `remote_bag_claims` 表，现有表不变，没有占用记录的页面即为空闲。
+管理员）；跨服务器时先占用者编辑。窗口关闭、玩家退出、模块停止时释放占用；窗口打开期间，服务器在后台任务中每过三分之一
+`lock.timeout_seconds` 续期一次（计数器加一），主线程卡顿不会中断续期。过期不依赖时钟：另一台服务器只有在自己的时钟上连续
+`lock.timeout_seconds` 看到同一计数器值后才能接手；崩溃服务器的占用在另一台服务器首次看到它的一个超时后被接手。背包页只由它自己的窗口
+写入，且仅当存储内容仍是窗口读取时的内容；保存被拒绝时，自上次读取或保存以来放入窗口的物品归还给玩家（放不下的掉落在脚下）；若占用丢失，
+窗口立即变为只读并归还这些物品。升级无需迁移。已知限制：不使用占用的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags`
+的其他插件、手动编辑数据表）仍可能在窗口打开时改动该页——保存会被拒绝、放入的物品会归还，但该会话中取出的物品留在玩家身上，而对方写入的页面
+可能仍含有它，从而出现两份；整个服务器进程（包括后台线程）冻结超过超时时间，或与数据库断开而另一台服务器仍可访问时，占用可能被接手。
 
 ## 🔧 开发者 API
 

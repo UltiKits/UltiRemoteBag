@@ -348,6 +348,18 @@ public class BagLockService {
     }
 
     /**
+     * Whether this server's editing session of the page has lost its claim (UltiKits/UltiRemoteBag#54): its
+     * window must not write, and turns read-only.
+     *
+     * @param ownerUuid the bag owner
+     * @param pageNum   the page number
+     * @return true if the claim this server held for the page was lost
+     */
+    public boolean hasLostClaim(UUID ownerUuid, int pageNum) {
+        return claimService != null && claimService.isLost(ownerUuid, pageNum);
+    }
+
+    /**
      * Whether {@code writer} may still persist this page.
      * <p>
      * True when no live lock is held on the page, or when the live lock is {@code writer}'s own. The

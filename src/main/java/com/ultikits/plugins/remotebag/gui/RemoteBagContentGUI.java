@@ -30,6 +30,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -67,6 +68,12 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * overwrite a page another server changed (UltiKits/UltiRemoteBag#54).
      */
     private RemoteBagService.PageRead pageRead;
+
+    /**
+     * Set when this window's edit claim was lost (UltiKits/UltiRemoteBag#54): from then on the window behaves
+     * read-only and writes nothing.
+     */
+    private boolean editRightsLost;
     
     /**
      * 内容区域槽位数（前 5 行 = 45 槽）
@@ -195,7 +202,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         // (UltiKits/UltiRemoteBag#54).
         pageRead = bagService.readPage(ownerUuid, pageNum);
 
-        ItemStack[] contents = pageRead.getItems();
+        ItemStack[] contents = pageRead == null ? null : pageRead.getItems();
         for (int i = 0; i < CONTENT_SIZE; i++) {
             // 物品直接放入，不设置 Icon 点击事件
             // 编辑模式下允许自由移动，只读模式在 onClick 中处理
@@ -474,7 +481,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return CANCEL;
         }
 
-        if (accessMode == AccessMode.READ_ONLY) {
+        if (!isEditable()) {
             if (isRefusalWorthAnnouncing(event, insideBagWindow)) {
                 SoundUtil.playErrorSound(player, config);
                 player.sendMessage(ChatColor.RED + plugin.i18n("msg_readonly_no_move"));
@@ -589,7 +596,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
                 continue;
             }
 
-            if (accessMode == AccessMode.READ_ONLY) {
+            if (!isEditable()) {
                 // In read-only the whole window is guarded, toolbar included, and "read-only" is the
                 // reason for all of it.
                 announceDragRefusal(plugin.i18n("msg_readonly_no_move"));
@@ -683,23 +690,141 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     @Override
     public void onClose(InventoryCloseEvent event) {
-        if (accessMode == AccessMode.EDIT) {
-            // 编辑模式 - 保存并释放锁
-            // Unconditional, and it has to stay that way until something in this class can hand the
-            // window's contents back. Edit-mode clicks are not cancelled, so an item the player has
-            // dragged in has already left their own inventory; a close that skips this call destroys
-            // it. That is why `save_on_close` was deleted rather than wired
-            // (UltiKits/UltiRemoteBag#18), and the constraint any future switch must satisfy is
-            // recorded in UltiKits/UltiRemoteBag#37.
-            saveCurrentContents();
+        try {
+            if (isEditable()) {
+                // 编辑模式 - 保存并释放锁
+                // Unconditional, and it has to stay that way: edit-mode clicks are not cancelled, so an item
+                // the player has dragged in has already left their own inventory. That is why `save_on_close`
+                // was deleted rather than wired (UltiKits/UltiRemoteBag#18, #37). A save that is refused gives
+                // those items back instead (UltiKits/UltiRemoteBag#54).
+                saveCurrentContents(false);
+                SoundUtil.playCloseSound(player, config);
+            }
+        } finally {
+            // Always, even if the save threw: the lock and the edit claim (and with it the claim's background
+            // renewal) never outlive the window (UltiKits/UltiRemoteBag#54).
             lockService.release(ownerUuid, pageNum, player.getUniqueId());
-            SoundUtil.playCloseSound(player, config);
-        } else {
-            // 只读模式 - 仅释放只读会话
-            lockService.release(ownerUuid, pageNum, player.getUniqueId());
+            // A view of another player's bag leaves no copy of it behind (UltiKits/UltiRemoteBag#54).
+            bagService.forgetUnlessOnline(ownerUuid);
         }
-        // A view of another player's bag leaves no copy of it behind (UltiKits/UltiRemoteBag#54).
-        bagService.forgetUnlessOnline(ownerUuid);
+    }
+
+    /** Whether this window may change its page: opened for editing, and its edit claim not lost. */
+    private boolean isEditable() {
+        return accessMode == AccessMode.EDIT && !editRightsLost;
+    }
+
+    /**
+     * Called on the main thread when the edit claim of {@code holderUuid}'s session on this page was lost
+     * (UltiKits/UltiRemoteBag#54): the window that session has open turns read-only at once, says so, gives back
+     * the items put in since its last save, and shows the page as stored now.
+     *
+     * @param holderUuid the player whose editing session held the claim
+     * @param ownerUuid  the bag owner
+     * @param page       the page number
+     */
+    public static void claimLost(UUID holderUuid, UUID ownerUuid, int page) {
+        if (holderUuid == null || InventoryAPI.getInstance() == null || Bukkit.getServer() == null) {
+            return;
+        }
+        Player holder = Bukkit.getPlayer(holderUuid);
+        if (holder == null) {
+            return;
+        }
+        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(holder);
+        if (current instanceof RemoteBagContentGUI) {
+            RemoteBagContentGUI window = (RemoteBagContentGUI) current;
+            if (window.pageNum == page && ownerUuid.equals(window.ownerUuid) && window.isEditable()) {
+                window.loseEditRights(true);
+            }
+        }
+    }
+
+    /** Turns this window read-only for good, says so, and gives back what was put in since its last save. */
+    private void loseEditRights(boolean windowStaysOpen) {
+        editRightsLost = true;
+        SoundUtil.playErrorSound(player, config);
+        player.sendMessage(plugin.i18n("bag_claim_lost_read_only"));
+        giveBackPutIns();
+        if (windowStaysOpen) {
+            loadBagContents();
+        }
+    }
+
+    /**
+     * Gives back to the viewer every item this window holds beyond what it read of its page (or what its last
+     * save wrote) -- the items put in since -- because they are not going to be stored (UltiKits/UltiRemoteBag#54;
+     * maintainer decision of 2026-10-06). Moving an item within the page counts as nothing. What does not fit in
+     * the inventory drops at the viewer's feet; one log line names the items, the player and the page. Items
+     * taken out of the page are not taken back.
+     */
+    private void giveBackPutIns() {
+        List<ItemStack> putIn = putInSinceRead();
+        if (putIn.isEmpty()) {
+            return;
+        }
+        Map<Integer, ItemStack> leftOver = player.getInventory().addItem(putIn.toArray(new ItemStack[0]));
+        int dropped = 0;
+        for (ItemStack rest : leftOver.values()) {
+            player.getWorld().dropItemNaturally(player.getLocation(), rest);
+            dropped += rest.getAmount();
+        }
+        plugin.getLogger().warn(plugin.i18n("log_bag_items_returned")
+                .replace("{PAGE}", String.valueOf(pageNum))
+                .replace("{DROPPED}", String.valueOf(dropped))
+                .replace("{ITEMS}", describe(putIn))
+                .replace("{OWNER}", String.valueOf(ownerUuid))
+                // The player's name last: it is data, so a brace sequence inside it stays as written.
+                .replace("{PLAYER}", String.valueOf(player.getName())));
+        player.sendMessage(ChatColor.YELLOW + plugin.i18n("msg_items_returned"));
+    }
+
+    /** The items this window shows beyond what it read, by type and amount. */
+    private List<ItemStack> putInSinceRead() {
+        List<ItemStack> read = new ArrayList<>();
+        if (pageRead != null && pageRead.getItems() != null) {
+            for (ItemStack item : pageRead.getItems()) {
+                if (isRealItem(item)) {
+                    read.add(item);
+                }
+            }
+        }
+        int[] unmatched = new int[read.size()];
+        for (int i = 0; i < read.size(); i++) {
+            unmatched[i] = read.get(i).getAmount();
+        }
+        List<ItemStack> putIn = new ArrayList<>();
+        for (int slot = 0; slot < CONTENT_SIZE; slot++) {
+            ItemStack shown = getInventory().getItem(slot);
+            if (!isRealItem(shown)) {
+                continue;
+            }
+            int amount = shown.getAmount();
+            for (int i = 0; i < read.size() && amount > 0; i++) {
+                if (unmatched[i] > 0 && read.get(i).isSimilar(shown)) {
+                    int matched = Math.min(amount, unmatched[i]);
+                    unmatched[i] -= matched;
+                    amount -= matched;
+                }
+            }
+            if (amount > 0) {
+                ItemStack given = shown.clone();
+                given.setAmount(amount);
+                putIn.add(given);
+            }
+        }
+        return putIn;
+    }
+
+    private static String describe(List<ItemStack> items) {
+        StringBuilder text = new StringBuilder();
+        for (ItemStack item : items) {
+            if (text.length() > 0) {
+                text.append(", ");
+            }
+            text.append(item.getType().name()).append(" x").append(item.getAmount());
+        }
+        return text.toString();
     }
     
     /**
@@ -737,7 +862,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         }
 
         RemoteBagContentGUI page = (RemoteBagContentGUI) current;
-        if (page.accessMode != AccessMode.EDIT
+        if (!page.isEditable()
                 || !viewer.getUniqueId().equals(page.ownerUuid)) {
             return FlushOutcome.NO_OPEN_PAGE;
         }
@@ -757,8 +882,8 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return;
         }
         Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
-        if (current instanceof RemoteBagContentGUI && ((RemoteBagContentGUI) current).accessMode == AccessMode.EDIT) {
-            ((RemoteBagContentGUI) current).saveCurrentContents();
+        if (current instanceof RemoteBagContentGUI && ((RemoteBagContentGUI) current).isEditable()) {
+            ((RemoteBagContentGUI) current).saveCurrentContents(false);
         }
     }
 
@@ -863,6 +988,20 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * @return true if the contents were written
      */
     private boolean saveCurrentContents() {
+        return saveCurrentContents(true);
+    }
+
+    /**
+     * @param windowStaysOpen whether the window stays open after this save (Save button, {@code /bag save}), so
+     *                        a refused save also redraws it from the page as stored now
+     */
+    private boolean saveCurrentContents(boolean windowStaysOpen) {
+        if (lockService.hasLostClaim(ownerUuid, pageNum)) {
+            // The edit claim was lost (UltiKits/UltiRemoteBag#54): nothing is written; the window turns
+            // read-only and gives back what was put in.
+            loseEditRights(windowStaysOpen);
+            return false;
+        }
         if (!lockService.mayWrite(ownerUuid, pageNum, player.getUniqueId())) {
             // Somebody else holds this page now. Writing would overwrite their committed edits with
             // a snapshot taken before they existed. Refusing silently would trade their loss for
@@ -886,9 +1025,14 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         RemoteBagService.PageRead written = bagService.savePage(ownerUuid, pageNum, contents, pageRead);
         if (written == null) {
             // Not stored: reporting success here would be the same defect as reporting a save that did
-            // not happen.
+            // not happen. What was put in since the read goes back to the viewer (UltiKits/UltiRemoteBag#54);
+            // a window that stays open then shows the page as stored now and saves over that.
             SoundUtil.playErrorSound(player, config);
             player.sendMessage(ChatColor.RED + plugin.i18n("msg_save_failed"));
+            giveBackPutIns();
+            if (windowStaysOpen) {
+                loadBagContents();
+            }
             return false;
         }
         pageRead = written;

@@ -50,14 +50,15 @@ public class UltiRemoteBag extends UltiToolsPlugin {
 
     /**
      * Writes no bag: every bag change was written when it was made, and a cached copy written here would
-     * overwrite a change another server sharing the database made since. Releases every edit claim this
-     * server holds, so another server can edit those pages at once (UltiKits/UltiRemoteBag#54).
+     * overwrite a change another server sharing the database made since. Stops the background claim renewal and
+     * releases every edit claim this server holds, so another server can edit those pages at once
+     * (UltiKits/UltiRemoteBag#54).
      */
     @Override
     protected void onUnregister() {
         BagEditClaimService claimService = getContext().getBean(BagEditClaimService.class);
         if (claimService != null) {
-            claimService.releaseAllHeld();
+            claimService.shutdown();
         }
         getLogger().info(i18n("bag_disabled"));
     }

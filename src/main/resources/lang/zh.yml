@@ -64,6 +64,7 @@ msg_owner_started_using: "{0} 已开始使用此背包，您的视图已切换�
 msg_owner_has_page_open: "所有者当前正打开此页，锁超时不会将其转交。待其关闭后点击刷新。"
 msg_save_refused_lock_taken: "此页现由他人持有，你的改动未被保存。请重新打开以查看当前内容。"
 msg_save_failed: "保存未写入数据库，你的改动尚未存储。请查看服务器控制台。"
+msg_items_returned: "你放入此页的物品未能存储，已归还给你（放不下的掉落在你脚下）。"
 msg_nothing_to_save: "没有需要保存的内容。"
 
 # 命令相关
@@ -111,13 +112,15 @@ bag_read_only_in_use: "§e该背包正被 {PLAYER} 使用中，当前为只读�
 bag_blocked_by_admin: "§c该背包正被管理员 {PLAYER} 编辑中，请稍后再试"
 bag_blocked_in_use: "§c该背包正被 {PLAYER} 使用中，请稍后再试"
 bag_read_only_other_server: "§e该背包页正在另一台服务器上编辑，当前为只读模式"
+bag_claim_lost_read_only: "§c你编辑期间，该背包页在本服务器之外被改动。此窗口现为只读；自上次保存以来你放入的物品已归还给你"
 bag_read_only_claim_failed: "§e无法为编辑占用该背包页（请查看服务器控制台），当前为只读模式"
 
 # 控制台消息
 log_bag_update_failed: "更新背包数据失败"
 log_bag_claim_failed: "无法读取或写入 {PLAYER} 的背包第 {PAGE} 页的编辑占用；该页在本服务器上以只读方式打开"
 log_bag_claim_release_failed: "无法释放 {PLAYER} 的背包第 {PAGE} 页的编辑占用；它将在 lock.timeout_seconds 之后过期"
-log_bag_claim_lost: "失去了 {PLAYER} 的背包第 {PAGE} 页的编辑占用：本服务器未能在 lock.timeout_seconds 内续期，另一台服务器已接手该页。该页在这里仍保持打开，但只有在读取之后无人改动过该页时，它的保存才会写入"
+log_bag_claim_lost: "失去了 {PLAYER} 的背包第 {PAGE} 页的编辑占用：本服务器编辑该页期间，它在本服务器之外被改动。打开的窗口已变为只读，自上次保存以来放入的物品已归还"
+log_bag_items_returned: "已将放入 {OWNER} 的背包第 {PAGE} 页但未存储的物品归还给 {PLAYER}：{ITEMS}（其中 {DROPPED} 个掉落在其脚下）"
 log_bag_deserialize_failed: "反序列化背包物品失败"
 log_skipped_slot: "跳过背包第 {PAGE} 页中无法读取的槽位：键 '{KEY}'（{REASON}）；该页其余内容保留"
 log_skipped_slot_not_a_number: "不是槽位编号"

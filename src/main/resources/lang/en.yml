@@ -64,6 +64,7 @@ msg_owner_started_using: "{0} has started using this bag, your view has been swi
 msg_owner_has_page_open: "The owner has this page open right now, so the lock timeout does not hand it over. Click refresh once they close it."
 msg_save_refused_lock_taken: "This page is now held by someone else, so your changes were not saved. Reopen it to see the current contents."
 msg_save_failed: "The save did not reach the database, so your changes are not stored. Check the server console."
+msg_items_returned: "The items you put into this page were not stored and were given back to you (any that did not fit are at your feet)."
 msg_nothing_to_save: "Nothing to save."
 
 # Command Related
@@ -111,13 +112,15 @@ bag_read_only_in_use: "§eThis bag is being used by {PLAYER}; it is open in read
 bag_blocked_by_admin: "§cThis bag is being edited by admin {PLAYER}, please try again later"
 bag_blocked_in_use: "§cThis bag is being used by {PLAYER}, please try again later"
 bag_read_only_other_server: "§eThis bag page is being edited on another server; it is open in read-only mode"
+bag_claim_lost_read_only: "§cThis bag page was changed outside this server while you were editing it. This window is now read-only; the items you put in since your last save were given back to you"
 bag_read_only_claim_failed: "§eThis bag page could not be reserved for editing (see the server console); it is open in read-only mode"
 
 # Console messages
 log_bag_update_failed: "Failed to update bag data"
 log_bag_claim_failed: "Could not read or write the edit claim of bag page {PAGE} of {PLAYER}; the page opens read-only on this server"
 log_bag_claim_release_failed: "Could not release the edit claim of bag page {PAGE} of {PLAYER}; it expires after lock.timeout_seconds"
-log_bag_claim_lost: "Lost the edit claim of bag page {PAGE} of {PLAYER}: this server did not renew it within lock.timeout_seconds and another server took the page. The page stays open here, and its save is written only if nobody changed the page since it was read"
+log_bag_claim_lost: "Lost the edit claim of bag page {PAGE} of {PLAYER}: it was changed outside this server while this server was editing the page. The open window is now read-only, and the items put in since its last save were given back"
+log_bag_items_returned: "Gave back to {PLAYER} the items put into bag page {PAGE} of {OWNER} that were not stored: {ITEMS} ({DROPPED} dropped at their feet)"
 log_bag_deserialize_failed: "Failed to deserialize bag items"
 log_skipped_slot: "Skipping unreadable slot in bag page {PAGE}: key '{KEY}' ({REASON}); the rest of the page is kept"
 log_skipped_slot_not_a_number: "not a slot number"
