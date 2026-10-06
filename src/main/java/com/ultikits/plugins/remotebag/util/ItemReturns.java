@@ -139,6 +139,25 @@ public final class ItemReturns {
         return items;
     }
 
+    /**
+     * A page detached from wherever its stacks live: each stack is cloned, so a later change to the window's own
+     * stacks -- vanilla changes a stack in place when items are stacked onto it, and {@code Inventory#getItem}
+     * returns a live mirror -- does not change the copy (UltiKits/UltiRemoteBag#54, gate 2 Codex P1).
+     *
+     * @param page the page's slots; may be {@code null} and may hold {@code null}
+     * @return a new array of new stacks, or {@code null}
+     */
+    public static ItemStack[] deepCopy(ItemStack[] page) {
+        if (page == null) {
+            return null;
+        }
+        ItemStack[] copy = new ItemStack[page.length];
+        for (int i = 0; i < page.length; i++) {
+            copy[i] = page[i] == null ? null : page[i].clone();
+        }
+        return copy;
+    }
+
     private static ItemStack[] copies(List<ItemStack> items) {
         ItemStack[] copies = new ItemStack[items.size()];
         for (int i = 0; i < copies.length; i++) {

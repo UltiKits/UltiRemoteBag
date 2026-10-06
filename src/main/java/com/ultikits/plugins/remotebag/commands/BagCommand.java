@@ -77,6 +77,12 @@ public class BagCommand extends BaseCommandExecutor {
             return;
         }
         
+        // A page whose last save is still being written opens read-only from the kept content, before anything is
+        // read from a database that may not be answering (UltiKits/UltiRemoteBag#54, gate 2 Codex P2).
+        if (openKeptReadOnly(player, player.getUniqueId(), page)) {
+            return;
+        }
+
         // 检查背包是否存在 -- on what is stored now (UltiKits/UltiRemoteBag#54)
         bagService.refreshBag(player.getUniqueId());
         // The owner is offered page 1 even before anything is stored (UltiKits/UltiRemoteBag#26).
@@ -130,6 +136,12 @@ public class BagCommand extends BaseCommandExecutor {
         if (flushed == RemoteBagContentGUI.FlushOutcome.NOT_WRITTEN) {
             // The page has already told the sender why it would not write. Reporting a save here
             // would contradict it.
+            return;
+        }
+
+        if (lockService.hasSavePending(player.getUniqueId())) {
+            // A save of the sender's is still being written: not saved yet, whatever else was (gate 2 Codex P2).
+            player.sendMessage(ChatColor.YELLOW + i18n("msg_save_pending"));
             return;
         }
 
@@ -188,6 +200,22 @@ public class BagCommand extends BaseCommandExecutor {
     }
     
     /**
+     * Opens a page whose save is kept on this server read-only, showing the kept content, without reading the
+     * database (UltiKits/UltiRemoteBag#54).
+     *
+     * @return true if it was such a page (and is now open)
+     */
+    private boolean openKeptReadOnly(Player viewer, UUID ownerUuid, int page) {
+        if (!lockService.isSavePending(ownerUuid, page)) {
+            return false;
+        }
+        viewer.closeInventory();
+        viewer.sendMessage(BagOpenResult.readOnlySavePending().renderMessage(plugin));
+        new RemoteBagContentGUI(viewer, plugin, ownerUuid, page, bagService, lockService, config, AccessMode.READ_ONLY).open();
+        return true;
+    }
+
+    /**
      * Resolves an administrator command's target by name, or tells the sender it was not found and
      * returns {@code null}.
      * <p>
@@ -219,6 +247,9 @@ public class BagCommand extends BaseCommandExecutor {
      * 管理员打开背包页
      */
     private void openAdminBagPage(Player admin, UUID ownerUuid, int page, String ownerName) {
+        if (openKeptReadOnly(admin, ownerUuid, page)) {
+            return;
+        }
         // Read what is stored now; the window's close drops the copy again unless the owner is on this
         // server (UltiKits/UltiRemoteBag#54).
         bagService.refreshBag(ownerUuid);

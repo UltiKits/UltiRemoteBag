@@ -798,9 +798,35 @@ public class BagEditClaimService {
      * @param page      the page number
      * @return a copy of the kept items, or {@code null}
      */
+    /**
+     * Whether a save of this page is kept on this server (main thread; memory only).
+     *
+     * @param ownerUuid the bag owner
+     * @param page      the page number
+     * @return true while the page's last changes are still being written
+     */
+    public boolean hasKeptWrite(UUID ownerUuid, int page) {
+        return kept.containsKey(RemoteBagEditClaim.idOf(ownerUuid, page));
+    }
+
+    /**
+     * Whether any save of this player's bag is kept on this server (memory only).
+     *
+     * @param ownerUuid the bag owner
+     * @return true while any page of the bag is still being written
+     */
+    public boolean hasKeptWriteOf(UUID ownerUuid) {
+        for (Kept write : kept.values()) {
+            if (write.ownerUuid.equals(ownerUuid)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public ItemStack[] keptItems(UUID ownerUuid, int page) {
         Kept write = kept.get(RemoteBagEditClaim.idOf(ownerUuid, page));
-        return write == null ? null : write.items.clone();
+        return write == null ? null : ItemReturns.deepCopy(write.items);
     }
 
     /**
@@ -809,7 +835,8 @@ public class BagEditClaimService {
      */
     private void keep(String id, String token, UUID holderUuid, UUID ownerUuid, int page, ItemStack[] items,
                       String contents, RemoteBagService.PageRead base, String attempt, Future<WriteOutcome> running) {
-        Kept write = new Kept(id, token, holderUuid, ownerUuid, page, items.clone(), contents, base);
+        // Detached from the window's live stacks (gate 2 Codex P1).
+        Kept write = new Kept(id, token, holderUuid, ownerUuid, page, ItemReturns.deepCopy(items), contents, base);
         if (attempt != null) {
             write.attempts.add(attempt);
             write.uncertain = true;
@@ -1230,7 +1257,10 @@ public class BagEditClaimService {
 
     private void attemptKeptWrites(long waitMillis) {
         long now = nanoTime.getAsLong();
+        // One deadline for everything this pass waits on: attempts and receipt reads alike (gate 2 Codex P2).
+        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMillis);
         Map<Kept, Future<WriteOutcome>> started = new LinkedHashMap<>();
+        List<Kept> abandonedNow = new ArrayList<>();
         for (Kept write : new ArrayList<>(kept.values())) {
             Future<WriteOutcome> running = write.inFlight;
             if (running != null) {
@@ -1244,14 +1274,14 @@ public class BagEditClaimService {
                 }
             }
             if (write.abandoned) {
-                settleAbandoned(write, waitMillis);
+                abandonedNow.add(write);
                 continue;
             }
             Held claim = held.get(write.id);
             if (claim == null) {
                 // No claim left to fence a write on: settled as abandoned.
                 write.abandoned = true;
-                settleAbandoned(write, waitMillis);
+                abandonedNow.add(write);
                 continue;
             }
             if (!isConfirmed(claim, now)) {
@@ -1266,7 +1296,15 @@ public class BagEditClaimService {
             write.inFlight = next;
             started.put(write, next);
         }
-        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMillis);
+        // Every receipt read is started before any is waited for, then each waits only for what is left.
+        for (Kept write : abandonedNow) {
+            if (write.uncertain && write.receiptRead == null) {
+                write.receiptRead = submit(() -> landedEarlier(write.token, write.attempts));
+            }
+        }
+        for (Kept write : abandonedNow) {
+            settleAbandoned(write, Math.max(0L, TimeUnit.NANOSECONDS.toMillis(until - System.nanoTime())));
+        }
         for (Map.Entry<Kept, Future<WriteOutcome>> entry : started.entrySet()) {
             Kept write = entry.getKey();
             try {

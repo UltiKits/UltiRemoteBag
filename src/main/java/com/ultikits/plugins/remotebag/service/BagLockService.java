@@ -348,6 +348,28 @@ public class BagLockService {
     }
 
     /**
+     * Whether this page's last changes on this server are still being written (a save the database did not answer
+     * is kept and retried, UltiKits/UltiRemoteBag#54): memory only, no database call.
+     *
+     * @param ownerUuid the bag owner
+     * @param pageNum   the page number
+     * @return true while the page's save is kept
+     */
+    public boolean isSavePending(UUID ownerUuid, int pageNum) {
+        return claimService != null && claimService.hasKeptWrite(ownerUuid, pageNum);
+    }
+
+    /**
+     * Whether any page of this bag has a save still being written on this server (memory only).
+     *
+     * @param ownerUuid the bag owner
+     * @return true while any page's save is kept
+     */
+    public boolean hasSavePending(UUID ownerUuid) {
+        return claimService != null && claimService.hasKeptWriteOf(ownerUuid);
+    }
+
+    /**
      * Claims a page for an administrator's own action on it ({@code /bag clear}, {@code /bag delete}), so no session
      * on this or another server can edit it while the action runs (UltiKits/UltiRemoteBag#54, gate 1 F4). Refused
      * while the page is held on this server, claimed by another server, or its last changes are still being written.

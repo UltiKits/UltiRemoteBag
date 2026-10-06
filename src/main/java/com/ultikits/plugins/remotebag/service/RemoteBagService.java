@@ -177,7 +177,7 @@ public class RemoteBagService {
         }
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
         if (pages != null && read.isStored()) {
-            pages.put(page, read.getItems().clone());
+            pages.put(page, com.ultikits.plugins.remotebag.util.ItemReturns.deepCopy(read.getItems()));
         }
         return read;
     }
@@ -215,7 +215,7 @@ public class RemoteBagService {
      * @return what the window's next save is conditioned on
      */
     public PageRead storedRead(ItemStack[] items, String contents) {
-        return new PageRead(items.clone(), true, contents, 0L);
+        return new PageRead(com.ultikits.plugins.remotebag.util.ItemReturns.deepCopy(items), true, contents, 0L);
     }
 
     /**
@@ -297,7 +297,8 @@ public class RemoteBagService {
             }
             return null;
         }
-        ItemStack[] stored = items.clone();
+        // Detached from the window's live stacks: this is the window's next baseline (gate 2 Codex P1).
+        ItemStack[] stored = com.ultikits.plugins.remotebag.util.ItemReturns.deepCopy(items);
         if (logMiss) {
             // A plain save: written with its own commit, so the display cache follows now. A fenced save's caller
             // updates it after its transaction committed (rememberWritten).
@@ -317,7 +318,7 @@ public class RemoteBagService {
     public void rememberWritten(UUID playerUuid, int page, ItemStack[] items) {
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
         if (pages != null) {
-            pages.put(page, items.clone());
+            pages.put(page, com.ultikits.plugins.remotebag.util.ItemReturns.deepCopy(items));
         }
     }
 
