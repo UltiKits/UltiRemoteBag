@@ -83,6 +83,22 @@ class BagOpenResultTest {
             assertThat(render(BagOpenResult.blocked(lock("Other", LockType.OWNER)), "en")).isEqualTo(inUse);
             assertThat(readOnly).doesNotContainPattern("[\\x{4e00}-\\x{9fff}]");
         }
+
+        @Test
+        @DisplayName("Another server editing the page, or a failed claim: read-only, with its own notice in each language (UltiKits/UltiRemoteBag#54)")
+        void otherServerAndClaimFailedNotices() {
+            BagOpenResult elsewhere = BagOpenResult.readOnlyElsewhere();
+            BagOpenResult failed = BagOpenResult.readOnlyClaimFailed();
+
+            assertThat(elsewhere.isReadOnlyMode()).isTrue();
+            assertThat(failed.isReadOnlyMode()).isTrue();
+            assertThat(elsewhere.getNotice()).isEqualTo(BagOpenResult.Notice.READ_ONLY_OTHER_SERVER);
+            assertThat(failed.getNotice()).isEqualTo(BagOpenResult.Notice.READ_ONLY_CLAIM_FAILED);
+            for (String language : new String[] {"en", "zh"}) {
+                assertThat(render(elsewhere, language)).isEqualTo(CatalogueText.text(language, "bag_read_only_other_server"));
+                assertThat(render(failed, language)).isEqualTo(CatalogueText.text(language, "bag_read_only_claim_failed"));
+            }
+        }
     }
 
     @Nested

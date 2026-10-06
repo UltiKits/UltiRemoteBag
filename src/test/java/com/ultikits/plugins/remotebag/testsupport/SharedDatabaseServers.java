@@ -301,6 +301,11 @@ public final class SharedDatabaseServers {
             return gui.getInventory().getItem(slot);
         }
 
+        /** Clicks a toolbar icon (its action runs; nothing moves). */
+        public InventoryClickEvent click(int rawSlot) {
+            return click(rawSlot, ClickType.LEFT, InventoryAction.PICKUP_ALL);
+        }
+
         private InventoryClickEvent click(int rawSlot, ClickType type, InventoryAction action) {
             InventoryView view = viewer.getOpenInventory();
             InventoryType.SlotType slotType = rawSlot < gui.getInventory().getSize()

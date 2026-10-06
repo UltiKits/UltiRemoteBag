@@ -45,6 +45,8 @@ class BagEditClaimTest {
     private static final int PAGE = 1;
     private static final int SLOT = 0;
     private static final long TIMEOUT_MS = 300_000L;
+    /** Bottom row slot 3 -- the Refresh icon of a read-only page. */
+    private static final int REFRESH_SLOT = 48;
 
     @TempDir
     Path dir;
@@ -180,8 +182,7 @@ class BagEditClaimTest {
         void crashLeftClaimExpires() throws Exception {
             start(true);
             serverA.openAsOwner(owner, PAGE);
-            // Server A crashes: nothing is closed, released or renewed again.
-            owner.closeInventory();
+            // Server A crashes: nothing is closed, released or renewed again (the window is simply abandoned).
 
             serverB.clock.set(serverA.clock.get() + TIMEOUT_MS - 1_000L);
             Window early = serverB.openAsAdmin(admin, ownerId(), PAGE);
@@ -289,6 +290,50 @@ class BagEditClaimTest {
 
             assertThat(held(claim())).as("page 1's claim is released").isFalse();
             assertThat(held(servers.claimRow(ownerId(), 2))).as("page 2's claim is released").isFalse();
+        }
+    }
+
+    @Nested
+    @DisplayName("The owner's own paths")
+    class OwnerPaths {
+
+        @Test
+        @DisplayName("/bag <page> on another server while the page is being edited: read-only, and the owner is told why")
+        void openPageTellsTheOwnerWhy() throws Exception {
+            start(true);
+            Window editing = serverA.openAsAdmin(admin, ownerId(), PAGE);
+            assertThat(editing.isEdit()).isTrue();
+            com.ultikits.plugins.remotebag.commands.BagCommand commandOnB = new com.ultikits.plugins.remotebag.commands.BagCommand(
+                    serverB.plugin, serverB.bagService, serverB.lockService, servers.config());
+
+            commandOnB.openPage(owner, PAGE);
+
+            assertThat(owner.nextMessage()).isEqualTo("bag_read_only_other_server");
+            assertThat(held(claim())).as("A's claim is untouched").isTrue();
+        }
+
+        @Test
+        @DisplayName("Refresh on the owner's read-only page: still read-only while the other server edits; once released, the owner takes the page as its owner")
+        void refreshUpgradesTheOwnerOnceReleased() throws Exception {
+            start(true);
+            Window editing = serverA.openAsAdmin(admin, ownerId(), PAGE);
+            Window readOnly = serverB.openAsOwner(owner, PAGE);
+            assertThat(readOnly.isReadOnly()).isTrue();
+            String tokenOfA = claim().getHolderToken();
+
+            readOnly.click(REFRESH_SLOT);
+            assertThat(owner.nextMessage()).isEqualTo("bag_read_only_other_server");
+            assertThat(claim().getHolderToken()).as("still A's claim").isEqualTo(tokenOfA);
+
+            editing.close();
+            readOnly.click(REFRESH_SLOT);
+
+            assertThat(held(claim())).as("the owner on B claimed the page").isTrue();
+            assertThat(claim().getHolderToken()).isNotEqualTo(tokenOfA);
+            assertThat(serverB.lockService.getLockInfo(ownerId(), PAGE))
+                    .as("as its owner, not as an administrator")
+                    .hasValueSatisfying(lock -> assertThat(lock.getLockType())
+                            .isEqualTo(com.ultikits.plugins.remotebag.enums.LockType.OWNER));
         }
     }
 
