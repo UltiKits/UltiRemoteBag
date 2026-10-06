@@ -1037,6 +1037,104 @@ class BagStorageFailureTest {
         bagsA.heal();
     }
 
+    // ==================== Gate 2, Codex run 2 ====================
+
+    @Test
+    @DisplayName("Codex run 2: a claim-lost notice queued for the old session does not touch the window of a new session of the same page")
+    void aStaleClaimLostNoticeLeavesTheNextSessionAlone() throws Exception {
+        Window old = serverA.openAsOwner(owner, PAGE);
+        // Something outside this server releases the claim and moves the counter: A's next renewal finds it lost
+        // and queues the notice for A's main thread, which has not run it yet.
+        RemoteBagEditClaim released = claim();
+        released.setHolderRun("intruder-run");
+        released.setHolderToken("");
+        released.setRenewals(released.getRenewals() + 1);
+        servers.claimStore().updateCounted(released);
+        serverA.advance(TIMEOUT_MS / 3 + 1);
+        serverA.renewOffMainThread();
+        assertThat(serverA.mainThreadTasks).as("precondition: the notice is queued").isNotEmpty();
+
+        old.close();
+        Window next = serverA.openAsOwner(owner, PAGE);
+        assertThat(next.isEdit()).as("precondition: the page was claimed again").isTrue();
+        owner.getInventory().addItem(new ItemStack(Material.GOLD_INGOT));
+        putIn(next, OTHER_SLOT, Material.GOLD_INGOT);
+        messages(owner);
+
+        serverA.runMainThread();
+
+        assertThat(messages(owner)).as("the new session is not told its claim was lost").doesNotContain("bag_claim_lost_read_only");
+        owner.setItemOnCursor(new ItemStack(Material.STONE));
+        assertThat(next.place(OTHER_SLOT + 1).isCancelled()).as("the new window still edits").isFalse();
+        SharedDatabaseServers.returnCursorToInventory(owner);
+        assertThat(count(owner.getInventory(), Material.GOLD_INGOT)).as("its put-in is not given back").isZero();
+        next.close();
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.GOLD_INGOT)).as("and it is saved").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Codex run 2: an unconfirmed-claim notice queued for the old session does not touch the window of a new session of the same page")
+    void aStaleUnconfirmedNoticeLeavesTheNextSessionAlone() throws Exception {
+        StorageFaults claimsA = claimsOf(serverA).onlyMethods("updateIf");
+        Window old = serverA.openAsOwner(owner, PAGE);
+        claimsA.set(StorageFaults.Mode.THROW);
+        serverA.advance(TIMEOUT_MS / 3 + 1);
+        serverA.renewOffMainThread();
+        assertThat(serverA.mainThreadTasks).as("precondition: the notice is queued").isNotEmpty();
+        claimsA.heal();
+        // The old window closes before the notice runs: its save is kept (the claim is unconfirmed), then lands,
+        // and the claim is released; the owner claims the page again.
+        old.close();
+        serverA.advance(1);
+        serverA.renewOffMainThread();
+        serverA.renewOffMainThread();
+        Window next = serverA.openAsOwner(owner, PAGE);
+        assertThat(next.isEdit()).as("precondition: the page was claimed again").isTrue();
+        owner.getInventory().addItem(new ItemStack(Material.GOLD_INGOT));
+        putIn(next, OTHER_SLOT, Material.GOLD_INGOT);
+        messages(owner);
+
+        serverA.runMainThread();
+
+        assertThat(messages(owner)).as("the new session is not turned read-only").doesNotContain("bag_storage_trouble_read_only");
+        owner.setItemOnCursor(new ItemStack(Material.STONE));
+        assertThat(next.place(OTHER_SLOT + 1).isCancelled()).as("the new window still edits").isFalse();
+        SharedDatabaseServers.returnCursorToInventory(owner);
+        next.close();
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.GOLD_INGOT)).as("its put-in is saved").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("Codex run 2: releases that do not answer, after kept saves land, do not hold up a background pass")
+    void hungReleasesDoNotHoldUpThePass() throws Exception {
+        servers.seedPage(ownerId(), 2, pageWith(SLOT, new ItemStack(Material.EMERALD)));
+        servers.seedPage(ownerId(), 3, pageWith(SLOT, new ItemStack(Material.EMERALD)));
+        StorageFaults bagsA = bagsOf(serverA);
+        StorageFaults claimsA = claimsOf(serverA);
+        Window one = serverA.openAsOwner(owner, PAGE);
+        Window two = serverA.openAsAdmin(admin, ownerId(), 2);
+        Window three = serverA.openAsAdmin(otherPlayer(), ownerId(), 3);
+        bagsA.set(StorageFaults.Mode.THROW);
+        one.close();
+        two.close();
+        three.close();
+        bagsA.heal();
+        // Every release (an updateIf that empties the token) hangs; renewals and the saves themselves answer.
+        claimsA.onlyMethods("updateIf").onlyFirstArgument(row -> row instanceof RemoteBagEditClaim
+                && ((RemoteBagEditClaim) row).getHolderToken() != null && ((RemoteBagEditClaim) row).getHolderToken().isEmpty());
+        claimsA.set(StorageFaults.Mode.HANG);
+
+        serverA.advance(1);
+        long started = System.currentTimeMillis();
+        serverA.renewOffMainThread();
+        long took = System.currentTimeMillis() - started;
+
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.DIAMOND)).as("precondition: the kept saves landed").isEqualTo(1);
+        assertThat(took).as("the pass did not wait for the hung releases one after another (ms)")
+                .isLessThan(2 * SharedDatabaseServers.CALL_DEADLINE_MILLIS);
+        claimsA.heal();
+    }
+
     private PlayerMock otherPlayer() {
         PlayerMock other = (PlayerMock) servers.live().getPlayerExact("OtherAdmin");
         return other != null ? other : servers.live().addPlayer("OtherAdmin");
