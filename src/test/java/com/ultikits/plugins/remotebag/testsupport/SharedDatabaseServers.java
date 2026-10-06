@@ -5,9 +5,11 @@ import com.ultikits.plugins.remotebag.UltiRemoteBag;
 import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.BagOpenResult;
+import com.ultikits.plugins.remotebag.entity.RemoteBagEditClaim;
 import com.ultikits.plugins.remotebag.entity.RemoteBagData;
 import com.ultikits.plugins.remotebag.gui.RemoteBagContentGUI;
 import com.ultikits.plugins.remotebag.listener.BagListener;
+import com.ultikits.plugins.remotebag.service.BagEditClaimService;
 import com.ultikits.plugins.remotebag.service.BagLockService;
 import com.ultikits.plugins.remotebag.service.RemoteBagService;
 import com.ultikits.ultitools.context.SimpleContainer;
@@ -41,6 +43,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -62,6 +65,13 @@ import static org.mockito.Mockito.mock;
  * {@code updateIf} as one check-and-write -- the two properties a database shared by two servers has
  * that a per-server cache does not.
  *
+ * <p>
+ * The edit claims ({@code remote_bag_claims}, UltiKits/UltiRemoteBag#54) live in a second shared store, the
+ * same framework operator behind a {@link PrimaryKeyStore}, which by default gives it the primary key the
+ * relational backends give the table, so that two first claims of one page meet it
+ * ({@link #startWithoutPrimaryKey} keeps the JSON behaviour, which ignores a duplicate insert). Each server has its own clock, so a server can be
+ * stopped in time ("crashed") while another's moves on.
+ *
  * <h2>What is modelled</h2>
  * The two servers share one player list (a player is on one of them at a time in the scenarios), and the
  * store is in memory. Item counts are read from the stored row itself ({@link #storedPage}), never from a
@@ -77,19 +87,43 @@ public final class SharedDatabaseServers {
     private final InventoryAPI inventoryApi;
     private final RemoteBagConfig config;
     private final DataOperator<RemoteBagData> bags;
+    private final DataOperator<RemoteBagEditClaim> claimsJson;
+    private final PrimaryKeyStore<RemoteBagEditClaim> claimsWithKey;
 
-    private SharedDatabaseServers(Path storeDir) throws Exception {
+    private SharedDatabaseServers(Path storeDir, boolean primaryKey) throws Exception {
         server = MockBukkitSupport.bootstrapLiveServer();
         UltiRemoteBagTestHelper.setUp();
         inventoryApi = new InventoryAPI(MockBukkit.createMockPlugin("ObliviateHost"));
         inventoryApi.init();
         config = UltiRemoteBagTestHelper.createDefaultConfig();
-        bags = new SimpleJsonDataOperator<>(storeDir.toString(), RemoteBagData.class);
+        bags = new SimpleJsonDataOperator<>(storeDir.resolve("remote_bags").toString(), RemoteBagData.class);
+        claimsJson = new SimpleJsonDataOperator<>(storeDir.resolve("remote_bag_claims").toString(), RemoteBagEditClaim.class);
+        claimsWithKey = new PrimaryKeyStore<>(claimsJson, primaryKey);
     }
 
-    /** Boots the live server and an empty shared store in {@code storeDir}. */
+    /** Boots the live server and empty shared stores in {@code storeDir}; claims have a primary key. */
     public static SharedDatabaseServers start(Path storeDir) throws Exception {
-        return new SharedDatabaseServers(storeDir);
+        return new SharedDatabaseServers(storeDir, true);
+    }
+
+    /** As {@link #start}, but the claims store ignores a duplicate insert, as the JSON backend does. */
+    public static SharedDatabaseServers startWithoutPrimaryKey(Path storeDir) throws Exception {
+        return new SharedDatabaseServers(storeDir, false);
+    }
+
+    /** The shared claims store, as every server sees it. */
+    public DataOperator<RemoteBagEditClaim> claimStore() {
+        return claimsWithKey;
+    }
+
+    /** The claims store's wrapper, for running another server between a read and an insert. */
+    public PrimaryKeyStore<RemoteBagEditClaim> claimKey() {
+        return claimsWithKey;
+    }
+
+    /** The stored claim of a page, or {@code null}. */
+    public RemoteBagEditClaim claimRow(UUID ownerUuid, int page) {
+        return claimsJson.getById(ownerUuid + ":" + page);
     }
 
     /** Tears the live server down. */
@@ -125,6 +159,9 @@ public final class SharedDatabaseServers {
         public final RemoteBagService bagService;
         public final BagLockService lockService;
         public final BagListener listener;
+        public final BagEditClaimService claimService;
+        /** This server's clock, in epoch milliseconds; tests move it on. */
+        public final AtomicLong clock = new AtomicLong(1_000_000_000_000L);
 
         private Server(String name) throws Exception {
             this.name = name;
@@ -137,7 +174,18 @@ public final class SharedDatabaseServers {
             lockService = new BagLockService();
             UltiRemoteBagTestHelper.setField(lockService, "plugin", plugin);
             UltiRemoteBagTestHelper.setField(lockService, "config", config);
+            claimService = new BagEditClaimService();
+            UltiRemoteBagTestHelper.setField(claimService, "plugin", plugin);
+            UltiRemoteBagTestHelper.setField(claimService, "config", config);
+            UltiRemoteBagTestHelper.setField(claimService, "claims", claimStore());
+            UltiRemoteBagTestHelper.setField(claimService, "clock", (java.util.function.LongSupplier) clock::get);
+            UltiRemoteBagTestHelper.setFieldIfPresent(lockService, "claimService", claimService);
             listener = new BagListener(bagService, lockService);
+        }
+
+        /** Moves this server's clock on. */
+        public void advance(long millis) {
+            clock.addAndGet(millis);
         }
 
         /** The owner opens their own page on this server, as {@code /bag <page>} does. */
@@ -200,6 +248,9 @@ public final class SharedDatabaseServers {
             }
             if (type == RemoteBagConfig.class) {
                 return config;
+            }
+            if (type == BagEditClaimService.class) {
+                return claimService;
             }
             return null;
         }
