@@ -293,14 +293,20 @@ public class BagCommand extends BaseCommandExecutor {
         }
         
         // 检查背包是否被锁定
-        // Held on this server, or being edited on another server sharing the database (UltiKits/UltiRemoteBag#54).
-        if (!lockService.canUpgradeToEdit(targetUuid, page) || lockService.isClaimedElsewhere(targetUuid, page)) {
+        // Held on this server, or being edited on another server sharing the database: the page is claimed for
+        // the delete itself, so nobody can start editing it meanwhile (UltiKits/UltiRemoteBag#54).
+        if (!lockService.claimForAction(targetUuid, page, admin.getUniqueId())) {
             admin.sendMessage(ChatColor.RED + i18n("bag_in_use_cannot_delete"));
             return;
         }
-        
-        boolean deleted = bagService.deleteBagPage(targetUuid, page);
-        bagService.forgetUnlessOnline(targetUuid);
+
+        boolean deleted;
+        try {
+            deleted = bagService.deleteBagPage(targetUuid, page);
+        } finally {
+            lockService.releaseAction(targetUuid, page);
+            bagService.forgetUnlessOnline(targetUuid);
+        }
         if (deleted) {
             admin.sendMessage(ChatColor.GREEN + i18n("admin_bag_deleted")
                     .replace("{0}", playerName)
@@ -325,14 +331,20 @@ public class BagCommand extends BaseCommandExecutor {
         }
         
         // 检查背包是否被锁定
-        // Held on this server, or being edited on another server sharing the database (UltiKits/UltiRemoteBag#54).
-        if (!lockService.canUpgradeToEdit(targetUuid, page) || lockService.isClaimedElsewhere(targetUuid, page)) {
+        // Held on this server, or being edited on another server sharing the database: the page is claimed for
+        // the clear itself, so nobody can start editing it meanwhile (UltiKits/UltiRemoteBag#54).
+        if (!lockService.claimForAction(targetUuid, page, admin.getUniqueId())) {
             admin.sendMessage(ChatColor.RED + i18n("bag_in_use_cannot_clear"));
             return;
         }
-        
-        boolean cleared = bagService.clearBagPage(targetUuid, page);
-        bagService.forgetUnlessOnline(targetUuid);
+
+        boolean cleared;
+        try {
+            cleared = bagService.clearBagPage(targetUuid, page);
+        } finally {
+            lockService.releaseAction(targetUuid, page);
+            bagService.forgetUnlessOnline(targetUuid);
+        }
         if (cleared) {
             admin.sendMessage(ChatColor.GREEN + i18n("admin_bag_cleared")
                     .replace("{0}", playerName)

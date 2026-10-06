@@ -195,7 +195,10 @@ class BagEditClaimTest {
 
     @Test
     @DisplayName("Two first claims of one page at once: exactly one holds it, the other opens read-only")
-    void concurrentFirstClaim() {
+    void concurrentFirstClaim() throws Exception {
+        // A's claim runs on the test thread, so the hook can run B's open in the middle of it (gate 1 F1 moved every
+        // claim call onto the storage pool, with a deadline).
+        serverA.runStorageCallsInline();
         Window[] fromB = new Window[1];
         // Server B claims in the moment between server A's read (no row) and A's insert.
         servers.claimHooks().beforeNextInsert(() -> fromB[0] = serverB.openAsAdmin(admin, ownerId(), PAGE));
@@ -287,7 +290,8 @@ class BagEditClaimTest {
 
     @Test
     @DisplayName("Two observers racing to take over an expired claim: exactly one wins, the other stays read-only")
-    void twoObserversRacingToTakeOverOneWins() {
+    void twoObserversRacingToTakeOverOneWins() throws Exception {
+        serverC.runStorageCallsInline();
         assertThat(serverA.openAsOwner(owner, PAGE).isEdit()).isTrue();
         assertThat(triesToEdit(serverB, admin)).isFalse();
         assertThat(triesToEdit(serverC, otherAdmin)).isFalse();

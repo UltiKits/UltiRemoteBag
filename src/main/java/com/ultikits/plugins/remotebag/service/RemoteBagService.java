@@ -150,6 +150,11 @@ public class RemoteBagService {
         public boolean isStored() {
             return stored;
         }
+
+        /** The stored contents as read, in the storage format; {@code null} when none were stored. */
+        public String getContents() {
+            return contents;
+        }
     }
 
     /**
@@ -199,7 +204,62 @@ public class RemoteBagService {
      * @return the page as now stored, for the window's next save; {@code null} if nothing was written
      */
     public PageRead savePage(UUID playerUuid, int page, ItemStack[] items, PageRead read) {
-        String contents = serializeItems(items);
+        return write(playerUuid, page, items, serializePage(items), read, true);
+    }
+
+    /**
+     * The page as stored after a write of {@code contents} that is known to have landed, for the window's next save.
+     *
+     * @param items    the items written
+     * @param contents {@code items} in the storage format
+     * @return what the window's next save is conditioned on
+     */
+    public PageRead storedRead(ItemStack[] items, String contents) {
+        return new PageRead(items.clone(), true, contents, 0L);
+    }
+
+    /**
+     * The stored contents of a page, read from the database now; {@code null} when no row is stored. Safe off the
+     * main thread.
+     *
+     * @param playerUuid the bag's owner
+     * @param page       the page number
+     * @return the stored contents, or {@code null}
+     */
+    public String storedContents(UUID playerUuid, int page) {
+        List<RemoteBagData> rows = storedRows(playerUuid, page);
+        return rows.isEmpty() ? null : rows.get(0).getContents();
+    }
+
+    /**
+     * The page in the storage format, for {@link #writePage}. Run where the items may be read (the main thread).
+     *
+     * @param items the page's items
+     * @return the stored form
+     */
+    public String serializePage(ItemStack[] items) {
+        return serializeItems(items);
+    }
+
+    /**
+     * The write of {@link #savePage}, with the contents already in the storage format and without its log line:
+     * the caller decides what a write that was not applied means (UltiKits/UltiRemoteBag#54). Safe off the main
+     * thread: it touches no Bukkit state.
+     *
+     * @param playerUuid the bag's owner
+     * @param page       the page number
+     * @param items      what the window shows (kept as the stored page's items in the result)
+     * @param contents   {@code items} in the storage format ({@link #serializePage})
+     * @param read       what the window read, or what its last save wrote
+     * @return the page as now stored; {@code null} if nothing was written because the stored page is not
+     *         {@code read} (or no longer exists)
+     * @throws RuntimeException a storage failure, as the data operator reports it
+     */
+    public PageRead writePage(UUID playerUuid, int page, ItemStack[] items, String contents, PageRead read) {
+        return write(playerUuid, page, items, contents, read, false);
+    }
+
+    private PageRead write(UUID playerUuid, int page, ItemStack[] items, String contents, PageRead read, boolean logMiss) {
         List<RemoteBagData> rows = storedRows(playerUuid, page);
         boolean written;
         RemoteBagData target = null;
@@ -230,7 +290,9 @@ public class RemoteBagService {
             }
         }
         if (!written) {
-            plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
+            if (logMiss) {
+                plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
+            }
             return null;
         }
         ItemStack[] stored = items.clone();

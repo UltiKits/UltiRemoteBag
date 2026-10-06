@@ -155,10 +155,11 @@ public final class StorageFaults {
                     hung.incrementAndGet();
                     try {
                         hang.await(15, TimeUnit.SECONDS);
+                        return forward(real, method, args);
                     } finally {
+                        // After the real call: "no call is hung" means every hung call has also finished.
                         hung.decrementAndGet();
                     }
-                    return forward(real, method, args);
                 case COMMIT_THEN_THROW:
                     mode = Mode.NONE;
                     forward(real, method, args);

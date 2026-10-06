@@ -1,6 +1,7 @@
 package com.ultikits.plugins.remotebag.listener;
 
 import com.ultikits.plugins.remotebag.gui.RemoteBagContentGUI;
+import com.ultikits.plugins.remotebag.service.BagEditClaimService;
 import com.ultikits.plugins.remotebag.service.BagLockService;
 import com.ultikits.plugins.remotebag.service.RemoteBagService;
 import com.ultikits.ultitools.annotations.EventListener;
@@ -8,6 +9,7 @@ import com.ultikits.ultitools.annotations.EventListener;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 /**
@@ -50,8 +52,32 @@ public class BagListener implements Listener {
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
 
-        RemoteBagContentGUI.saveOpenEditPageOnQuit(player);
-        lockService.releaseAll(player.getUniqueId());
-        bagService.clearCache(player.getUniqueId());
+        try {
+            RemoteBagContentGUI.saveOpenEditPageOnQuit(player);
+        } finally {
+            // Always, even if that save threw: no lock, claim (and its background renewal) or cached copy outlives
+            // the player's session (UltiKits/UltiRemoteBag#54, gate 1 F8). A write still being retried keeps its
+            // claim until it lands (BagEditClaimService#release).
+            try {
+                lockService.releaseAll(player.getUniqueId());
+            } finally {
+                bagService.clearCache(player.getUniqueId());
+            }
+        }
+    }
+
+    /**
+     * Gives a joining player the items a save that was refused after they left owes them: what they had put into a
+     * bag page whose write the database did not answer before they quit, and then refused because the stored page
+     * had been changed (UltiKits/UltiRemoteBag#54).
+     *
+     * @param event the join
+     */
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        BagEditClaimService claims = lockService.getClaimService();
+        if (claims != null) {
+            claims.deliverOwed(event.getPlayer());
+        }
     }
 }

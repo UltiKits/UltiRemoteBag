@@ -69,6 +69,11 @@ class BagCommandTest {
 
         bagService = mock(RemoteBagService.class);
         lockService = mock(BagLockService.class);
+        // /bag clear and /bag delete claim the page for their action since UltiKits/UltiRemoteBag#54 (gate 1 F4).
+        // With no claim service wired, the real claimForAction answers what canUpgradeToEdit answers; the cases
+        // below stub that.
+        lenient().when(lockService.claimForAction(any(), anyInt(), any()))
+                .thenAnswer(inv -> lockService.canUpgradeToEdit(inv.getArgument(0), inv.getArgument(1)));
         config = UltiRemoteBagTestHelper.createDefaultConfig();
 
         UltiToolsPlugin mockPlugin = mock(UltiToolsPlugin.class);

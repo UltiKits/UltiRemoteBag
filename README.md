@@ -218,8 +218,10 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
   mode"). On one server nothing changes: the owner still outranks an administrator. Across servers the first
   server to claim the page edits it, owner or not.
 - **Release and renewal.** The claim is released when the window closes, when its player quits, and when the
-  module stops. While a window is open, its server renews the claim on a background task every third of
-  `lock.timeout_seconds` (default 300), adding one to the claim's counter; a stalled main thread does not stop it.
+  module stops (or, while a save is still being written -- see below -- as soon as it is). While a window is open,
+  its server renews the claim on a background task every third of `lock.timeout_seconds` (default 300), adding one
+  to the claim's counter; a stalled main thread does not stop it, and one database call that hangs does not hold up
+  the renewal of any other page.
 - **Expiry does not depend on clocks.** Another server may take a claim over only after it has seen the same
   counter for a full `lock.timeout_seconds` on its own clock. A crashed server's claim is taken over one timeout
   after another server first sees it; a running server keeps its claim however far the servers' clocks disagree.
@@ -228,6 +230,25 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
   If a save is refused, the items put into the window since it last read or saved the page are given back to the
   player (what does not fit drops at their feet). If the claim is ever lost, the window turns read-only at once
   and gives those items back.
+- **When the database does not answer.** Every database call of the claim and of a page save is given up on after a
+  sixth of `lock.timeout_seconds` (at most two seconds while the main thread waits); a call given up on may still
+  land later, and its answer is still used.
+  - If a renewal fails or does not answer, the window turns read-only at once ("This server could not confirm its
+    reservation of this bag page with the database ..."). What it shows is kept and saved as soon as the claim is
+    confirmed again; nothing is given back, because that save can still land. A window whose claim has not been
+    confirmed for half the timeout turns read-only by itself at the next click, even if the renewal task is stuck.
+  - If a save fails or does not answer (at close, on the Save button, at quit, or by `/bag save`), the claim is kept
+    and renewed, the page's content stays in memory, and the same conditional save is retried in the background
+    until it lands. Meanwhile the page is read-only on every server; reopening it on this server shows the kept
+    content. A save that landed although the database reported an error counts as saved. Kept saves survive the
+    player quitting and reopening; when the module stops it keeps trying for five seconds and logs, with their
+    items, the saves it could not write.
+  - Only a save the database refuses (the stored page is not what the window read) gives back the items put in. If
+    the player has left, they get them at their next join on this server.
+  - Set a socket or statement timeout on your MySQL connection (for example `socketTimeout` in the JDBC URL) if your
+    server's network can leave a connection half-open: the framework does not set one, and a call on such a
+    connection otherwise waits for TCP keep-alive. This module never waits for it, but the pooled connection stays
+    busy until it returns.
 - **Upgrading** needs no migration: the `remote_bag_claims` table is created on the first start, no existing
   table changes, and a page without a claim row is free.
 
@@ -238,9 +259,16 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
   plugin writing `remote_bags`, or someone editing the table by hand (`sqlite3`, a MySQL client). The window's
   save is then refused and its put-in items are given back, but an item taken out of the page during that session
   stays with the player while the other writer's page may still hold it: that item can exist twice.
-- A server process frozen as a whole (its background threads included) for longer than `lock.timeout_seconds`, or
-  cut off from a database that another server still reaches, can have its claim taken over; its window then turns
-  read-only and gives back the put-in items, with the same limitation for items taken out.
+- A server cut off from the database for a full `lock.timeout_seconds` while another server still reaches it, or
+  frozen as a whole (its background threads included) for that long, has its claim taken over. Its window turned
+  read-only when the first renewal failed, so nothing is edited after that; when the database answers again, the
+  claim is found lost and the items put in during the session are given back, with the same limitation for items
+  taken out before the cut. A single database call that hangs for longer than the timeout and then lands can land
+  after another server took the claim over.
+- A save that is still being retried is held in memory: a server crash loses it, as it loses an unsaved window,
+  and so does a module stop that cannot write it within five seconds (logged with its items; the items put in go
+  back to the player if they are online and no write is still running). Items owed to a player who left are also
+  held in memory until they join again.
 - On MySQL the comparison of a page's stored contents follows the column's collation, which ignores letter case.
 
 多台服务器共享 MySQL 时（UltiKits/UltiRemoteBag#54）：同一背包页同一时间只能在一台服务器上编辑——打开编辑时在数据库表
@@ -249,9 +277,17 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
 `lock.timeout_seconds` 续期一次（计数器加一），主线程卡顿不会中断续期。过期不依赖时钟：另一台服务器只有在自己的时钟上连续
 `lock.timeout_seconds` 看到同一计数器值后才能接手；崩溃服务器的占用在另一台服务器首次看到它的一个超时后被接手。背包页只由它自己的窗口
 写入，且仅当存储内容仍是窗口读取时的内容；保存被拒绝时，自上次读取或保存以来放入窗口的物品归还给玩家（放不下的掉落在脚下）；若占用丢失，
-窗口立即变为只读并归还这些物品。升级无需迁移。已知限制：不使用占用的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags`
+窗口立即变为只读并归还这些物品。数据库未响应时：占用和保存的每次数据库调用最多等待 `lock.timeout_seconds` 的六分之一（主线程等待时最多两秒），
+放弃等待的调用仍可能稍后完成，其结果仍会被采用；续期失败或未响应时窗口立即变为只读，窗口内容被保留，占用恢复确认后立即保存，不归还物品；
+保存失败或未响应时保留占用并继续续期，内容保留在内存中，在后台重试同一条件写入直到成功，期间该页在所有服务器上只读，在本服务器重新打开会显示
+保留的内容；只有被数据库拒绝的保存才归还放入的物品（玩家已离开时在其下次加入本服务器时归还）。保留的保存在玩家退出和重新打开后仍然有效；模块停止时
+再尝试五秒，无法写入的连同物品记录在日志中。如果服务器网络可能留下半开连接，请为 MySQL 连接设置套接字或语句超时（例如 JDBC URL 中的
+`socketTimeout`），框架本身不设置。升级无需迁移。已知限制：不使用占用的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags`
 的其他插件、手动编辑数据表）仍可能在窗口打开时改动该页——保存会被拒绝、放入的物品会归还，但该会话中取出的物品留在玩家身上，而对方写入的页面
-可能仍含有它，从而出现两份；整个服务器进程（包括后台线程）冻结超过超时时间，或与数据库断开而另一台服务器仍可访问时，占用可能被接手。
+可能仍含有它，从而出现两份；与数据库断开整整一个超时而另一台服务器仍可访问，或整个服务器进程（包括后台线程）冻结这么久时，占用会被接手——
+窗口在第一次续期失败时已变为只读，数据库恢复后发现占用丢失，归还会话中放入的物品，断开前取出的物品同样可能出现两份；一次挂起超过超时时间后才完成的数据库调用
+可能在另一台服务器接手之后写入；仍在重试的保存保存在内存中，服务器崩溃会丢失它（与未保存的窗口相同），模块停止时五秒内无法写入的也会丢失（连同物品记录在
+日志中；若玩家在线且没有仍在进行的写入，放入的物品归还给玩家）；欠离线玩家的物品同样保存在内存中，直到其再次加入。
 
 ## 🔧 开发者 API
 

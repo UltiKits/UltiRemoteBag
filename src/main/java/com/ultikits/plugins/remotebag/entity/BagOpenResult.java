@@ -63,7 +63,12 @@ public class BagOpenResult {
         /** Another server sharing the database is editing the page, so it opens read-only (UltiKits/UltiRemoteBag#54). */
         READ_ONLY_OTHER_SERVER,
         /** The page's edit claim could not be read or written, so it opens read-only (UltiKits/UltiRemoteBag#54). */
-        READ_ONLY_CLAIM_FAILED
+        READ_ONLY_CLAIM_FAILED,
+        /**
+         * The page's last changes on this server are still being written (a save the database did not answer is
+         * kept and retried), so it opens read-only and shows them (UltiKits/UltiRemoteBag#54).
+         */
+        READ_ONLY_SAVE_PENDING
     }
     
     /**
@@ -104,6 +109,15 @@ public class BagOpenResult {
     }
 
     /**
+     * Read-only because this server is still writing the page's last changes (UltiKits/UltiRemoteBag#54).
+     *
+     * @return the read-only result with the save-pending notice
+     */
+    public static BagOpenResult readOnlySavePending() {
+        return new BagOpenResult(true, AccessMode.READ_ONLY, Notice.READ_ONLY_SAVE_PENDING, null);
+    }
+
+    /**
      * 创建被阻止的结果
      * 
      * @param lock 阻止的锁信息
@@ -140,6 +154,9 @@ public class BagOpenResult {
                 break;
             case READ_ONLY_CLAIM_FAILED:
                 text = plugin.i18n("bag_read_only_claim_failed");
+                break;
+            case READ_ONLY_SAVE_PENDING:
+                text = plugin.i18n("bag_read_only_save_pending");
                 break;
             default:
                 text = plugin.i18n("bag_blocked_in_use");

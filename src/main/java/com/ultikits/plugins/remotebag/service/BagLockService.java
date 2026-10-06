@@ -329,8 +329,52 @@ public class BagLockService {
                 return null;
             case HELD_ELSEWHERE:
                 return BagOpenResult.readOnlyElsewhere();
+            case SAVE_PENDING:
+                return BagOpenResult.readOnlySavePending();
             default:
                 return BagOpenResult.readOnlyClaimFailed();
+        }
+    }
+
+    /**
+     * The edit claims shared with other servers and the page writes of the windows holding them
+     * (UltiKits/UltiRemoteBag#54); {@code null} when not wired (some unit tests), in which case a window saves
+     * directly.
+     *
+     * @return the claim service, or {@code null}
+     */
+    public BagEditClaimService getClaimService() {
+        return claimService;
+    }
+
+    /**
+     * Claims a page for an administrator's own action on it ({@code /bag clear}, {@code /bag delete}), so no session
+     * on this or another server can edit it while the action runs (UltiKits/UltiRemoteBag#54, gate 1 F4). Refused
+     * while the page is held on this server, claimed by another server, or its last changes are still being written.
+     * End the action with {@link #releaseAction}.
+     *
+     * @param ownerUuid the bag owner
+     * @param pageNum   the page number
+     * @param actor     the administrator
+     * @return true if the action may proceed
+     */
+    public boolean claimForAction(UUID ownerUuid, int pageNum, UUID actor) {
+        if (!canUpgradeToEdit(ownerUuid, pageNum)) {
+            return false;
+        }
+        return claimService == null
+                || claimService.claim(ownerUuid, pageNum, actor) == BagEditClaimService.Outcome.CLAIMED;
+    }
+
+    /**
+     * Ends an action begun with {@link #claimForAction}: its claim is released.
+     *
+     * @param ownerUuid the bag owner
+     * @param pageNum   the page number
+     */
+    public void releaseAction(UUID ownerUuid, int pageNum) {
+        if (claimService != null) {
+            claimService.release(ownerUuid, pageNum);
         }
     }
 

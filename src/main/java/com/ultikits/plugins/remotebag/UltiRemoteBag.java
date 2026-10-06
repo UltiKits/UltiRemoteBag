@@ -2,6 +2,7 @@ package com.ultikits.plugins.remotebag;
 
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.config.RemovedConfigKeys;
+import com.ultikits.plugins.remotebag.gui.RemoteBagContentGUI;
 import com.ultikits.plugins.remotebag.service.BagEditClaimService;
 import com.ultikits.plugins.remotebag.service.RemoteBagService;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
@@ -49,15 +50,17 @@ public class UltiRemoteBag extends UltiToolsPlugin {
     }
 
     /**
-     * Writes no bag: every bag change was written when it was made, and a cached copy written here would
-     * overwrite a change another server sharing the database made since. Stops the background claim renewal and
-     * releases every edit claim this server holds, so another server can edit those pages at once
-     * (UltiKits/UltiRemoteBag#54).
+     * Writes no cached bag: a cached copy written here would overwrite a change another server sharing the
+     * database made since. Every edit window still open keeps what it shows and closes; the claim service then
+     * writes those and every other kept write for a bounded time (logging, with its items, any that cannot land),
+     * stops the background claim renewal and releases every edit claim this server holds, so another server can
+     * edit those pages at once (UltiKits/UltiRemoteBag#54, gate 1 F2 and F3).
      */
     @Override
     protected void onUnregister() {
         BagEditClaimService claimService = getContext().getBean(BagEditClaimService.class);
         if (claimService != null) {
+            RemoteBagContentGUI.keepOpenEditWindowsForDisable();
             claimService.shutdown();
         }
         getLogger().info(i18n("bag_disabled"));

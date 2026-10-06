@@ -132,12 +132,12 @@ class BagStorageFailureTest {
         return claim != null && claim.getHolderToken() != null && !claim.getHolderToken().isEmpty();
     }
 
-    /** Every message the player has been sent and not yet read. */
+    /** Every message the player has been sent and not yet read, without colour codes. */
     private static List<String> messages(PlayerMock player) {
         List<String> all = new ArrayList<>();
         String next;
         while ((next = player.nextMessage()) != null) {
-            all.add(next);
+            all.add(org.bukkit.ChatColor.stripColor(next));
         }
         return all;
     }
@@ -235,6 +235,7 @@ class BagStorageFailureTest {
 
         claimsA.heal();
         assertThat(waitUntil(() -> claimsA.hungCalls() == 0)).as("the hung renewal finished").isTrue();
+        backgroundPass(serverA);
         backgroundPass(serverA);
 
         assertTheEditIsStoredOnce();
@@ -452,11 +453,13 @@ class BagStorageFailureTest {
         assertThat(reopened.shown(SLOT)).as("the diamond was taken out").isNull();
         assertThat(reopened.pickUp(OTHER_SLOT).isCancelled()).isTrue();
         reopened.close();
+        // The database answers again, but the kept write has not been retried yet (/bag see reads the bag first).
+        bagsA.heal();
         Window adminView = serverA.openAsAdmin(admin, ownerId(), PAGE);
         assertThat(adminView.isReadOnly()).as("another player on this server: read-only too").isTrue();
+        assertThat(adminView.shown(OTHER_SLOT)).as("showing the kept content").isNotNull();
         adminView.close();
 
-        bagsA.heal();
         backgroundPass(serverA);
         assertTheEditIsStoredOnce();
         Window afterwards = serverA.openAsOwner(owner, PAGE);

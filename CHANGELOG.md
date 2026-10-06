@@ -30,6 +30,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   各服务器时钟不一致也没有影响。若占用丢失，窗口立即变为只读，并归还自上次保存以来放入的物品。单台服务器上的规则不变。该表在首次启动时创建；
   现有表不变，也没有任何迁移。已知限制：不使用占用的写入者（滚动升级期间的旧版本模块、其他插件、手动编辑数据表）仍可能在窗口打开时改动该页，
   该会话中取出的物品可能出现两份（见 README“已知限制”）（UltiKits/UltiRemoteBag#54）。
+- **A bag page survives a database that does not answer.** Every database call of the edit claim and of a page
+  save is given up on after a sixth of `lock.timeout_seconds` (at most two seconds while the main thread waits),
+  and one call that hangs no longer holds up the claims of other pages. If the claim's renewal fails or does not
+  answer, the window turns read-only at once and what it shows is saved as soon as the database answers. If a save
+  fails or does not answer -- at close, on the Save button, at quit or by `/bag save` -- the claim is kept, the
+  changes stay in memory and the same save is retried in the background until it lands; meanwhile the page is
+  read-only everywhere and a reopen on this server shows the kept changes. Nothing is given back while such a save
+  can still land. Only a save the database refuses gives back the items put in (at the next join if the player has
+  left). Module stop now saves the pages still open for editing, keeps trying kept saves for five seconds and logs,
+  with their items, those it could not write. `/bag clear` and `/bag delete` claim the page for their own action.
+  Known limitation: a kept save is held in memory and a server crash loses it, as it loses an unsaved window
+  (README, "Known limitations") (UltiKits/UltiRemoteBag#54).
+- **数据库未响应时，背包页不再丢失改动。** 占用和保存的每次数据库调用最多等待 `lock.timeout_seconds` 的六分之一（主线程等待时最多两秒），
+  一次挂起的调用不再耽误其他页面的占用续期。续期失败或未响应时，窗口立即变为只读，窗口中显示的内容在数据库恢复响应后立即保存。保存失败或未响应时——
+  关闭窗口、点击保存按钮、退出或 `/bag save`——保留占用，改动保留在内存中，并在后台重试同一保存直到成功；期间该页在所有服务器上只读，
+  在本服务器重新打开会显示保留的改动。只要这次保存仍可能完成，就不归还任何物品。
+  只有被数据库拒绝的保存才归还放入的物品（玩家已离开时在其下次加入时归还）。模块停止时会保存仍在编辑中打开的背包页，对保留的保存再尝试五秒，
+  无法写入的连同物品记录在日志中。`/bag clear` 与 `/bag delete` 会为自身操作占用该页。已知限制：保留的保存在内存中，服务器崩溃会丢失它，
+  与未保存的窗口相同（见 README“已知限制”）（UltiKits/UltiRemoteBag#54）。
 
 ### Fixed
 

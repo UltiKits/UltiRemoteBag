@@ -276,6 +276,15 @@ public final class SharedDatabaseServers {
             onJoin.invoke(listener, new org.bukkit.event.player.PlayerJoinEvent(player, "join"));
         }
 
+        /**
+         * Runs this server's storage calls on the calling thread instead of the claim service's pool, so a hook of
+         * the shared claims store ({@link PrimaryKeyStore.Hooks}) runs another server's open on the test's main
+         * thread, in the middle of this server's claim. Not for the hang cases: an inline call cannot be given up on.
+         */
+        public void runStorageCallsInline() throws Exception {
+            UltiRemoteBagTestHelper.setField(claimService, "storage", new InlineExecutorService());
+        }
+
         /** Moves this server's monotonic clock on (its wall clock is left alone). */
         public void advance(long millis) {
             nanos.addAndGet(millis * 1_000_000L);
@@ -444,6 +453,42 @@ public final class SharedDatabaseServers {
                 throw new IllegalStateException("no vanilla effect modelled for " + action);
             }
             return event;
+        }
+    }
+
+    /** An executor service that runs each task on the thread that submits it. */
+    private static final class InlineExecutorService extends java.util.concurrent.AbstractExecutorService {
+        private volatile boolean shut;
+
+        @Override
+        public void execute(Runnable command) {
+            command.run();
+        }
+
+        @Override
+        public void shutdown() {
+            shut = true;
+        }
+
+        @Override
+        public List<Runnable> shutdownNow() {
+            shut = true;
+            return new ArrayList<>();
+        }
+
+        @Override
+        public boolean isShutdown() {
+            return shut;
+        }
+
+        @Override
+        public boolean isTerminated() {
+            return shut;
+        }
+
+        @Override
+        public boolean awaitTermination(long timeout, java.util.concurrent.TimeUnit unit) {
+            return true;
         }
     }
 
