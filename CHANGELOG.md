@@ -9,14 +9,35 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Bag pages on servers that share one database.** A bag page changed on another server sharing the database is
+  no longer overwritten by an old copy held on this server, so an item taken out there no longer comes back here
+  (duplicated), and an item put in there is no longer lost. Each server kept every page of a player's bag in memory
+  from the first read -- also after an administrator only looked at another player's bag with `/bag see` or
+  `/bag list` -- and wrote the whole copy back: every cached page of that player on any save, and every cached page
+  of every player when the module stopped. Now nothing is written from that copy. A page is saved only from its own
+  window, only that page, and only if the stored page is still what the window read when it opened (or last saved);
+  otherwise nothing is written, the console logs `Failed to update bag data` and the player sees the existing
+  "The save did not reach the database" line. Creating, clearing and deleting a page are decided on what is stored
+  at that moment, and write only that page. Stopping or unloading the module, quitting, and `/bag save` with no page
+  open write nothing (every change is written when it is made; `/bag save` still answers `Bag saved manually!` when
+  this server holds any of your pages). A copy of another player's bag is dropped when the administrator's window
+  closes or the command is done, unless that player is on this server (UltiKits/UltiRemoteBag#54).
+- **共享同一数据库的多台服务器上的背包页。** 另一台共享该数据库的服务器修改过的背包页，不会再被本服务器持有的旧副本覆盖：在那里取出的物品
+  不会在这里重新出现（复制），在那里放入的物品也不会丢失。此前每台服务器从首次读取起就把玩家背包的每一页保存在内存里——包括管理员只是用
+  `/bag see` 或 `/bag list` 查看了别人的背包之后——并整份写回：任意一次保存都会写回该玩家所有缓存页，模块停止时还会写回所有玩家的所有缓存页。
+  现在不再从这份副本写入任何内容。背包页只能由它自己的窗口保存，只写这一页，并且仅当存储的内容仍是窗口打开时（或上次保存时）读到的内容时
+  才写入；否则不写入，控制台记录 `Failed to update bag data`，玩家看到既有的“保存未写入数据库”提示。创建、清空、删除背包页都以当时存储的内容
+  为准，且只写这一页。停止或卸载模块、玩家退出、以及没有打开页面时的 `/bag save` 都不写入任何内容（每次改动在发生时就已写入；本服务器持有你的
+  背包页时，`/bag save` 仍回复“背包已手动保存！”）。管理员查看他人背包的窗口关闭或命令结束后，该玩家背包的副本即被丢弃，除非该玩家就在本服务器上
+  （UltiKits/UltiRemoteBag#54）。
 - A bag save whose stored row has been deleted in the meantime is now reported as not saved. On a MySQL
   database shared by several servers, an administrator on another server who deletes a bag page at the moment
   this server saves it made that save write nothing while `/bag save` still answered that the bag was saved;
-  now the save logs `Failed to update bag data`, the other pages are still saved, and the save is reported as
-  failed (UltiKits/UltiRemoteBag#50).
+  now the save logs `Failed to update bag data` and the save is reported as failed (UltiKits/UltiRemoteBag#50;
+  since UltiKits/UltiRemoteBag#54 a save writes only its own page).
 - 已存储的背包行在保存时已被删除，现在会报告为未保存。多个服务器共用同一个 MySQL 数据库时，若另一台服务器上的管理员恰好在本服务器保存时
-  删除了某一页背包，该次保存什么也没写入，`/bag save` 却仍回复背包已保存；现在会记录 `Failed to update bag data`，其余页面照常保存，
-  并且报告保存失败（UltiKits/UltiRemoteBag#50）。
+  删除了某一页背包，该次保存什么也没写入，`/bag save` 却仍回复背包已保存；现在会记录 `Failed to update bag data`，
+  并且报告保存失败（UltiKits/UltiRemoteBag#50；自 UltiKits/UltiRemoteBag#54 起一次保存只写它自己的那一页）。
 
 - `config/remotebag.yml` now writes its comments in the server's language. Thirteen comments (the `economy.*`,
   `sound.*` and `lock.*` settings) used to be Chinese-only, so a fresh install under `language: en` got a file
@@ -283,6 +304,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- `RemoteBagService#setBagPage`, `#saveBag` and `#saveAllBags` are removed. They wrote a cached copy of a player's pages
+  over the stored ones, which on a shared database overwrote another server's changes. A plugin that changes a page
+  reads it with `readPage` and saves it with `savePage`, which writes only if the stored page is still what was read
+  (UltiKits/UltiRemoteBag#54).
+- 移除 `RemoteBagService#setBagPage`、`#saveBag` 与 `#saveAllBags`。它们会把玩家背包页的缓存副本写回覆盖已存储的内容，在共享数据库上
+  会覆盖其他服务器的修改。需要修改背包页的插件请用 `readPage` 读取、`savePage` 保存；仅当存储的内容仍是读取时的内容时才会写入
+  （UltiKits/UltiRemoteBag#54）。
 - The language-file entry `opening_bag` ("Opening bag #{0}...") from `lang/en.yml` and
   `lang/zh.yml`: no code ever displayed it.
 - 从 `lang/en.yml` 与 `lang/zh.yml` 中移除语言文件条目 `opening_bag`（「正在打开背包 #{0}...」）：从未有任何代码显示它。

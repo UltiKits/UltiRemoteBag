@@ -227,15 +227,19 @@ bagService.loadBagIfNeeded(playerUuid);
 // 获取背包页列表
 List<Integer> pages = bagService.getPlayerBagPages(playerUuid);
 
-// 获取背包内容
+// 获取背包内容（只读缓存，用于显示）
 ItemStack[] contents = bagService.getBagPage(playerUuid, pageNum);
 
-// 设置背包内容
-bagService.setBagPage(playerUuid, pageNum, contents);
-
-// 保存到数据库
-bagService.saveBag(playerUuid);
+// 读取一页（从数据库）并保存修改：仅当存储的内容仍是读取时的内容才写入，否则返回 null
+// Read one page from the database and save a change to it: written only if the stored page is
+// still what was read; otherwise nothing is written and null comes back (UltiKits/UltiRemoteBag#54)
+RemoteBagService.PageRead read = bagService.readPage(playerUuid, pageNum);
+RemoteBagService.PageRead written = bagService.savePage(playerUuid, pageNum, newContents, read);
 ```
+
+缓存只读，从不写回数据库；`setBagPage`、`saveBag`、`saveAllBags` 已移除（UltiKits/UltiRemoteBag#54）。
+The cache is read-only and never written back; `setBagPage`, `saveBag` and `saveAllBags` were removed
+(UltiKits/UltiRemoteBag#54).
 
 ### 锁定操作
 

@@ -60,6 +60,13 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     private final UUID ownerUuid;
     private final int pageNum;
     private final AccessMode accessMode;
+
+    /**
+     * What this window read of its page when it opened (or last refreshed), or what its last save wrote:
+     * its next save is written only if the stored page is still this, so a stale window can never
+     * overwrite a page another server changed (UltiKits/UltiRemoteBag#54).
+     */
+    private RemoteBagService.PageRead pageRead;
     
     /**
      * 内容区域槽位数（前 5 行 = 45 槽）
@@ -184,10 +191,11 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * administrator can still act on the wrong picture.
      */
     private void loadBagContents() {
-        // 确保背包数据已加载
-        bagService.loadBagIfNeeded(ownerUuid);
+        // Read from the database, not from the cache: this is what the window's save is conditioned on
+        // (UltiKits/UltiRemoteBag#54).
+        pageRead = bagService.readPage(ownerUuid, pageNum);
 
-        ItemStack[] contents = bagService.getBagPage(ownerUuid, pageNum);
+        ItemStack[] contents = pageRead.getItems();
         for (int i = 0; i < CONTENT_SIZE; i++) {
             // 物品直接放入，不设置 Icon 点击事件
             // 编辑模式下允许自由移动，只读模式在 onClick 中处理
@@ -676,6 +684,8 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             // 只读模式 - 仅释放只读会话
             lockService.release(ownerUuid, pageNum, player.getUniqueId());
         }
+        // A view of another player's bag leaves no copy of it behind (UltiKits/UltiRemoteBag#54).
+        bagService.forgetUnlessOnline(ownerUuid);
     }
     
     /**
@@ -722,17 +732,34 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     }
 
     /**
+     * Saves the edit-mode page {@code viewer} still has open, whoever's bag it is, before their quit
+     * releases its lock. Paper closes a quitting player's window before the quit event, so this normally
+     * finds nothing; it exists so the quit listener does not depend on that order.
+     *
+     * @param viewer the quitting player
+     */
+    public static void saveOpenEditPageOnQuit(Player viewer) {
+        if (viewer == null || InventoryAPI.getInstance() == null) {
+            return;
+        }
+        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
+        if (current instanceof RemoteBagContentGUI && ((RemoteBagContentGUI) current).accessMode == AccessMode.EDIT) {
+            ((RemoteBagContentGUI) current).saveCurrentContents();
+        }
+    }
+
+    /**
      * What {@link #flushOpenEditPage(Player)} did.
      * <p>
      * Three outcomes rather than a boolean, because a caller that reports "saved" has to distinguish
-     * "there was nothing open, so persist the cache instead" from "there was an open page and it did
+     * "there was nothing open" from "there was an open page and it did
      * not write" — the second must report nothing, since the page has already told the viewer why,
      * whether it declined for lack of authority or the database write failed.
      */
     public enum FlushOutcome {
-        /** No flushable page was open; the caller should persist the cache itself. */
+        /** No flushable page was open; nothing was written (nothing is ever written from the cache). */
         NO_OPEN_PAGE,
-        /** An open edit page was written, which also persisted the rest of that player's cache. */
+        /** An open edit page was written (that page only). */
         WRITTEN,
         /**
          * An open edit page did not write: it no longer holds edit authority, or the database write
@@ -806,7 +833,8 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     /**
      * 保存当前 GUI 中的内容到背包服务
      * <p>
-     * Copies this page's live inventory into the service cache and persists it.
+     * Writes this page's live inventory as the page, conditionally on what the window read
+     * ({@link RemoteBagService#savePage}, UltiKits/UltiRemoteBag#54); no other page is written.
      * <p>
      * Defence in depth, explicitly secondary: the primary protection against a stale page
      * overwriting a newer one is that a lock can no longer expire while its page is open
@@ -830,19 +858,26 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return false;
         }
 
-        ItemStack[] contents = new ItemStack[CONTENT_SIZE];
-        for (int i = 0; i < CONTENT_SIZE; i++) {
-            contents[i] = getInventory().getItem(i);
-        }
-        bagService.setBagPage(ownerUuid, pageNum, contents);
-        if (!bagService.saveBag(ownerUuid)) {
-            // The cache holds the edit but the database does not, so it is lost on the next restart.
-            // Discarding this result and reporting success is the same defect as reporting a save with
-            // an empty cache, one layer in.
+        if (pageRead == null) {
+            // Never read: there is nothing this window's contents may be written over.
             SoundUtil.playErrorSound(player, config);
             player.sendMessage(ChatColor.RED + plugin.i18n("msg_save_failed"));
             return false;
         }
+        ItemStack[] contents = new ItemStack[CONTENT_SIZE];
+        for (int i = 0; i < CONTENT_SIZE; i++) {
+            contents[i] = getInventory().getItem(i);
+        }
+        // Only this page, and only over what this window read (UltiKits/UltiRemoteBag#54).
+        RemoteBagService.PageRead written = bagService.savePage(ownerUuid, pageNum, contents, pageRead);
+        if (written == null) {
+            // Not stored: reporting success here would be the same defect as reporting a save that did
+            // not happen.
+            SoundUtil.playErrorSound(player, config);
+            player.sendMessage(ChatColor.RED + plugin.i18n("msg_save_failed"));
+            return false;
+        }
+        pageRead = written;
         return true;
     }
 }

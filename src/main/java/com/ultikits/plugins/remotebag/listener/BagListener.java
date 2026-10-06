@@ -1,5 +1,6 @@
 package com.ultikits.plugins.remotebag.listener;
 
+import com.ultikits.plugins.remotebag.gui.RemoteBagContentGUI;
 import com.ultikits.plugins.remotebag.service.BagLockService;
 import com.ultikits.plugins.remotebag.service.RemoteBagService;
 import com.ultikits.ultitools.annotations.EventListener;
@@ -38,22 +39,19 @@ public class BagListener implements Listener {
     /**
      * 处理玩家退出事件
      * <p>
-     * 当玩家退出时：
-     * 1. 释放该玩家持有的所有背包锁
-     * 2. 保存背包数据到数据库
-     * 3. 清理内存缓存
+     * When a player quits: an edit-mode page they still have open is saved (Paper normally closed it, and
+     * so saved it, just before this event); then every lock they hold is released; then their read cache
+     * entry is dropped. Nothing is written from the cache: every change was written when it was made
+     * (UltiKits/UltiRemoteBag#54).
      *
      * @param event 玩家退出事件
      */
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        
-        // 释放该玩家持有的所有锁
+
+        RemoteBagContentGUI.saveOpenEditPageOnQuit(player);
         lockService.releaseAll(player.getUniqueId());
-        
-        // 保存并清理缓存
-        bagService.saveBag(player.getUniqueId());
         bagService.clearCache(player.getUniqueId());
     }
 }

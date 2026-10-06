@@ -41,14 +41,12 @@ public class UltiRemoteBag extends UltiToolsPlugin {
         return true;
     }
 
+    /**
+     * Writes nothing: every bag change was written when it was made, and a cached copy written here would
+     * overwrite a change another server sharing the database made since (UltiKits/UltiRemoteBag#54).
+     */
     @Override
     protected void onUnregister() {
-        // 保存所有背包数据
-        RemoteBagService bagService = getContext().getBean(RemoteBagService.class);
-        if (bagService != null) {
-            bagService.saveAllBags();
-        }
-
         getLogger().info(i18n("bag_disabled"));
     }
 

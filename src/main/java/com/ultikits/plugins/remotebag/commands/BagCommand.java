@@ -77,8 +77,8 @@ public class BagCommand extends BaseCommandExecutor {
             return;
         }
         
-        // 检查背包是否存在
-        bagService.loadBagIfNeeded(player.getUniqueId());
+        // 检查背包是否存在 -- on what is stored now (UltiKits/UltiRemoteBag#54)
+        bagService.refreshBag(player.getUniqueId());
         // The owner is offered page 1 even before anything is stored (UltiKits/UltiRemoteBag#26).
         List<Integer> existingPages = RemoteBagService.pagesOfferedToOwner(bagService.getPlayerBagPages(player.getUniqueId()));
         
@@ -115,15 +115,10 @@ public class BagCommand extends BaseCommandExecutor {
      * `bag_saved_manually` while the just-placed item was never written, and it was lost on the
      * next restart (UltiKits/UltiRemoteBag#22).
      * <p>
-     * It reports only a save it actually performed. A flush already persists the whole of that
-     * player's cache (`saveCurrentContents` ends in `saveBag(ownerUuid)`), so the cache write is the
-     * ELSE branch rather than an unconditional second pass -- running both re-queried, re-serialized
-     * and re-timestamped every cached page twice.
-     * <p>
-     * Three outcomes, not two, because `saveBag` returning false has two causes that ask different
-     * things of the operator: nothing is cached at all -- a fresh login that has not opened a page --
-     * or a write failed and the edit exists only in memory. Reporting either as the other, or either
-     * as a success, is the same defect this command was fixed for.
+     * It reports only a save it actually performed. With no page open there is nothing to write: every
+     * change is written when it is made, and nothing is ever written from the cache, which would
+     * overwrite a page another server sharing the database changed since (UltiKits/UltiRemoteBag#54).
+     * The reply then says whether this server holds any page of the sender's at all.
      */
     @CmdMapping(format = "save")
     public void saveBag(@CmdSender Player player) {
@@ -139,14 +134,11 @@ public class BagCommand extends BaseCommandExecutor {
             return;
         }
 
-        // Nothing was open, so persist the cache -- and tell the two failures apart, because
-        // "there was nothing to save" and "the save failed" ask different things of the operator.
+        // Nothing was open: every page this server holds of the sender's is already stored.
         if (!bagService.hasCachedPages(player.getUniqueId())) {
             player.sendMessage(ChatColor.YELLOW + i18n("msg_nothing_to_save"));
-        } else if (bagService.saveBag(player.getUniqueId())) {
-            player.sendMessage(ChatColor.GREEN + i18n("bag_saved_manually"));
         } else {
-            player.sendMessage(ChatColor.RED + i18n("msg_save_failed"));
+            player.sendMessage(ChatColor.GREEN + i18n("bag_saved_manually"));
         }
     }
     
@@ -162,11 +154,12 @@ public class BagCommand extends BaseCommandExecutor {
             return;
         }
         
-        // 加载目标玩家背包
-        bagService.loadBagIfNeeded(targetUuid);
+        // Read what is stored now (UltiKits/UltiRemoteBag#54).
+        bagService.refreshBag(targetUuid);
         List<Integer> pages = bagService.getPlayerBagPages(targetUuid);
         
         if (pages.isEmpty()) {
+            bagService.forgetUnlessOnline(targetUuid);
             admin.sendMessage(ChatColor.YELLOW + i18n("player_no_bags").replace("{0}", playerName));
             return;
         }
@@ -222,10 +215,13 @@ public class BagCommand extends BaseCommandExecutor {
      * 管理员打开背包页
      */
     private void openAdminBagPage(Player admin, UUID ownerUuid, int page, String ownerName) {
-        bagService.loadBagIfNeeded(ownerUuid);
+        // Read what is stored now; the window's close drops the copy again unless the owner is on this
+        // server (UltiKits/UltiRemoteBag#54).
+        bagService.refreshBag(ownerUuid);
         List<Integer> pages = bagService.getPlayerBagPages(ownerUuid);
         
         if (!pages.contains(page)) {
+            bagService.forgetUnlessOnline(ownerUuid);
             admin.sendMessage(ChatColor.RED + i18n("bag_not_exist").replace("{0}", String.valueOf(page)));
             return;
         }
@@ -253,6 +249,7 @@ public class BagCommand extends BaseCommandExecutor {
             new RemoteBagContentGUI(admin, plugin, ownerUuid, page,
                     bagService, lockService, config, mode).open();
         } else {
+            bagService.forgetUnlessOnline(ownerUuid);
             SoundUtil.playErrorSound(admin, config);
             admin.sendMessage(result.renderMessage(plugin));
         }
@@ -269,6 +266,7 @@ public class BagCommand extends BaseCommandExecutor {
         }
         
         int newPage = bagService.createBagPage(targetUuid);
+        bagService.forgetUnlessOnline(targetUuid);
         if (newPage > 0) {
             admin.sendMessage(ChatColor.GREEN + i18n("admin_bag_created")
                     .replace("{0}", playerName)
@@ -296,7 +294,9 @@ public class BagCommand extends BaseCommandExecutor {
             return;
         }
         
-        if (bagService.deleteBagPage(targetUuid, page)) {
+        boolean deleted = bagService.deleteBagPage(targetUuid, page);
+        bagService.forgetUnlessOnline(targetUuid);
+        if (deleted) {
             admin.sendMessage(ChatColor.GREEN + i18n("admin_bag_deleted")
                     .replace("{0}", playerName)
                     .replace("{1}", String.valueOf(page)));
@@ -325,7 +325,9 @@ public class BagCommand extends BaseCommandExecutor {
             return;
         }
         
-        if (bagService.clearBagPage(targetUuid, page)) {
+        boolean cleared = bagService.clearBagPage(targetUuid, page);
+        bagService.forgetUnlessOnline(targetUuid);
+        if (cleared) {
             admin.sendMessage(ChatColor.GREEN + i18n("admin_bag_cleared")
                     .replace("{0}", playerName)
                     .replace("{1}", String.valueOf(page)));
@@ -346,7 +348,9 @@ public class BagCommand extends BaseCommandExecutor {
             return;
         }
         
-        bagService.loadBagIfNeeded(targetUuid);
+        // Read what is stored now, and keep no copy afterwards unless the player is on this server
+        // (UltiKits/UltiRemoteBag#54).
+        bagService.refreshBag(targetUuid);
         List<Integer> pages = bagService.getPlayerBagPages(targetUuid);
         
         admin.sendMessage(ChatColor.GOLD + "=== " + playerName + " " + i18n("bag_list_title") + " ===");
@@ -364,6 +368,7 @@ public class BagCommand extends BaseCommandExecutor {
             }
         }
         admin.sendMessage(ChatColor.GOLD + i18n("total_bags").replace("{0}", String.valueOf(pages.size())));
+        bagService.forgetUnlessOnline(targetUuid);
     }
     
     // ==================== 帮助命令 ====================
