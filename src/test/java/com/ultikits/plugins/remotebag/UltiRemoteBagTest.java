@@ -152,9 +152,15 @@ class UltiRemoteBagTest {
             verify(logger).info(expected);
         }
 
+        /**
+         * Nothing is written at disable since UltiKits/UltiRemoteBag#54 (maintainer decision 2026-10-06
+         * 00:04): every change was written when it was made, and a cached copy written here would
+         * overwrite a page another server sharing the database changed since. This case asserted the
+         * shutdown write it now forbids.
+         */
         @Test
-        @DisplayName("Should save all bags exactly once, before logging the disabled line")
-        void savesAllBagsExactlyOnceBeforeLogging() throws Exception {
+        @DisplayName("Writes no bag at disable, and logs the disabled line (UltiRemoteBag#54)")
+        void writesNoBagAtDisable() throws Exception {
             UltiRemoteBag plugin = mock(UltiRemoteBag.class);
             PluginLogger logger = mock(PluginLogger.class);
             when(plugin.getLogger()).thenReturn(logger);
@@ -171,10 +177,8 @@ class UltiRemoteBagTest {
 
             plugin.onUnregister();
 
-            InOrder inOrder = inOrder(bagService, logger);
-            inOrder.verify(bagService, times(1)).saveAllBags();
-            inOrder.verify(logger).info(expected);
-            verify(bagService, times(1)).saveAllBags();
+            verify(logger).info(expected);
+            verifyNoInteractions(bagService);
         }
     }
 

@@ -204,14 +204,14 @@ class BagCommandTest {
         }
 
         @Test
-        @DisplayName("Should load bag if needed before checking existing pages")
+        @DisplayName("Reads the stored pages before checking whether the page exists (UltiRemoteBag#54)")
         void loadsBagBeforeCheck() {
             when(bagService.getPlayerMaxPages(player)).thenReturn(5);
             when(bagService.getPlayerBagPages(playerUuid)).thenReturn(Arrays.asList(1, 2));
 
             command.openPage(player, 3);
 
-            verify(bagService).loadBagIfNeeded(playerUuid);
+            verify(bagService).refreshBag(playerUuid);
         }
 
         @Test
@@ -290,15 +290,16 @@ class BagCommandTest {
     class SaveBag {
 
         @Test
-        @DisplayName("Should save and send confirmation")
-        void savesAndConfirms() {
+        @DisplayName("With the sender's pages held and no page open, confirms without writing anything (UltiRemoteBag#54)")
+        void confirmsWithoutWriting() {
+            // Every change is written when it is made, so nothing is written from the cache
+            // (maintainer decision 2026-10-06 00:04).
             when(bagService.hasCachedPages(playerUuid)).thenReturn(true);
-            when(bagService.saveBag(playerUuid)).thenReturn(true);
 
             command.saveBag(player);
 
-            verify(bagService).saveBag(playerUuid);
             verify(player).sendMessage(contains("bag_saved_manually"));
+            verify(bagService, never()).savePage(any(), anyInt(), any(), any());
         }
 
         @Test
@@ -313,36 +314,19 @@ class BagCommandTest {
 
             verify(player).sendMessage(contains("msg_nothing_to_save"));
             verify(player, never()).sendMessage(contains("bag_saved_manually"));
-            verify(bagService, never()).saveBag(playerUuid);
         }
 
         @Test
-        @DisplayName("Reports a failed save distinctly from having nothing to save")
-        void reportsAFailedSaveDistinctly() {
-            // saveBag's second false: a page IS cached but its write did not reach the database, so the
-            // edit exists only in memory and is lost on the next restart. "Nothing to save" would be as
-            // wrong here as "saved" -- the two ask different things of the operator (second external
-            // review round on pull request #34).
-            when(bagService.hasCachedPages(playerUuid)).thenReturn(true);
-            when(bagService.saveBag(playerUuid)).thenReturn(false);
-
-            command.saveBag(player);
-
-            verify(player).sendMessage(contains("msg_save_failed"));
-            verify(player, never()).sendMessage(contains("bag_saved_manually"));
-            verify(player, never()).sendMessage(contains("msg_nothing_to_save"));
-        }
-
-        @Test
-        @DisplayName("Should call saveBag with correct player UUID")
-        void savesWithCorrectUuid() {
+        @DisplayName("Asks the service about the sender's own UUID")
+        void asksAboutTheSendersUuid() {
             UUID specificUuid = UUID.randomUUID();
             Player specificPlayer = UltiRemoteBagTestHelper.createMockPlayer("SpecificPlayer", specificUuid);
             when(bagService.hasCachedPages(specificUuid)).thenReturn(true);
 
             command.saveBag(specificPlayer);
 
-            verify(bagService).saveBag(specificUuid);
+            verify(bagService).hasCachedPages(specificUuid);
+            verify(specificPlayer).sendMessage(contains("bag_saved_manually"));
         }
     }
 
@@ -407,7 +391,7 @@ class BagCommandTest {
                 // Expected: GUI not initialized
             }
 
-            verify(bagService, atLeast(1)).loadBagIfNeeded(targetUuid);
+            verify(bagService, atLeast(1)).refreshBag(targetUuid);
         }
     }
 
@@ -719,7 +703,7 @@ class BagCommandTest {
         }
 
         @Test
-        @DisplayName("listBags should load target bag if needed")
+        @DisplayName("listBags reads the target's stored pages, and keeps no copy afterwards (UltiRemoteBag#54)")
         void listBagsLoadsTarget() {
             UUID targetUuid = offlinePlayer.getUniqueId();
             when(bagService.getPlayerBagPages(targetUuid)).thenReturn(Arrays.asList(1));
@@ -728,7 +712,8 @@ class BagCommandTest {
 
             command.listBags(player, "TargetPlayer");
 
-            verify(bagService).loadBagIfNeeded(targetUuid);
+            verify(bagService).refreshBag(targetUuid);
+            verify(bagService).forgetUnlessOnline(targetUuid);
         }
 
         @Test
@@ -778,7 +763,7 @@ class BagCommandTest {
             command.listBags(player, "Newbie");
 
             verify(player, never()).sendMessage(contains("player_not_found"));
-            verify(bagService).loadBagIfNeeded(newbieUuid);
+            verify(bagService).refreshBag(newbieUuid);
         }
 
         @Test
@@ -903,7 +888,7 @@ class BagCommandTest {
             command.listBags(player, "Target");
 
             verify(player).sendMessage(contains("player_not_found"));
-            verify(bagService, never()).loadBagIfNeeded(onlineUuid);
+            verify(bagService, never()).refreshBag(onlineUuid);
             verify(bagService, never()).getPlayerBagPages(onlineUuid);
         }
 

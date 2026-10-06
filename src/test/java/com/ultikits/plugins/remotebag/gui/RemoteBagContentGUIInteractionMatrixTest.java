@@ -690,7 +690,7 @@ class RemoteBagContentGUIInteractionMatrixTest {
             // request #34).
             RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
             // The owner empties the page elsewhere while this read-only view stays open.
-            lenient().when(bagService.getBagPage(ownerUuid, PAGE)).thenReturn(new ItemStack[45]);
+            lenient().when(bagService.readPage(ownerUuid, PAGE)).thenReturn(com.ultikits.plugins.remotebag.service.PageReads.of(new ItemStack[45]));
             // The owner still holds the page, so Refresh re-reads rather than upgrading to edit mode.
             lenient().when(lockService.canUpgradeToEdit(ownerUuid, PAGE)).thenReturn(false);
 
@@ -750,7 +750,7 @@ class RemoteBagContentGUIInteractionMatrixTest {
     private RemoteBagContentGUI openGuiHoldingDiamond(AccessMode mode) {
         ItemStack[] page = new ItemStack[45];
         page[CONTENT_SLOT] = new ItemStack(Material.DIAMOND);
-        lenient().when(bagService.getBagPage(ownerUuid, PAGE)).thenReturn(page);
+        lenient().when(bagService.readPage(ownerUuid, PAGE)).thenReturn(com.ultikits.plugins.remotebag.service.PageReads.of(page));
 
         RemoteBagContentGUI gui = new RemoteBagContentGUI(viewer, mockPlugin, ownerUuid, PAGE,
                 bagService, lockService, config, mode);

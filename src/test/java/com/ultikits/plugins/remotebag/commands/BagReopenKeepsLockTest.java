@@ -98,7 +98,7 @@ class BagReopenKeepsLockTest {
         server.getPlayerList().setFirstPlayed(owner.getUniqueId(), 1L);
 
         // The owner's page 1 exists and is empty.
-        bagService.setBagPage(owner.getUniqueId(), PAGE, new ItemStack[45]);
+        store.seed(owner.getUniqueId().toString(), PAGE, "");
     }
 
     @AfterEach
@@ -184,7 +184,7 @@ class BagReopenKeepsLockTest {
     @DisplayName("A re-open the lock then refuses still saves the page that was open")
     void refusedReopenKeepsTheOpenPagesEdit() throws Exception {
         owner.addAttachment(MockBukkit.createMockPlugin("Perms"), "ultibag.pages.2", true);
-        bagService.setBagPage(owner.getUniqueId(), 2, new ItemStack[45]);
+        store.seed(owner.getUniqueId().toString(), 2, "");
         // An administrator holds page 1's edit lock (they have it open), so the owner's /bag 1 is refused.
         command.seePlayerBagPage(admin, "Owner", PAGE);
         assertAdminHoldsTheLock("precondition: the administrator holds page 1");
