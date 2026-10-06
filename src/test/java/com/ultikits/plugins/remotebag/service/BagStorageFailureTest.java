@@ -21,6 +21,7 @@ import org.mockbukkit.mockbukkit.entity.PlayerMock;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -1133,6 +1134,98 @@ class BagStorageFailureTest {
         assertThat(took).as("the pass did not wait for the hung releases one after another (ms)")
                 .isLessThan(2 * SharedDatabaseServers.CALL_DEADLINE_MILLIS);
         claimsA.heal();
+    }
+
+    // ==================== Gate 2 top-up: session state is per session, not per page ====================
+
+    private String claimToken() {
+        RemoteBagEditClaim row = claim();
+        return row == null ? null : row.getHolderToken();
+    }
+
+    @Test
+    @DisplayName("Top-up P1 (probe): a stale renewal of session T1 finding T1's claim lost does not mark the reopened session T2 lost; T2's take-out exists once")
+    void aStaleLostRenewalLeavesTheNextSessionAlone() throws Exception {
+        StorageFaults claimsA = claimsOf(serverA);
+        StorageFaults bagsA = bagsOf(serverA);
+        Window first = serverA.openAsOwner(owner, PAGE);
+        String t1 = claimToken();
+        serverA.advance(TIMEOUT_MS / 3 + 1);
+        AtomicBoolean armed = new AtomicBoolean(false);
+        claimsA.onlyMethods("updateIf").onlyFirstArgument(row -> armed.get()
+                && row instanceof RemoteBagEditClaim && t1.equals(((RemoteBagEditClaim) row).getHolderToken()));
+        claimsA.set(StorageFaults.Mode.HANG);
+        java.util.concurrent.atomic.AtomicReference<Thread> renewer = new java.util.concurrent.atomic.AtomicReference<>();
+        bagsA.onlyMethods("updateIf").onceBefore(() -> {
+            // Inside T1's close-time save (it holds the claim's lock): a background pass starts and its renewal of
+            // T1 waits for that lock; once the save is done, its updateIf on T1 hangs.
+            Thread pass = new Thread(serverA.claimService::renewDue, "test-renewal-pass");
+            renewer.set(pass);
+            pass.start();
+            try {
+                Map<?, ?> held = (Map<?, ?>) com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.getField(serverA.claimService, "held");
+                long until = System.currentTimeMillis() + 2_000L;
+                while (System.currentTimeMillis() < until) {
+                    Object claim = held.values().iterator().next();
+                    if (com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.getField(claim, "inFlight") != null) {
+                        break;
+                    }
+                    Thread.sleep(2L);
+                }
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+            armed.set(true);
+        });
+        first.close();
+
+        Window second = serverA.openAsOwner(owner, PAGE);
+        assertThat(second.isEdit()).as("precondition: T2 claimed the released page").isTrue();
+        second.pickUp(SLOT);
+        SharedDatabaseServers.returnCursorToInventory(owner);
+        claimsA.release();
+        renewer.get().join(10_000L);
+        serverA.runMainThread();
+
+        assertThat(serverA.claimService.isLost(ownerId(), PAGE)).as("T2's page is not lost").isFalse();
+        owner.setItemOnCursor(new ItemStack(Material.STONE));
+        assertThat(second.place(OTHER_SLOT).isCancelled()).as("T2 still edits").isFalse();
+        SharedDatabaseServers.returnCursorToInventory(owner);
+        second.close();
+        assertThat(servers.total(Material.DIAMOND, ownerId(), owner)).as("one diamond").isEqualTo(1);
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.DIAMOND)).as("T2's take-out was saved").isZero();
+    }
+
+    @Test
+    @DisplayName("Top-up sweep: a page this run holds for one player's session is not handed to another player's session")
+    void aHeldClaimIsNotReusedForAnotherPlayersSession() {
+        assertThat(serverA.claimService.claim(ownerId(), PAGE, owner.getUniqueId())).isEqualTo(BagEditClaimService.Outcome.CLAIMED);
+
+        BagEditClaimService.Outcome second = serverA.claimService.claim(ownerId(), PAGE, admin.getUniqueId());
+
+        assertThat(second).as("another player's session does not take over this one's claim").isNotEqualTo(BagEditClaimService.Outcome.CLAIMED);
+    }
+
+    @Test
+    @DisplayName("Top-up sweep: releasing a page's claim names the session; another session's token releases nothing")
+    void aReleaseNamingAnotherSessionReleasesNothing() throws Exception {
+        Window editing = serverA.openAsOwner(owner, PAGE);
+        String token = claimToken();
+        java.lang.reflect.Method scoped = null;
+        try {
+            scoped = BagEditClaimService.class.getMethod("release", UUID.class, int.class, String.class);
+        } catch (NoSuchMethodException absent) {
+            // Before the sweep a release named the page only.
+        }
+
+        if (scoped != null) {
+            scoped.invoke(serverA.claimService, ownerId(), PAGE, "an-earlier-session");
+        } else {
+            serverA.claimService.release(ownerId(), PAGE);
+        }
+
+        assertThat(claimToken()).as("the session's claim is still held").isEqualTo(token);
+        editing.close();
     }
 
     private PlayerMock otherPlayer() {
