@@ -209,6 +209,16 @@ public class BagLockService {
      * @param holder    锁持有者 UUID
      */
     public void release(UUID ownerUuid, int pageNum, UUID holder) {
+        release(ownerUuid, pageNum, holder, null);
+    }
+
+    /**
+     * {@link #release(UUID, int, UUID)} for the editing session with {@code claimToken}: only that session's edit
+     * claim is released (gate 2 top-up).
+     *
+     * @param claimToken the session's claim token, or {@code null} for whatever this server holds for the page
+     */
+    public void release(UUID ownerUuid, int pageNum, UUID holder, String claimToken) {
         String key = makeKey(ownerUuid, pageNum);
         BagLockInfo existing = locks.get(key);
         
@@ -216,7 +226,7 @@ public class BagLockService {
             locks.remove(key);
             // The editing session ends: its claim goes with the lock (UltiKits/UltiRemoteBag#54).
             if (claimService != null) {
-                claimService.release(ownerUuid, pageNum);
+                claimService.release(ownerUuid, pageNum, claimToken);
             }
         }
         

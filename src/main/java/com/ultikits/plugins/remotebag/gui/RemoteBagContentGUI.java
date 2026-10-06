@@ -725,7 +725,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         } finally {
             // Always, even if the save threw: the lock and the edit claim (and with it the claim's background
             // renewal) never outlive the window (UltiKits/UltiRemoteBag#54).
-            lockService.release(ownerUuid, pageNum, player.getUniqueId());
+            releaseLock();
             // A view of another player's bag leaves no copy of it behind (UltiKits/UltiRemoteBag#54).
             bagService.forgetUnlessOnline(ownerUuid);
         }
@@ -752,7 +752,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         if (claims == null) {
             return true;
         }
-        switch (claims.editState(ownerUuid, pageNum)) {
+        switch (claims.editState(ownerUuid, pageNum, claimToken)) {
             case LOST:
                 loseEditRights(windowStaysOpen);
                 return false;
@@ -832,14 +832,14 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
                 if (claims == null) {
                     saveCurrentContents(false);
                 } else if (pageRead == null
-                        || !claims.keepWindow(player.getUniqueId(), ownerUuid, pageNum, currentContents(), pageRead)) {
+                        || !claims.keepWindow(player.getUniqueId(), ownerUuid, pageNum, currentContents(), pageRead, claimToken)) {
                     // Lost: nothing may be written; what was put in goes back.
                     loseEditRights(false);
                 }
                 editRightsLost = true;
             }
         } finally {
-            lockService.release(ownerUuid, pageNum, player.getUniqueId());
+            releaseLock();
             bagService.forgetUnlessOnline(ownerUuid);
             player.closeInventory();
         }
@@ -874,7 +874,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         }
         BagEditClaimService claims = lockService.getClaimService();
         if (claims != null && (pageRead == null
-                || !claims.keepWindow(player.getUniqueId(), ownerUuid, pageNum, currentContents(), pageRead))) {
+                || !claims.keepWindow(player.getUniqueId(), ownerUuid, pageNum, currentContents(), pageRead, claimToken))) {
             loseEditRights(true);
             return;
         }
@@ -906,6 +906,15 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         RemoteBagContentGUI window = openWindowOf(holderUuid, ownerUuid, page);
         if (window != null && window.isEditable() && window.holdsClaim(token)) {
             window.loseEditRights(true);
+        }
+    }
+
+    /** Releases this window's lock, and with it its own session's edit claim (named by its token, gate 2 top-up). */
+    private void releaseLock() {
+        if (claimToken == null) {
+            lockService.release(ownerUuid, pageNum, player.getUniqueId());
+        } else {
+            lockService.release(ownerUuid, pageNum, player.getUniqueId(), claimToken);
         }
     }
 
@@ -1149,7 +1158,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         // Only this page, only over what this window read, and only while its claim is confirmed; a write the
         // database does not answer is kept and retried, never given back (UltiKits/UltiRemoteBag#54, gate 1 F2).
         BagEditClaimService.SaveResult result =
-                claims.saveWindow(player.getUniqueId(), ownerUuid, pageNum, contents, pageRead);
+                claims.saveWindow(player.getUniqueId(), ownerUuid, pageNum, contents, pageRead, claimToken);
         switch (result.getOutcome()) {
             case WRITTEN:
                 pageRead = result.getWritten();

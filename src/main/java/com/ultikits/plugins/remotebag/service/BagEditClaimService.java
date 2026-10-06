@@ -255,8 +255,15 @@ public class BagEditClaimService {
     /** What this server last saw of other servers' claims, by claim id. */
     private final Map<String, Observation> observed = new ConcurrentHashMap<>();
 
-    /** Claims this run held and found lost, by claim id, until the page is claimed again. */
-    private final Set<String> lost = ConcurrentHashMap.newKeySet();
+    /**
+     * Claims this run held and found lost: page id -> the lost claim's session token, until the page is claimed again.
+     * A page-level entry, but it names its session: it counts only for that session (lostFor), so a background result
+     * about an earlier session never reaches a later session of the same page (gate 2 top-up).
+     */
+    private final Map<String, String> lost = new ConcurrentHashMap<>();
+
+    /** Releases settled during module disable, made together with the final releases (P3-1). */
+    private final List<Held> stopReleases = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     /** Kept writes: page writes the database did not answer, by claim id. */
     private final Map<String, Kept> kept = new ConcurrentHashMap<>();
@@ -593,7 +600,7 @@ public class BagEditClaimService {
         String token = UUID.randomUUID().toString();
         long started = nanoTime.getAsLong();
         try {
-            ClaimDecision decision = submit(() -> decideClaim(id, ownerUuid, page, token))
+            ClaimDecision decision = submit(() -> decideClaim(id, ownerUuid, page, token, holderUuid))
                     .get(mainThreadDeadlineMillis(), TimeUnit.MILLISECONDS);
             if (decision.outcome == Outcome.CLAIMED && !decision.alreadyMine) {
                 hold(id, ownerUuid, page, holderUuid, token, decision.renewals, started);
@@ -611,7 +618,7 @@ public class BagEditClaimService {
         return Outcome.FAILED;
     }
 
-    private ClaimDecision decideClaim(String id, UUID ownerUuid, int page, String token) {
+    private ClaimDecision decideClaim(String id, UUID ownerUuid, int page, String token, UUID holderUuid) {
         for (int attempt = 1; attempt <= 2; attempt++) {
             RemoteBagEditClaim row = claims.getById(id);
             if (row == null) {
@@ -633,10 +640,15 @@ public class BagEditClaimService {
             Held alreadyHeld = held.get(id);
             if (alreadyHeld != null) {
                 if (isMine(row, alreadyHeld.token)) {
+                    if (!alreadyHeld.holderUuid.equals(holderUuid)) {
+                        // This run holds the page for another player's session: that session's claim is not
+                        // handed over (gate 2 top-up sweep; was F5).
+                        return new ClaimDecision(Outcome.HELD_ELSEWHERE, 0L, false);
+                    }
                     return new ClaimDecision(Outcome.CLAIMED, row.getRenewals(), true);
                 }
-                // Taken over or changed since: this run no longer holds it.
-                held.remove(id, alreadyHeld);
+                // Taken over or changed since: that session's claim is lost (named by its token).
+                claimLost(alreadyHeld);
             }
             if (!isTakeable(id, row)) {
                 return new ClaimDecision(Outcome.HELD_ELSEWHERE, 0L, false);
@@ -684,7 +696,38 @@ public class BagEditClaimService {
      * @return true if the claim was lost
      */
     public boolean isLost(UUID ownerUuid, int page) {
-        return lost.contains(RemoteBagEditClaim.idOf(ownerUuid, page));
+        return lostFor(RemoteBagEditClaim.idOf(ownerUuid, page), null);
+    }
+
+    /**
+     * Whether the page's claim was lost for the session with {@code token}; with no token, for the session this run
+     * holds the page for now, or -- when it holds none -- for the last session that held it.
+     */
+    private boolean lostFor(String id, String token) {
+        String lostToken = lost.get(id);
+        if (lostToken == null) {
+            return false;
+        }
+        if (token != null) {
+            return token.equals(lostToken);
+        }
+        Held current = held.get(id);
+        return current == null || current.token.equals(lostToken);
+    }
+
+    /** Whether a kept write of the page belongs to the session with {@code token}. */
+    private boolean keptFor(String id, String token) {
+        Kept write = kept.get(id);
+        return write != null && write.token.equals(token);
+    }
+
+    /**
+     * The claim this run holds for the page for the session with {@code token}; with no token, whatever it holds;
+     * {@code null} if it holds none, or holds it for another session.
+     */
+    private Held heldFor(String id, String token) {
+        Held claim = held.get(id);
+        return claim == null || token == null || claim.token.equals(token) ? claim : null;
     }
 
     /**
@@ -698,13 +741,27 @@ public class BagEditClaimService {
      * @return the state; {@link EditState#EDITABLE} when this run holds no claim for the page and has not lost one
      */
     public EditState editState(UUID ownerUuid, int page) {
+        return editState(ownerUuid, page, null);
+    }
+
+    /**
+     * {@link #editState(UUID, int)} for the window of the session with {@code token} (recorded when it opened): a
+     * lost claim or a claim of another session of the same page is not this window's.
+     *
+     * @param token the window's claim token, or {@code null} if it recorded none
+     */
+    public EditState editState(UUID ownerUuid, int page, String token) {
         String id = RemoteBagEditClaim.idOf(ownerUuid, page);
-        if (lost.contains(id)) {
+        if (lostFor(id, token)) {
             return EditState.LOST;
         }
         Held claim = held.get(id);
         if (claim == null) {
             return EditState.EDITABLE;
+        }
+        if (token != null && !claim.token.equals(token)) {
+            // The page is held for another session: this window's claim is gone.
+            return EditState.LOST;
         }
         if (claim.troubled || !isConfirmed(claim, nanoTime.getAsLong())) {
             claim.troubled = true;
@@ -731,15 +788,29 @@ public class BagEditClaimService {
      */
     public SaveResult saveWindow(UUID holderUuid, UUID ownerUuid, int page, ItemStack[] items,
                                  RemoteBagService.PageRead base) {
+        return saveWindow(holderUuid, ownerUuid, page, items, base, null);
+    }
+
+    /**
+     * {@link #saveWindow(UUID, UUID, int, ItemStack[], RemoteBagService.PageRead)} for the window of the session with
+     * {@code token}: only that session's claim fences the write.
+     *
+     * @param token the window's claim token, or {@code null} if it recorded none
+     */
+    public SaveResult saveWindow(UUID holderUuid, UUID ownerUuid, int page, ItemStack[] liveItems,
+                                 RemoteBagService.PageRead base, String token) {
+        // Copied here, on the main thread, from the window's live stacks: nothing off this thread reads them (P3-3).
+        ItemStack[] items = ItemReturns.deepCopy(liveItems);
         if (claims == null) {
             // No claims table (the service was never started): a plain conditional save.
             RemoteBagService.PageRead written = bagService.savePage(ownerUuid, page, items, base);
             return new SaveResult(written != null ? SaveOutcome.WRITTEN : SaveOutcome.REFUSED, written);
         }
         String id = RemoteBagEditClaim.idOf(ownerUuid, page);
-        Held claim = held.get(id);
-        if (lost.contains(id) || claim == null) {
-            // No claim: every editing window claims at open and releases at close, so only a lost claim gets here.
+        Held claim = heldFor(id, token);
+        if (lostFor(id, token) || claim == null) {
+            // No claim of this session: every editing window claims at open and releases at close, so only a lost
+            // claim gets here.
             return new SaveResult(SaveOutcome.LOST, null);
         }
         String contents = bagService.serializePage(items);
@@ -784,9 +855,20 @@ public class BagEditClaimService {
      */
     public boolean keepWindow(UUID holderUuid, UUID ownerUuid, int page, ItemStack[] items,
                               RemoteBagService.PageRead base) {
+        return keepWindow(holderUuid, ownerUuid, page, items, base, null);
+    }
+
+    /**
+     * {@link #keepWindow(UUID, UUID, int, ItemStack[], RemoteBagService.PageRead)} for the window of the session with
+     * {@code token}.
+     *
+     * @param token the window's claim token, or {@code null} if it recorded none
+     */
+    public boolean keepWindow(UUID holderUuid, UUID ownerUuid, int page, ItemStack[] items,
+                              RemoteBagService.PageRead base, String token) {
         String id = RemoteBagEditClaim.idOf(ownerUuid, page);
-        Held claim = held.get(id);
-        if (lost.contains(id) || claim == null) {
+        Held claim = heldFor(id, token);
+        if (lostFor(id, token) || claim == null) {
             return false;
         }
         keep(id, claim.token, holderUuid, ownerUuid, page, items, bagService.serializePage(items), base, null, null);
@@ -845,7 +927,7 @@ public class BagEditClaimService {
         }
         write.inFlight = running;
         kept.put(id, write);
-        if (lost.contains(id)) {
+        if (lostFor(id, token)) {
             // The claim was found lost between this caller's check and the put (R2-6): the background settles it.
             write.abandoned = true;
         }
@@ -985,9 +1067,23 @@ public class BagEditClaimService {
      * @param page      the page number
      */
     public void release(UUID ownerUuid, int page) {
+        release(ownerUuid, page, null);
+    }
+
+    /**
+     * {@link #release(UUID, int)} for the session with {@code token}: a claim or a lost-mark of another session of the
+     * page is left alone.
+     *
+     * @param token the session's claim token, or {@code null} for whatever this run holds for the page
+     */
+    public void release(UUID ownerUuid, int page, String token) {
         String id = RemoteBagEditClaim.idOf(ownerUuid, page);
-        lost.remove(id);
-        Held claim = held.get(id);
+        if (token == null) {
+            lost.remove(id);
+        } else {
+            lost.remove(id, token);
+        }
+        Held claim = heldFor(id, token);
         if (claim != null) {
             endSession(id, claim);
         }
@@ -1008,7 +1104,8 @@ public class BagEditClaimService {
 
     /** Releases every claim this run holds, kept writes or not (module disable, after its final flush). */
     public void releaseAllHeld() {
-        List<Held> releasing = new ArrayList<>();
+        List<Held> releasing = new ArrayList<>(stopReleases);
+        stopReleases.clear();
         for (Map.Entry<String, Held> entry : new ArrayList<>(held.entrySet())) {
             if (held.remove(entry.getKey(), entry.getValue())) {
                 releasing.add(entry.getValue());
@@ -1021,7 +1118,7 @@ public class BagEditClaimService {
         // Set before looking for a kept write; the background looks at this after removing one, so one of the two
         // always sees the other (UltiKits/UltiRemoteBag#54).
         claim.sessionEnded = true;
-        if (!kept.containsKey(id) && held.remove(id, claim)) {
+        if (!keptFor(id, claim.token) && held.remove(id, claim)) {
             writeReleases(java.util.Collections.singletonList(claim));
         }
     }
@@ -1271,7 +1368,8 @@ public class BagEditClaimService {
      */
     private void claimLost(Held claim) {
         String id = RemoteBagEditClaim.idOf(claim.ownerUuid, claim.page);
-        lost.add(id);
+        // Names the lost session: a later session of the page, which holds another token, is not lost (top-up P1).
+        lost.put(id, claim.token);
         if (held.remove(id, claim)) {
             claim.released = true;
             onMainThread(() -> {
@@ -1282,9 +1380,9 @@ public class BagEditClaimService {
             });
         }
         Kept write = kept.get(id);
-        if (write != null) {
+        if (write != null && write.token.equals(claim.token)) {
             write.abandoned = true;
-        } else if (claims != null && storage != null) {
+        } else if (write == null && claims != null && storage != null) {
             // No save of the session is pending, so its receipt has nothing left to tell (R3-2; best effort).
             submit(() -> {
                 forgetRecord(claim.token);
@@ -1322,9 +1420,9 @@ public class BagEditClaimService {
                 abandonedNow.add(write);
                 continue;
             }
-            Held claim = held.get(write.id);
+            Held claim = heldFor(write.id, write.token);
             if (claim == null) {
-                // No claim left to fence a write on: settled as abandoned.
+                // No claim of this write's session left to fence it on: settled as abandoned.
                 write.abandoned = true;
                 abandonedNow.add(write);
                 continue;
@@ -1390,7 +1488,7 @@ public class BagEditClaimService {
                     return true;
                 default:
                     // LOST: nothing written by this attempt; an earlier one may have landed -- settled as abandoned.
-                    Held claim = held.get(write.id);
+                    Held claim = heldFor(write.id, write.token);
                     if (claim != null) {
                         claimLost(claim);
                     }
@@ -1527,8 +1625,9 @@ public class BagEditClaimService {
         if (claim != null && claim.token.equals(write.token)) {
             if (claim.sessionEnded && held.remove(write.id, claim)) {
                 if (stopping) {
-                    // Module disable: waited for within disable's own bound, before the pool is shut down.
-                    writeReleases(java.util.Collections.singletonList(claim));
+                    // Module disable: collected and made together with the final releases, on one deadline (P3-1).
+                    claim.released = true;
+                    stopReleases.add(claim);
                 } else {
                     // Submitted, never waited for: this runs on the background pass, whose schedule a release that
                     // does not answer must not hold up (gate 2 Codex run 2).
