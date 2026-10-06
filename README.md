@@ -248,13 +248,19 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
     is still what the window read, and records the save as written. On SQLite and MySQL a save therefore lands only
     while this server holds the page's claim, however late it runs: once another server has taken the page over, a
     save that was held up writes nothing. Whether a save that reported a database error had in fact been written is
-    read from that record, never guessed, so such a save is never also given back.
+    read from that record, never guessed: the retry and the abandon after a lost claim read it only after the save's
+    transaction has ended (the claim row's lock orders them), and when the module stops it is read in a transaction
+    that first locks the claim row, so it waits for a save still running on the database (MySQL's `socketTimeout`
+    can give up on a save the database then commits). A save that cannot be decided before the stop's deadline is
+    not given back; it is logged with its items as undecided.
   - Only a save the database refuses (the stored page is not what the window read) gives back the items put in. If
     the player has left, they get them at their next join on this server.
   - Set a socket or statement timeout on your MySQL connection (for example `socketTimeout` in the JDBC URL) if your
     server's network can leave a connection half-open: the framework does not set one, and a call on such a
     connection otherwise waits for TCP keep-alive. This module never waits for it, but the pooled connection stays
-    busy until it returns.
+    busy until it returns. A connection lost in the middle of a save also leaves the page's claim row locked on the
+    database until the database drops that session, so no server can take the page over meanwhile: a moderate
+    `innodb_lock_wait_timeout` or `wait_timeout` keeps that short.
 - **Upgrading** needs no migration: the `remote_bag_claims` table is created on the first start, no existing
   table changes, and a page without a claim row is free.
 
@@ -269,7 +275,7 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
   frozen as a whole (its background threads included) for that long, has its claim taken over. Its window turned
   read-only when the first renewal failed, so nothing is edited after that; when the database answers again, the
   claim is found lost and the items put in during the session are given back (unless the record shows the save
-  had been written), with the same limitation for items taken out before the cut.
+  had been written), with the same limitation for items taken out since the last save and before the window turned read-only (up to about half `lock.timeout_seconds` after the cut).
 - A save that is still being retried is held in memory: a server crash loses it, as it loses an unsaved window,
   and so does a module stop that cannot write it within five seconds (logged with its items; the items put in go
   back to the player if they are online, no write is still running and the record shows none was written). Items
@@ -292,11 +298,11 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
 再尝试五秒，无法写入的连同物品记录在日志中；数据库完全不响应时，模块停用最多可能耗时约 16 秒。每次保存都以占用为栅栏：同一个数据库事务先在占用仍属于
 本服务器的会话且计数器仍是其最后确认的值时推进计数器，再在页面仍是窗口读取时的内容时写入页面，并记录这次保存已写入；因此在 SQLite 和 MySQL 上，
 保存只会在本服务器持有该页占用时生效，无论它多晚执行——另一台服务器接手之后，被耽搁的保存不会写入任何内容；报告了数据库错误的保存是否实际已写入，
-从这条记录中读取而不是猜测，因此这样的保存绝不会同时被归还。如果服务器网络可能留下半开连接，请为 MySQL 连接设置套接字或语句超时（例如 JDBC URL 中的
-`socketTimeout`），框架本身不设置。升级无需迁移。已知限制：不使用占用的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags`
+从这条记录中读取而不是猜测：重试和占用丢失后的放弃都只在该保存的事务结束后读取（占用行的锁保证这一顺序）；模块停止时，在先锁定占用行的事务中读取，因此会等待仍在数据库上运行的保存（MySQL 的 `socketTimeout` 可能放弃一个随后被数据库提交的保存）。在停止期限内无法判定的保存不会被归还，而是连同物品作为未判定记录在日志中。如果服务器网络可能留下半开连接，请为 MySQL 连接设置套接字或语句超时（例如 JDBC URL 中的
+`socketTimeout`），框架本身不设置；保存进行中断开的连接还会让该页的占用行在数据库上保持锁定，直到数据库丢弃该会话，期间任何服务器都无法接手该页——适度的 `innodb_lock_wait_timeout` 或 `wait_timeout` 可以缩短这段时间。升级无需迁移。已知限制：不使用占用的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags`
 的其他插件、手动编辑数据表）仍可能在窗口打开时改动该页——保存会被拒绝、放入的物品会归还，但该会话中取出的物品留在玩家身上，而对方写入的页面
 可能仍含有它，从而出现两份；与数据库断开整整一个超时而另一台服务器仍可访问，或整个服务器进程（包括后台线程）冻结这么久时，占用会被接手——
-窗口在第一次续期失败时已变为只读，数据库恢复后发现占用丢失，归还会话中放入的物品（除非记录表明保存已写入），断开前取出的物品同样可能出现两份；
+窗口在第一次续期失败时已变为只读，数据库恢复后发现占用丢失，归还会话中放入的物品（除非记录表明保存已写入），自上次保存起、到窗口变为只读为止（断开后最多约半个 `lock.timeout_seconds`）取出的物品同样可能出现两份；
 仍在重试的保存保存在内存中，服务器崩溃会丢失它（与未保存的窗口相同），模块停止时五秒内无法写入的也会丢失（连同物品记录在日志中；若玩家在线、没有仍在进行的写入
 且记录表明没有写入，放入的物品归还给玩家）；欠离线玩家的物品同样保存在内存中，直到其再次加入——重启会丢失它们，每一件在欠下时和模块停止时都会连同玩家、页码与物品
 记录在日志中；JSON 存储只属于一台服务器，其栅栏与页面写入不在同一个事务中，这在单台服务器上没有影响。

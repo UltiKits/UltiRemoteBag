@@ -84,8 +84,10 @@ import java.util.function.LongSupplier;
  *       run last confirmed, then writes the page conditionally on what the window read, and records the save as
  *       landed in the session's record row ({@link #fencedWrite}). On SQLite and MySQL a save therefore lands only
  *       while the claim is this session's, however late it runs. A save that threw or did not answer may have
- *       committed: whether it did is read from that record row, never guessed -- by the retry, by the abandon after a
- *       lost claim and by the abandon at disable -- so a save that landed is never also given back.</li>
+ *       committed: whether it did is read from that record row, never guessed -- by the retry and by the abandon
+ *       after a lost claim, both ordered after the save's transaction by the claim row's lock, and by the abandon at
+ *       disable inside a transaction that first locks the claim row ({@link #decideAtDisable}), so it waits for a
+ *       save still running on the database. A save that cannot be decided in time is not given back, and logged.</li>
  *   <li><b>Release.</b> Closing the window, quitting and module disable end the session; its claim is released
  *       then, or, while a kept write is pending, as soon as that write lands or is refused. Module disable flushes
  *       kept writes for a bounded time and logs, with their items, the ones that still cannot land.</li>
@@ -97,7 +99,9 @@ import java.util.function.LongSupplier;
  * Remaining limits: a writer outside the module (an older module version during a rolling upgrade, another
  * plugin, an operator editing the table) can still change a page or a claim under an open window; a server cut
  * off for a full timeout from a database another server still reaches loses its claim, and the items its window
- * had taken out before the cut stay in the stored page as well; a server crash loses a kept write, as it loses an
+ * had taken out since its last save and before it turned read-only (up to about half the timeout after the cut) stay
+ * in the stored page as well; a save the database still runs when the module stops, undecided within the stop's
+ * deadline, is not given back and is logged; a server crash loses a kept write, as it loses an
  * unsaved window, and items owed to a player who left (logged when owed). On the JSON storage backend, which
  * belongs to one server, the claims change nothing and the fence is not atomic with the page write (JSON has no
  * transaction across two tables).
@@ -316,6 +320,8 @@ public class BagEditClaimService {
         private final Set<String> attempts = new java.util.concurrent.CopyOnWriteArraySet<>();
         /** An attempt threw or did not answer: it may have landed. */
         private volatile boolean uncertain;
+        /** A read of the session's receipt still running (R3-4: one at a time). */
+        private volatile Future<Boolean> receiptRead;
         private final UUID holderUuid;
         private final UUID ownerUuid;
         private final int page;
@@ -853,6 +859,10 @@ public class BagEditClaimService {
                 claim.confirmedAtNanos = started;
                 claim.unconfirmed = false;
             }
+            if (result.outcome == WriteOutcome.LANDED) {
+                // Committed: only now may the display cache show it (R3-3).
+                bagService.rememberWritten(ownerUuid, page, items);
+            }
             return result.outcome;
         }
     }
@@ -987,12 +997,19 @@ public class BagEditClaimService {
         for (Held claim : releasing) {
             claim.released = true;
             writes.put(claim, submit(() -> {
-                boolean released = claims.updateIf(claimRow(claim.ownerUuid, claim.page, "", claim.renewals + 1),
-                        WhereCondition.builder().column("holder_token").value(claim.token).build(),
-                        WhereCondition.builder().column("holder_run").value(run).build());
-                // No save of the session is pending any more, so its record row has nothing left to tell.
-                forgetRecord(claim.token);
-                return released;
+                try {
+                    return claims.updateIf(claimRow(claim.ownerUuid, claim.page, "", claim.renewals + 1),
+                            WhereCondition.builder().column("holder_token").value(claim.token).build(),
+                            WhereCondition.builder().column("holder_run").value(run).build());
+                } finally {
+                    // No save of the session is pending any more, so its receipt has nothing left to tell -- deleted
+                    // even when the release itself failed (R3-2).
+                    try {
+                        forgetRecord(claim.token);
+                    } catch (RuntimeException ignored) {
+                        // Best effort: a receipt nobody reads takes up one row.
+                    }
+                }
             }));
         }
         long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(mainThreadDeadlineMillis());
@@ -1186,6 +1203,12 @@ public class BagEditClaimService {
         Kept write = kept.get(id);
         if (write != null) {
             write.abandoned = true;
+        } else if (claims != null && storage != null) {
+            // No save of the session is pending, so its receipt has nothing left to tell (R3-2; best effort).
+            submit(() -> {
+                forgetRecord(claim.token);
+                return null;
+            });
         }
     }
 
@@ -1317,9 +1340,57 @@ public class BagEditClaimService {
 
     /** What the session's record row says of {@code write}'s attempts; {@code null} if it cannot be read in time. */
     private Boolean recordSays(Kept write, long waitMillis) {
+        // In-flight guard (R3-4): a read still running is waited for again, never started a second time.
+        Future<Boolean> read = write.receiptRead;
+        if (read == null) {
+            read = submit(() -> landedEarlier(write.token, write.attempts));
+            write.receiptRead = read;
+        }
         try {
-            return submit(() -> landedEarlier(write.token, write.attempts))
-                    .get(Math.max(1L, waitMillis), TimeUnit.MILLISECONDS);
+            Boolean landed = read.get(Math.max(1L, waitMillis), TimeUnit.MILLISECONDS);
+            write.receiptRead = null;
+            return landed;
+        } catch (ExecutionException e) {
+            write.receiptRead = null;
+            log(e.getCause(), plugin.i18n("log_bag_claim_failed"), write.ownerUuid, write.page);
+        } catch (TimeoutException e) {
+            log(e, plugin.i18n("log_bag_claim_failed"), write.ownerUuid, write.page);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return null;
+    }
+
+    /**
+     * Decides a write in doubt at module disable (R3-1; maintainer decision 2026-10-06): one transaction that first
+     * releases the session's claim -- an {@code updateIf} on the session's token and this run, a write to the claim
+     * row, so it waits behind any transaction of the session still running on the database, which holds that row
+     * from its fence to its commit -- then reads the session's receipt and deletes it. A save the database is still
+     * running when the client gave up on it (MySQL's {@code socketTimeout}) is therefore decided only after it
+     * committed or rolled back, and none of the session's saves can land after this transaction, because the claim
+     * no longer carries its token.
+     *
+     * @return whether a save of {@code write} landed; {@code null} if this could not be decided within
+     *         {@code waitMillis} (nothing is given back then)
+     */
+    private Boolean decideAtDisable(Kept write, long waitMillis) {
+        Held claim = held.get(write.id);
+        boolean ours = claim != null && claim.token.equals(write.token);
+        // Any counter: a released row carries no token, so another server may take it at once.
+        long counter = ours ? claim.renewals + 2 : 0L;
+        try {
+            Boolean landed = submit(() -> claims.transaction(() -> {
+                claims.updateIf(claimRow(write.ownerUuid, write.page, "", counter),
+                        WhereCondition.builder().column("holder_token").value(write.token).build(),
+                        WhereCondition.builder().column("holder_run").value(run).build());
+                boolean wasLanded = landedEarlier(write.token, write.attempts);
+                forgetRecord(write.token);
+                return wasLanded;
+            })).get(Math.max(1L, waitMillis), TimeUnit.MILLISECONDS);
+            if (ours && held.remove(write.id, claim)) {
+                claim.released = true;
+            }
+            return landed;
         } catch (ExecutionException e) {
             log(e.getCause(), plugin.i18n("log_bag_claim_failed"), write.ownerUuid, write.page);
         } catch (TimeoutException e) {
@@ -1436,7 +1507,7 @@ public class BagEditClaimService {
         if (running == null || running.isDone()) {
             long left = TimeUnit.NANOSECONDS.toMillis(recordsUntilNanos - System.nanoTime());
             Boolean landed = !write.uncertain && running == null ? Boolean.FALSE
-                    : left > 0 ? recordSays(write, left) : null;
+                    : left > 0 ? decideAtDisable(write, left) : null;
             if (Boolean.TRUE.equals(landed)) {
                 logLanded(write);
                 return;

@@ -298,11 +298,27 @@ public class RemoteBagService {
             return null;
         }
         ItemStack[] stored = items.clone();
-        Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
-        if (pages != null) {
-            pages.put(page, stored.clone());
+        if (logMiss) {
+            // A plain save: written with its own commit, so the display cache follows now. A fenced save's caller
+            // updates it after its transaction committed (rememberWritten).
+            rememberWritten(playerUuid, page, stored);
         }
         return new PageRead(stored, true, contents, target != null ? target.getLastUpdated() : 0L);
+    }
+
+    /**
+     * Shows a page in the display cache as written, if the player's bag is cached. Called only once the write has
+     * committed, so the cache never shows a page that a rollback took back (UltiKits/UltiRemoteBag#54, gate 1 R3-3).
+     *
+     * @param playerUuid the bag's owner
+     * @param page       the page number
+     * @param items      the page as written
+     */
+    public void rememberWritten(UUID playerUuid, int page, ItemStack[] items) {
+        Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
+        if (pages != null) {
+            pages.put(page, items.clone());
+        }
     }
 
     /**
