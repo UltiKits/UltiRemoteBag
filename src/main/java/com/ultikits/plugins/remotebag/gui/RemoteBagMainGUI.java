@@ -163,6 +163,10 @@ public class RemoteBagMainGUI extends BasePaginationPage {
             BagOpenResult result = lockService.ownerOpen(player.getUniqueId(), targetPage, player);
             
             if (result.isSuccess()) {
+                if (result.isReadOnlyMode()) {
+                    // Being edited on another server (UltiKits/UltiRemoteBag#54): say why it is read-only.
+                    player.sendMessage(result.renderMessage(plugin));
+                }
                 // 打开背包内容 GUI
                 new RemoteBagContentGUI(player, plugin, player.getUniqueId(), targetPage,
                         bagService, lockService, config, result.getAccessMode()).open();

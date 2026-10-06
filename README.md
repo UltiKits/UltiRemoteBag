@@ -208,6 +208,35 @@ UltiRemoteBag 实现了一套完整的并发访问控制机制：
 - 管理员 (ADMIN) 在所有者使用时只能只读访问
 - 同一时间只有一个用户可以编辑
 
+### Several servers sharing one database / 多台服务器共享一个数据库
+
+With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
+
+- **One bag page is edited on one server at a time.** Opening a page for editing claims it in the database
+  table `remote_bag_claims`; while another server holds the page, it opens read-only on this server, for the
+  owner and for administrators alike ("This bag page is being edited on another server; it is open in read-only
+  mode"). On one server nothing changes: the owner still outranks an administrator. Across servers the first
+  server to claim the page edits it, owner or not.
+- **Release and expiry.** The claim is released when the window closes, when its player quits, and when the
+  module stops. A claim left by a crash expires after `lock.timeout_seconds` (default 300); while a window is
+  open, its server renews the claim every third of that.
+- **No stale copies.** A page is written only by its own window, only if the stored page is still what the
+  window read; nothing is written from a cached copy at quit, at shutdown or by `/bag save` without an open page.
+- **Limits.** Expiry compares the holding server's timestamp with the reading server's clock, so keep the
+  servers' clocks in sync: a difference shifts the expiry by that much. A server that stalls for longer than
+  `lock.timeout_seconds` can lose its claim while a window is open; the console then logs one error naming the
+  player and the page, and that window's save is not written if the other server changed the page.
+- **Upgrading** needs no migration: the `remote_bag_claims` table is created on the first start, no existing
+  table changes, and a page without a claim row is free.
+
+多台服务器共享 MySQL 时（UltiKits/UltiRemoteBag#54）：同一背包页同一时间只能在一台服务器上编辑——打开编辑时在数据库表
+`remote_bag_claims` 中占用该页；另一台服务器占用期间，本服务器对所有者和管理员都以只读方式打开。单台服务器上的规则不变（所有者优先于
+管理员）；跨服务器时先占用者编辑。窗口关闭、玩家退出、模块停止时释放占用；崩溃遗留的占用在 `lock.timeout_seconds`（默认 300）后过期，
+窗口打开期间每过三分之一时间续期一次。背包页只由它自己的窗口写入，且仅当存储内容仍是窗口读取时的内容；退出、关服、无打开页面的
+`/bag save` 不会写入缓存副本。限制：过期时间以持有者的时间戳与读取方服务器的时钟比较，请保持各服务器时钟同步；某台服务器停顿超过
+超时时间可能在窗口打开时失去占用，控制台会记录一条指明玩家与页码的错误，且若另一台服务器改动过该页，该窗口的保存不会写入。升级无需
+迁移：首次启动时创建 `remote_bag_claims` 表，现有表不变，没有占用记录的页面即为空闲。
+
 ## 🔧 开发者 API
 
 ### 获取服务实例

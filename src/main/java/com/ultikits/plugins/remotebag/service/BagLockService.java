@@ -48,6 +48,14 @@ public class BagLockService {
     private RemoteBagConfig config;
 
     /**
+     * The edit claims shared with other servers through the database (UltiKits/UltiRemoteBag#54). When this
+     * service lets a session edit a page, the page is claimed there first; refused, the page opens read-only.
+     * {@code null} only for a service built outside the container, which then decides as before.
+     */
+    @Autowired
+    private BagEditClaimService claimService;
+
+    /**
      * 锁存储: "ownerUUID:pageNum" -> LockInfo
      */
     private final Map<String, BagLockInfo> locks = new ConcurrentHashMap<>();
@@ -93,6 +101,11 @@ public class BagLockService {
         if (existing != null) {
             // 检查是否是自己的锁
             if (existing.getHolderUuid().equals(owner.getUniqueId())) {
+                BagOpenResult refused = claimForEdit(ownerUuid, pageNum, owner.getUniqueId());
+                if (refused != null) {
+                    locks.remove(key);
+                    return refused;
+                }
                 return BagOpenResult.editMode();
             }
             
@@ -105,6 +118,12 @@ public class BagLockService {
             }
         }
         
+        // Across servers the first claimant edits, owner or not (UltiKits/UltiRemoteBag#54).
+        BagOpenResult refused = claimForEdit(ownerUuid, pageNum, owner.getUniqueId());
+        if (refused != null) {
+            return refused;
+        }
+
         // 所有者获取锁（最高优先级）
         BagLockInfo ownerLock = BagLockInfo.builder()
                 .holderUuid(owner.getUniqueId())
@@ -152,6 +171,11 @@ public class BagLockService {
             if (existing.getLockType() == LockType.ADMIN) {
                 if (existing.getHolderUuid().equals(admin.getUniqueId())) {
                     // 自己的锁，继续编辑
+                    BagOpenResult refused = claimForEdit(ownerUuid, pageNum, admin.getUniqueId());
+                    if (refused != null) {
+                        locks.remove(key);
+                        return refused;
+                    }
                     return BagOpenResult.editMode();
                 }
                 // 其他管理员正在编辑
@@ -159,6 +183,12 @@ public class BagLockService {
             }
         }
         
+        // Across servers the first claimant edits (UltiKits/UltiRemoteBag#54).
+        BagOpenResult refused = claimForEdit(ownerUuid, pageNum, admin.getUniqueId());
+        if (refused != null) {
+            return refused;
+        }
+
         // 管理员获取编辑锁
         BagLockInfo adminLock = BagLockInfo.builder()
                 .holderUuid(admin.getUniqueId())
@@ -184,6 +214,10 @@ public class BagLockService {
         
         if (existing != null && existing.getHolderUuid().equals(holder)) {
             locks.remove(key);
+            // The editing session ends: its claim goes with the lock (UltiKits/UltiRemoteBag#54).
+            if (claimService != null) {
+                claimService.release(ownerUuid, pageNum);
+            }
         }
         
         // 同时清理只读会话
@@ -200,6 +234,10 @@ public class BagLockService {
         locks.entrySet().removeIf(entry -> 
                 entry.getValue().getHolderUuid().equals(holder)
         );
+        // ... and the claims of their editing sessions (UltiKits/UltiRemoteBag#54)
+        if (claimService != null) {
+            claimService.releaseHeldBy(holder);
+        }
         
         // 清理只读会话
         for (Set<UUID> sessions : readOnlySessions.values()) {
@@ -275,6 +313,38 @@ public class BagLockService {
         }
 
         return Optional.ofNullable(info);
+    }
+
+    /**
+     * Claims the page for an editing session this service is about to grant, and answers the read-only result
+     * to give instead when the claim is refused (UltiKits/UltiRemoteBag#54); {@code null} when the session may
+     * edit.
+     */
+    private BagOpenResult claimForEdit(UUID ownerUuid, int pageNum, UUID holder) {
+        if (claimService == null) {
+            return null;
+        }
+        switch (claimService.claim(ownerUuid, pageNum, holder)) {
+            case CLAIMED:
+                return null;
+            case HELD_ELSEWHERE:
+                return BagOpenResult.readOnlyElsewhere();
+            default:
+                return BagOpenResult.readOnlyClaimFailed();
+        }
+    }
+
+    /**
+     * Whether another server sharing the database is editing this page now (UltiKits/UltiRemoteBag#54). An
+     * administrator's {@code /bag clear} and {@code /bag delete} refuse then, as they refuse a page held on
+     * this server.
+     *
+     * @param ownerUuid the bag owner
+     * @param pageNum   the page number
+     * @return true if another server holds a live edit claim on the page
+     */
+    public boolean isClaimedElsewhere(UUID ownerUuid, int pageNum) {
+        return claimService != null && claimService.isHeldElsewhere(ownerUuid, pageNum);
     }
 
     /**

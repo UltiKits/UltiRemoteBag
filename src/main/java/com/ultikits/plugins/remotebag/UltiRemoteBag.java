@@ -2,6 +2,7 @@ package com.ultikits.plugins.remotebag;
 
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.config.RemovedConfigKeys;
+import com.ultikits.plugins.remotebag.service.BagEditClaimService;
 import com.ultikits.plugins.remotebag.service.RemoteBagService;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.UltiToolsModule;
@@ -28,6 +29,12 @@ public class UltiRemoteBag extends UltiToolsPlugin {
         if (bagService != null) {
             bagService.init();
         }
+        // The edit claims shared with other servers; the framework creates their table on first use
+        // (UltiKits/UltiRemoteBag#54).
+        BagEditClaimService claimService = getContext().getBean(BagEditClaimService.class);
+        if (claimService != null) {
+            claimService.init();
+        }
 
         // lock.timeout_seconds is read by BagLockService at each use, so /ul reload applies it
         // (UltiKits/UltiRemoteBag#39); nothing is copied here.
@@ -42,11 +49,16 @@ public class UltiRemoteBag extends UltiToolsPlugin {
     }
 
     /**
-     * Writes nothing: every bag change was written when it was made, and a cached copy written here would
-     * overwrite a change another server sharing the database made since (UltiKits/UltiRemoteBag#54).
+     * Writes no bag: every bag change was written when it was made, and a cached copy written here would
+     * overwrite a change another server sharing the database made since. Releases every edit claim this
+     * server holds, so another server can edit those pages at once (UltiKits/UltiRemoteBag#54).
      */
     @Override
     protected void onUnregister() {
+        BagEditClaimService claimService = getContext().getBean(BagEditClaimService.class);
+        if (claimService != null) {
+            claimService.releaseAllHeld();
+        }
         getLogger().info(i18n("bag_disabled"));
     }
 

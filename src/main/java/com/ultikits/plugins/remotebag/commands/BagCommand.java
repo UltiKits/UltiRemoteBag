@@ -98,6 +98,10 @@ public class BagCommand extends BaseCommandExecutor {
         // 尝试打开
         BagOpenResult result = lockService.ownerOpen(player.getUniqueId(), page, player);
         if (result.isSuccess()) {
+            if (result.isReadOnlyMode()) {
+                // Being edited on another server (UltiKits/UltiRemoteBag#54): say why it is read-only.
+                player.sendMessage(result.renderMessage(plugin));
+            }
             new RemoteBagContentGUI(player, plugin, player.getUniqueId(), page,
                     bagService, lockService, config, result.getAccessMode()).open();
         } else {
@@ -289,7 +293,8 @@ public class BagCommand extends BaseCommandExecutor {
         }
         
         // 检查背包是否被锁定
-        if (!lockService.canUpgradeToEdit(targetUuid, page)) {
+        // Held on this server, or being edited on another server sharing the database (UltiKits/UltiRemoteBag#54).
+        if (!lockService.canUpgradeToEdit(targetUuid, page) || lockService.isClaimedElsewhere(targetUuid, page)) {
             admin.sendMessage(ChatColor.RED + i18n("bag_in_use_cannot_delete"));
             return;
         }
@@ -320,7 +325,8 @@ public class BagCommand extends BaseCommandExecutor {
         }
         
         // 检查背包是否被锁定
-        if (!lockService.canUpgradeToEdit(targetUuid, page)) {
+        // Held on this server, or being edited on another server sharing the database (UltiKits/UltiRemoteBag#54).
+        if (!lockService.canUpgradeToEdit(targetUuid, page) || lockService.isClaimedElsewhere(targetUuid, page)) {
             admin.sendMessage(ChatColor.RED + i18n("bag_in_use_cannot_clear"));
             return;
         }

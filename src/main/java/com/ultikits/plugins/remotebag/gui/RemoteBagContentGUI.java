@@ -292,18 +292,32 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         
         Icon icon = new Icon(item);
         icon.onClick(e -> {
+            if (lockService.isClaimedElsewhere(ownerUuid, pageNum)) {
+                // Still being edited on another server (UltiKits/UltiRemoteBag#54): stay read-only, say why,
+                // and show the page as stored now.
+                SoundUtil.playErrorSound(player, config);
+                player.sendMessage(BagOpenResult.readOnlyElsewhere().renderMessage(plugin));
+                loadBagContents();
+                return;
+            }
             // 检查是否可以升级为编辑模式
             if (lockService.canUpgradeToEdit(ownerUuid, pageNum)) {
                 player.sendMessage(ChatColor.GREEN + plugin.i18n("msg_upgrading_to_edit"));
                 player.closeInventory();
                 
-                // 重新以编辑模式打开
-                BagOpenResult result = lockService.adminOpen(ownerUuid, pageNum, player);
+                // 重新以编辑模式打开 -- as the owner when it is the viewer's own bag, which since
+                // UltiKits/UltiRemoteBag#54 can be open read-only because another server was editing it.
+                BagOpenResult result = player.getUniqueId().equals(ownerUuid)
+                        ? lockService.ownerOpen(ownerUuid, pageNum, player)
+                        : lockService.adminOpen(ownerUuid, pageNum, player);
                 if (result.isEditMode()) {
                     new RemoteBagContentGUI(player, plugin, ownerUuid, pageNum,
                             bagService, lockService, config, AccessMode.EDIT).open();
                 } else {
                     // 如果还是无法获取编辑权限，以只读模式重新打开
+                    if (result.getNotice() != null) {
+                        player.sendMessage(result.renderMessage(plugin));
+                    }
                     new RemoteBagContentGUI(player, plugin, ownerUuid, pageNum,
                             bagService, lockService, config, AccessMode.READ_ONLY).open();
                 }

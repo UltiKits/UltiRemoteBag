@@ -7,6 +7,26 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **One bag page is edited on one server at a time** when several servers share one database. Opening a page
+  for editing claims it in a new database table, `remote_bag_claims`; while another server holds the page it opens
+  read-only on this server, for the owner and for administrators alike, with the line "This bag page is being
+  edited on another server; it is open in read-only mode", and an administrator's `/bag clear` and `/bag delete`
+  of that page are refused as for a page in use. The claim is released when the window closes, when its player
+  quits and when the module stops; one left by a crash expires after `lock.timeout_seconds`, and an open window's
+  server renews it every third of that. On one server nothing changes: the owner still outranks an
+  administrator. The table is created on the first start; no existing table changes and nothing is migrated.
+  Keep the servers' clocks in sync: expiry compares one server's timestamp with another's clock. A server that
+  stalls for longer than `lock.timeout_seconds` can lose its claim; the console then logs one error naming the
+  player and the page (UltiKits/UltiRemoteBag#54).
+- **多台服务器共享一个数据库时，同一背包页同一时间只能在一台服务器上编辑。** 打开编辑时会在新的数据库表 `remote_bag_claims` 中占用该页；
+  另一台服务器占用期间，本服务器对所有者和管理员都以只读方式打开，并提示“该背包页正在另一台服务器上编辑，当前为只读模式”，管理员对该页的
+  `/bag clear` 与 `/bag delete` 也会像页面正被使用时一样被拒绝。窗口关闭、玩家退出、模块停止时释放占用；崩溃遗留的占用在
+  `lock.timeout_seconds` 后过期，窗口打开期间其服务器每过三分之一时间续期一次。单台服务器上的规则不变：所有者仍优先于管理员。该表在首次启动时
+  创建；现有表不变，也没有任何迁移。请保持各服务器时钟同步：过期判断以一台服务器的时间戳与另一台服务器的时钟比较。某台服务器停顿超过
+  `lock.timeout_seconds` 可能失去占用，此时控制台会记录一条指明玩家与页码的错误（UltiKits/UltiRemoteBag#54）。
+
 ### Fixed
 
 - **Bag pages on servers that share one database.** A bag page changed on another server sharing the database is
