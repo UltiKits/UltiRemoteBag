@@ -39,7 +39,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   read-only everywhere and a reopen on this server shows the kept changes. Nothing is given back while such a save
   can still land. Only a save the database refuses gives back the items put in (at the next join if the player has
   left). Module stop now saves the pages still open for editing, keeps trying kept saves for five seconds and logs,
-  with their items, those it could not write. `/bag clear` and `/bag delete` claim the page for their own action.
+  with their items, those it could not write. Every page save is fenced on the claim: one database transaction
+  checks that the claim is still this server's and writes the page, so a save held up past another server's
+  takeover writes nothing, and a save that reported an error is never also given back when it had in fact been
+  written. `/bag clear` and `/bag delete` claim the page for their own action.
   Known limitation: a kept save is held in memory and a server crash loses it, as it loses an unsaved window
   (README, "Known limitations") (UltiKits/UltiRemoteBag#54).
 - **数据库未响应时，背包页不再丢失改动。** 占用和保存的每次数据库调用最多等待 `lock.timeout_seconds` 的六分之一（主线程等待时最多两秒），
@@ -47,7 +50,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   关闭窗口、点击保存按钮、退出或 `/bag save`——保留占用，改动保留在内存中，并在后台重试同一保存直到成功；期间该页在所有服务器上只读，
   在本服务器重新打开会显示保留的改动。只要这次保存仍可能完成，就不归还任何物品。
   只有被数据库拒绝的保存才归还放入的物品（玩家已离开时在其下次加入时归还）。模块停止时会保存仍在编辑中打开的背包页，对保留的保存再尝试五秒，
-  无法写入的连同物品记录在日志中。`/bag clear` 与 `/bag delete` 会为自身操作占用该页。已知限制：保留的保存在内存中，服务器崩溃会丢失它，
+  无法写入的连同物品记录在日志中。每次保存都以占用为栅栏：同一个数据库事务确认占用仍属于本服务器并写入页面，因此在另一台服务器接手之后被耽搁的保存不会写入任何内容，
+  报告了错误但实际已写入的保存也绝不会同时被归还。`/bag clear` 与 `/bag delete` 会为自身操作占用该页。已知限制：保留的保存在内存中，服务器崩溃会丢失它，
   与未保存的窗口相同（见 README“已知限制”）（UltiKits/UltiRemoteBag#54）。
 
 ### Fixed

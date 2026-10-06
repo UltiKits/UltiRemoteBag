@@ -77,10 +77,15 @@ import java.util.function.LongSupplier;
  *         <li>A page write that throws or does not return: a <b>kept write</b>. The claim is kept and renewed,
  *             the content stays in memory and the same conditional write is retried in the background until it
  *             lands ({@link #renewDue}); meanwhile the page is read-only on every server, and a reopen on this
- *             server shows the kept content. A retry that finds the stored page already holding this content
- *             (an earlier attempt landed although it reported an error) counts as landed. A kept write is
- *             attempted only while its claim is confirmed.</li>
+ *             server shows the kept content. A kept write is attempted only while its claim is confirmed.</li>
  *       </ul></li>
+ *   <li><b>Every page save is fenced on the claim</b> (maintainer decision of 2026-10-06, gate 1 round 2): one
+ *       database transaction raises the claim's counter conditionally on this session's token and the counter this
+ *       run last confirmed, then writes the page conditionally on what the window read, and records the save as
+ *       landed in the session's record row ({@link #fencedWrite}). On SQLite and MySQL a save therefore lands only
+ *       while the claim is this session's, however late it runs. A save that threw or did not answer may have
+ *       committed: whether it did is read from that record row, never guessed -- by the retry, by the abandon after a
+ *       lost claim and by the abandon at disable -- so a save that landed is never also given back.</li>
  *   <li><b>Release.</b> Closing the window, quitting and module disable end the session; its claim is released
  *       then, or, while a kept write is pending, as soon as that write lands or is refused. Module disable flushes
  *       kept writes for a bounded time and logs, with their items, the ones that still cannot land.</li>
@@ -92,10 +97,10 @@ import java.util.function.LongSupplier;
  * Remaining limits: a writer outside the module (an older module version during a rolling upgrade, another
  * plugin, an operator editing the table) can still change a page or a claim under an open window; a server cut
  * off for a full timeout from a database another server still reaches loses its claim, and the items its window
- * had taken out before the cut stay in the stored page as well; a storage call that does not return for longer
- * than the timeout and then lands can land after another server took the claim over; a server crash loses a kept
- * write, as it loses an unsaved window. On the JSON storage backend, which belongs to one server, the claims
- * change nothing.
+ * had taken out before the cut stay in the stored page as well; a server crash loses a kept write, as it loses an
+ * unsaved window, and items owed to a player who left (logged when owed). On the JSON storage backend, which
+ * belongs to one server, the claims change nothing and the fence is not atomic with the page write (JSON has no
+ * transaction across two tables).
  */
 @Service
 public class BagEditClaimService {
@@ -253,6 +258,12 @@ public class BagEditClaimService {
     /** Items a refused kept write owes a player who was not on this server, by player. */
     private final Map<UUID, List<Owed>> owed = new ConcurrentHashMap<>();
 
+    /**
+     * Give-backs not made yet: made by the main thread, and at disable by the disabling thread, so one the scheduler
+     * drops (it drops tasks once the framework is disabled at server stop) is still made.
+     */
+    private final java.util.Queue<Return> returns = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
     /** One claim this run holds. */
     private static final class Held {
         private final UUID ownerUuid;
@@ -299,25 +310,68 @@ public class BagEditClaimService {
     /** A page write the database did not answer, retried until it lands or is refused. */
     private static final class Kept {
         private final String id;
+        /** The editing session's claim token: the key of the row that records which of its saves landed. */
+        private final String token;
+        /** Every attempt made of this write, by attempt id. */
+        private final Set<String> attempts = new java.util.concurrent.CopyOnWriteArraySet<>();
+        /** An attempt threw or did not answer: it may have landed. */
+        private volatile boolean uncertain;
         private final UUID holderUuid;
         private final UUID ownerUuid;
         private final int page;
         private final ItemStack[] items;
         private final String contents;
         private final RemoteBagService.PageRead base;
-        private volatile Future<Boolean> inFlight;
+        private volatile Future<WriteOutcome> inFlight;
         /** The claim was lost: no new attempt; settled (given back unless landed) once no attempt is running. */
         private volatile boolean abandoned;
 
-        private Kept(String id, UUID holderUuid, UUID ownerUuid, int page, ItemStack[] items, String contents,
-                     RemoteBagService.PageRead base) {
+        private Kept(String id, String token, UUID holderUuid, UUID ownerUuid, int page, ItemStack[] items,
+                     String contents, RemoteBagService.PageRead base) {
             this.id = id;
+            this.token = token;
             this.holderUuid = holderUuid;
             this.ownerUuid = ownerUuid;
             this.page = page;
             this.items = items;
             this.contents = contents;
             this.base = base;
+        }
+    }
+
+    /** What one fenced page write found. */
+    private enum WriteOutcome {
+        /** The page now holds the write's content: written by this attempt, or recorded as written by an earlier one. */
+        LANDED,
+        /** The claim was this session's, but the stored page is not what the window read: nothing written. */
+        REFUSED,
+        /** The claim is no longer this session's: nothing written. */
+        LOST
+    }
+
+    /** A fenced write's outcome and the claim's counter after it ({@code -1}: not moved). */
+    private static final class Fenced {
+        private final WriteOutcome outcome;
+        private final long counter;
+
+        private Fenced(WriteOutcome outcome, long counter) {
+            this.outcome = outcome;
+            this.counter = counter;
+        }
+    }
+
+    /** Items to give back to a player, made on the main thread (or at disable, on the disabling thread). */
+    private static final class Return {
+        private final UUID holderUuid;
+        private final UUID ownerUuid;
+        private final int page;
+        private final List<ItemStack> items;
+
+        private Return(UUID holderUuid, UUID ownerUuid, int page, List<ItemStack> items) {
+            this.holderUuid = holderUuid;
+            this.ownerUuid = ownerUuid;
+            this.page = page;
+            this.items = items;
         }
     }
 
@@ -393,7 +447,6 @@ public class BagEditClaimService {
      * afterwards. Runs on the disabling (main) thread.
      */
     public void shutdown() {
-        stopping = true;
         ScheduledExecutorService task;
         synchronized (this) {
             task = renewer;
@@ -407,13 +460,23 @@ public class BagEditClaimService {
                 Thread.currentThread().interrupt();
             }
         }
+        // Only now: the background task has ended, so from here every piece of main-thread work runs on this, the
+        // disabling (main) thread, and none on the task's thread (gate 1 round 2, R2-5).
+        stopping = true;
         flushKept(FINAL_FLUSH_MILLIS);
+        // One deadline for every record read below, however many writes are left.
+        long recordsUntil = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(mainThreadDeadlineMillis());
         for (Kept write : new ArrayList<>(kept.values())) {
-            abandonAtDisable(write);
+            abandonAtDisable(write, recordsUntil);
         }
+        // Every give-back still queued -- including one the scheduler dropped because the framework was already
+        // disabled -- is made here, synchronously (R2-3); a player who is not online is logged as owed.
+        drainReturns();
         for (Map.Entry<UUID, List<Owed>> entry : owed.entrySet()) {
             for (Owed items : entry.getValue()) {
                 plugin.getLogger().error(plugin.i18n("log_bag_items_owed_dropped")
+                        .replace("{PAGE}", String.valueOf(items.page))
+                        .replace("{OWNER}", nameOf(items.ownerUuid))
                         .replace("{ITEMS}", ItemReturns.describe(items.items))
                         .replace("{PLAYER}", nameOf(entry.getKey())));
             }
@@ -665,25 +728,33 @@ public class BagEditClaimService {
         String contents = bagService.serializePage(items);
         if (claim.troubled || !isConfirmed(claim, nanoTime.getAsLong())) {
             claim.troubled = true;
-            keep(id, holderUuid, ownerUuid, page, items, contents, base, null);
+            keep(id, claim.token, holderUuid, ownerUuid, page, items, contents, base, null, null);
             return new SaveResult(SaveOutcome.KEPT, null);
         }
-        Future<Boolean> write = submit(() -> attemptWrite(ownerUuid, page, items, contents, base));
+        String attempt = UUID.randomUUID().toString();
+        Future<WriteOutcome> write = submit(() -> fencedWrite(claim, ownerUuid, page, items, contents, base, attempt,
+                java.util.Collections.<String>emptySet()));
         try {
-            if (write.get(mainThreadDeadlineMillis(), TimeUnit.MILLISECONDS)) {
-                return new SaveResult(SaveOutcome.WRITTEN, bagService.storedRead(items, contents));
+            switch (write.get(mainThreadDeadlineMillis(), TimeUnit.MILLISECONDS)) {
+                case LANDED:
+                    return new SaveResult(SaveOutcome.WRITTEN, bagService.storedRead(items, contents));
+                case LOST:
+                    claimLost(claim);
+                    return new SaveResult(SaveOutcome.LOST, null);
+                default:
+                    plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
+                    return new SaveResult(SaveOutcome.REFUSED, null);
             }
-            plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
-            return new SaveResult(SaveOutcome.REFUSED, null);
         } catch (ExecutionException e) {
-            keep(id, holderUuid, ownerUuid, page, items, contents, base, null);
+            // It may have committed before the error reached this server: kept, and decided by its record.
+            keep(id, claim.token, holderUuid, ownerUuid, page, items, contents, base, attempt, null);
             logKept(e.getCause(), holderUuid, ownerUuid, page);
         } catch (TimeoutException e) {
-            keep(id, holderUuid, ownerUuid, page, items, contents, base, write);
+            keep(id, claim.token, holderUuid, ownerUuid, page, items, contents, base, attempt, write);
             logKept(e, holderUuid, ownerUuid, page);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            keep(id, holderUuid, ownerUuid, page, items, contents, base, write);
+            keep(id, claim.token, holderUuid, ownerUuid, page, items, contents, base, attempt, write);
         }
         return new SaveResult(SaveOutcome.KEPT, null);
     }
@@ -697,10 +768,11 @@ public class BagEditClaimService {
     public boolean keepWindow(UUID holderUuid, UUID ownerUuid, int page, ItemStack[] items,
                               RemoteBagService.PageRead base) {
         String id = RemoteBagEditClaim.idOf(ownerUuid, page);
-        if (lost.contains(id) || !held.containsKey(id)) {
+        Held claim = held.get(id);
+        if (lost.contains(id) || claim == null) {
             return false;
         }
-        keep(id, holderUuid, ownerUuid, page, items, bagService.serializePage(items), base, null);
+        keep(id, claim.token, holderUuid, ownerUuid, page, items, bagService.serializePage(items), base, null, null);
         return true;
     }
 
@@ -716,11 +788,23 @@ public class BagEditClaimService {
         return write == null ? null : write.items.clone();
     }
 
-    private void keep(String id, UUID holderUuid, UUID ownerUuid, int page, ItemStack[] items, String contents,
-                      RemoteBagService.PageRead base, Future<Boolean> running) {
-        Kept write = new Kept(id, holderUuid, ownerUuid, page, items.clone(), contents, base);
+    /**
+     * Keeps a write. {@code attempt}: an attempt already made whose outcome is not known (it threw or did not answer
+     * in time); {@code running}: that attempt, if it is still running.
+     */
+    private void keep(String id, String token, UUID holderUuid, UUID ownerUuid, int page, ItemStack[] items,
+                      String contents, RemoteBagService.PageRead base, String attempt, Future<WriteOutcome> running) {
+        Kept write = new Kept(id, token, holderUuid, ownerUuid, page, items.clone(), contents, base);
+        if (attempt != null) {
+            write.attempts.add(attempt);
+            write.uncertain = true;
+        }
         write.inFlight = running;
         kept.put(id, write);
+        if (lost.contains(id)) {
+            // The claim was found lost between this caller's check and the put (R2-6): the background settles it.
+            write.abandoned = true;
+        }
     }
 
     private void logKept(Throwable cause, UUID holderUuid, UUID ownerUuid, int page) {
@@ -731,17 +815,115 @@ public class BagEditClaimService {
     }
 
     /**
-     * One conditional page write (storage pool). A miss is a refusal unless the stored page already holds exactly
-     * this content -- an earlier attempt landed although it reported an error.
-     *
-     * @return true if the page now holds {@code contents} through this write or an earlier one
+     * One page save, fenced on the claim (storage pool; maintainer decision of 2026-10-06, gate 1 round 2 R2-2). One
+     * database transaction -- the page operator's, which the framework shares with the claims operator of the same
+     * module (one {@code DataSourceTransactionManager} per module, a thread-bound connection that both operators'
+     * {@code TransactionAwareDataSource} hand out) -- first raises the claim's counter with {@code updateIf} on this
+     * session's token, this run and the counter this run last confirmed, then writes the page conditionally on what
+     * the window read, and records the attempt as landed in the session's record row. The fence is a write, so it
+     * takes the claim row's lock (InnoDB row lock; SQLite's write lock): another server's takeover, which is
+     * conditional on the counter it saw, waits for this transaction and then misses, or committed before it and the
+     * fence misses. Either the claim is this session's when the page is written, or nothing is written.
+     * <p>
+     * <b>The counter checked.</b> The counter this run last confirmed ({@code Held#renewals}). A claim's renewal and
+     * its fenced saves run under the same lock ({@code synchronized} on the claim), so neither moves the counter while
+     * the other runs, and each records the new value before it lets go. A renewal or save that threw may have moved
+     * it under this session's token anyway: then the row is read, and with this session's token the counter read is
+     * fenced instead -- only another token, or a counter that moves again inside this transaction, means lost.
+     * <p>
+     * <b>An earlier attempt that may have landed</b> ({@code earlier}, those that threw or did not answer): the
+     * session's record row says whether one of them committed; if so, nothing is written again.
      */
-    private boolean attemptWrite(UUID ownerUuid, int page, ItemStack[] items, String contents,
-                                 RemoteBagService.PageRead base) {
-        if (bagService.writePage(ownerUuid, page, items, contents, base) != null) {
-            return true;
+    private WriteOutcome fencedWrite(Held claim, UUID ownerUuid, int page, ItemStack[] items, String contents,
+                                     RemoteBagService.PageRead base, String attempt, Set<String> earlier) throws Exception {
+        synchronized (claim) {
+            long started = nanoTime.getAsLong();
+            Fenced result;
+            try {
+                result = bagService.inPageTransaction(() ->
+                        fenceAndWrite(claim, ownerUuid, page, items, contents, base, attempt, earlier));
+            } catch (Exception e) {
+                // Unknown whether it committed: the counter may have moved under this session's token, so the next
+                // renewal reads the row first.
+                claim.unconfirmed = true;
+                throw e;
+            }
+            if (result.counter >= 0) {
+                claim.renewals = Math.max(claim.renewals, result.counter);
+                claim.confirmedAtNanos = started;
+                claim.unconfirmed = false;
+            }
+            return result.outcome;
         }
-        return contents.equals(bagService.storedContents(ownerUuid, page));
+    }
+
+    private Fenced fenceAndWrite(Held claim, UUID ownerUuid, int page, ItemStack[] items, String contents,
+                                 RemoteBagService.PageRead base, String attempt, Set<String> earlier) {
+        String id = RemoteBagEditClaim.idOf(ownerUuid, page);
+        long counter = claim.renewals;
+        if (!fence(claim, counter)) {
+            RemoteBagEditClaim row = claims.getById(id);
+            if (!isMine(row, claim.token)) {
+                return new Fenced(WriteOutcome.LOST, -1L);
+            }
+            counter = row.getRenewals();
+            if (!fence(claim, counter)) {
+                return new Fenced(WriteOutcome.LOST, -1L);
+            }
+        }
+        long fenced = counter + 1;
+        if (!earlier.isEmpty() && landedEarlier(claim.token, earlier)) {
+            return new Fenced(WriteOutcome.LANDED, fenced);
+        }
+        if (bagService.writePage(ownerUuid, page, items, contents, base) == null) {
+            return new Fenced(WriteOutcome.REFUSED, fenced);
+        }
+        recordLanded(claim.token, ownerUuid, page, attempt);
+        return new Fenced(WriteOutcome.LANDED, fenced);
+    }
+
+    /** Raises the claim's counter from {@code counter}, conditionally on this session's token, this run and it. */
+    private boolean fence(Held claim, long counter) {
+        return claims.updateIf(claimRow(claim.ownerUuid, claim.page, claim.token, counter + 1),
+                WhereCondition.builder().column("holder_token").value(claim.token).build(),
+                WhereCondition.builder().column("holder_run").value(run).build(),
+                WhereCondition.builder().column("renewals").value(counter).build());
+    }
+
+    /**
+     * The session's record row: a row of the claims table under the session's token (a claim row's id is
+     * {@code <player uuid>:<page>}, never a bare token), holding the id of its last save that committed. Written in the
+     * save's own transaction, so it says exactly whether that save landed; another server's takeover of the page does
+     * not touch it. Deleted when the session's claim is released.
+     */
+    private void recordLanded(String token, UUID ownerUuid, int page, String attempt) {
+        RemoteBagEditClaim record = RemoteBagEditClaim.builder()
+                .playerUuid(ownerUuid.toString())
+                .pageNumber(page)
+                .holderRun(run)
+                .holderToken(attempt)
+                .renewals(0L)
+                .claimedAt(clock.getAsLong())
+                .build();
+        record.setId(token);
+        if (claims.getById(token) == null) {
+            claims.insert(record);
+        } else {
+            claims.updateCounted(record);
+        }
+    }
+
+    /** Whether the session's record row names one of {@code attempts} as its last save that committed. */
+    private boolean landedEarlier(String token, Set<String> attempts) {
+        RemoteBagEditClaim record = claims.getById(token);
+        return record != null && attempts.contains(record.getHolderToken());
+    }
+
+    /** Deletes the session's record row, if there is one (storage pool). */
+    private void forgetRecord(String token) {
+        if (claims.getById(token) != null) {
+            claims.delById(token);
+        }
     }
 
     // ==================== Release ====================
@@ -804,9 +986,14 @@ public class BagEditClaimService {
         Map<Held, Future<Boolean>> writes = new LinkedHashMap<>();
         for (Held claim : releasing) {
             claim.released = true;
-            writes.put(claim, submit(() -> claims.updateIf(claimRow(claim.ownerUuid, claim.page, "", claim.renewals + 1),
-                    WhereCondition.builder().column("holder_token").value(claim.token).build(),
-                    WhereCondition.builder().column("holder_run").value(run).build())));
+            writes.put(claim, submit(() -> {
+                boolean released = claims.updateIf(claimRow(claim.ownerUuid, claim.page, "", claim.renewals + 1),
+                        WhereCondition.builder().column("holder_token").value(claim.token).build(),
+                        WhereCondition.builder().column("holder_run").value(run).build());
+                // No save of the session is pending any more, so its record row has nothing left to tell.
+                forgetRecord(claim.token);
+                return released;
+            }));
         }
         long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(mainThreadDeadlineMillis());
         for (Map.Entry<Held, Future<Boolean>> write : writes.entrySet()) {
@@ -922,8 +1109,8 @@ public class BagEditClaimService {
             if (renewal.lost) {
                 claimLost(claim);
             } else {
-                claim.renewals = renewal.renewals;
-                claim.confirmedAtNanos = renewal.startedAtNanos;
+                claim.renewals = Math.max(claim.renewals, renewal.renewals);
+                claim.confirmedAtNanos = Math.max(claim.confirmedAtNanos, renewal.startedAtNanos);
                 claim.unconfirmed = false;
             }
         } catch (ExecutionException e) {
@@ -942,6 +1129,18 @@ public class BagEditClaimService {
      * counter read is used.
      */
     private Renewal renewOnce(Held claim) {
+        // Never at the same time as a fenced save of the same claim: the counter each of them checks is the one the
+        // other last recorded (see fencedWrite).
+        synchronized (claim) {
+            Renewal renewal = renewLocked(claim);
+            if (!renewal.lost) {
+                claim.renewals = Math.max(claim.renewals, renewal.renewals);
+            }
+            return renewal;
+        }
+    }
+
+    private Renewal renewLocked(Held claim) {
         long started = nanoTime.getAsLong();
         String id = RemoteBagEditClaim.idOf(claim.ownerUuid, claim.page);
         long counter = claim.renewals;
@@ -969,7 +1168,11 @@ public class BagEditClaimService {
         return new Renewal(true, counter, started);
     }
 
-    /** The claim is lost: marked lost first, dropped, the window told; a kept write of the page is abandoned. */
+    /**
+     * The claim is lost: marked lost first, dropped, the window told; a kept write of the page is abandoned. The
+     * background pass settles an abandoned write ({@link #attemptKeptWrites}), never this caller: an attempt may still
+     * be running, and one that threw must be decided by the session's record row (a storage call).
+     */
     private void claimLost(Held claim) {
         String id = RemoteBagEditClaim.idOf(claim.ownerUuid, claim.page);
         lost.add(id);
@@ -983,9 +1186,6 @@ public class BagEditClaimService {
         Kept write = kept.get(id);
         if (write != null) {
             write.abandoned = true;
-            if (write.inFlight == null) {
-                settleAbandoned(write);
-            }
         }
     }
 
@@ -998,11 +1198,12 @@ public class BagEditClaimService {
 
     private void attemptKeptWrites(long waitMillis) {
         long now = nanoTime.getAsLong();
-        Map<Kept, Future<Boolean>> started = new LinkedHashMap<>();
+        Map<Kept, Future<WriteOutcome>> started = new LinkedHashMap<>();
         for (Kept write : new ArrayList<>(kept.values())) {
-            Future<Boolean> running = write.inFlight;
+            Future<WriteOutcome> running = write.inFlight;
             if (running != null) {
                 if (!running.isDone()) {
+                    // In-flight guard (R2-4): an attempt that can still land is never given back, abandoned or not.
                     continue;
                 }
                 write.inFlight = null;
@@ -1011,23 +1212,35 @@ public class BagEditClaimService {
                 }
             }
             if (write.abandoned) {
-                settleAbandoned(write);
+                settleAbandoned(write, waitMillis);
                 continue;
             }
             Held claim = held.get(write.id);
-            if (claim == null || !isConfirmed(claim, now)) {
-                // Written only while the claim is confirmed: no other server can have taken it then.
+            if (claim == null) {
+                // No claim left to fence a write on: settled as abandoned.
+                write.abandoned = true;
+                settleAbandoned(write, waitMillis);
                 continue;
             }
-            Future<Boolean> attempt = submit(() -> attemptWrite(write.ownerUuid, write.page, write.items, write.contents, write.base));
-            write.inFlight = attempt;
-            started.put(write, attempt);
+            if (!isConfirmed(claim, now)) {
+                // Attempted only while the claim is confirmed; the fence decides the rest.
+                continue;
+            }
+            String attempt = UUID.randomUUID().toString();
+            Set<String> earlier = new java.util.HashSet<>(write.attempts);
+            write.attempts.add(attempt);
+            Future<WriteOutcome> next = submit(() -> fencedWrite(claim, write.ownerUuid, write.page, write.items,
+                    write.contents, write.base, attempt, earlier));
+            write.inFlight = next;
+            started.put(write, next);
         }
         long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMillis);
-        for (Map.Entry<Kept, Future<Boolean>> entry : started.entrySet()) {
+        for (Map.Entry<Kept, Future<WriteOutcome>> entry : started.entrySet()) {
+            Kept write = entry.getKey();
             try {
                 entry.getValue().get(Math.max(0L, until - System.nanoTime()), TimeUnit.NANOSECONDS);
             } catch (TimeoutException e) {
+                write.uncertain = true;
                 continue;
             } catch (ExecutionException e) {
                 // Settled below.
@@ -1035,31 +1248,43 @@ public class BagEditClaimService {
                 Thread.currentThread().interrupt();
                 return;
             }
-            entry.getKey().inFlight = null;
-            settleKept(entry.getKey(), entry.getValue());
+            write.inFlight = null;
+            if (!settleKept(write, entry.getValue()) && write.abandoned) {
+                settleAbandoned(write, Math.max(0L, TimeUnit.NANOSECONDS.toMillis(until - System.nanoTime())));
+            }
         }
     }
 
     /**
      * Acts on a finished attempt of a kept write.
      *
-     * @return true if the kept write is settled (landed or refused)
+     * @return true if the kept write is settled (landed, or refused and given back)
      */
-    private boolean settleKept(Kept write, Future<Boolean> done) {
+    private boolean settleKept(Kept write, Future<WriteOutcome> done) {
         try {
-            if (done.get()) {
-                plugin.getLogger().info(plugin.i18n("log_bag_save_landed")
-                        .replace("{PAGE}", String.valueOf(write.page))
-                        .replace("{OWNER}", nameOf(write.ownerUuid)));
-                finishKept(write);
-                return true;
+            switch (done.get()) {
+                case LANDED:
+                    logLanded(write);
+                    finishKept(write);
+                    return true;
+                case REFUSED:
+                    // Definitive: the claim was this session's and the stored page is not what the window read.
+                    plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
+                    giveBackPutIns(write);
+                    finishKept(write);
+                    return true;
+                default:
+                    // LOST: nothing written by this attempt; an earlier one may have landed -- settled as abandoned.
+                    Held claim = held.get(write.id);
+                    if (claim != null) {
+                        claimLost(claim);
+                    }
+                    write.abandoned = true;
+                    return false;
             }
-            plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
-            giveBackPutIns(write);
-            finishKept(write);
-            return true;
         } catch (ExecutionException e) {
-            // Tried again on a later pass (or, abandoned, settled there).
+            // It may have committed before the error reached this server (R2-1): decided by the record row later.
+            write.uncertain = true;
             return false;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -1067,10 +1292,48 @@ public class BagEditClaimService {
         }
     }
 
-    /** A kept write whose claim was lost and that has no attempt running: its put-in items go back. */
-    private void settleAbandoned(Kept write) {
+    /**
+     * A kept write whose claim is gone, with no attempt running. If no attempt is in doubt, nothing was written: the
+     * put-in items go back. If one is (it threw or did not answer -- R2-1, the consumers being this abandon after a lost
+     * claim, the abandon at disable, and the retry in {@link #fenceAndWrite}), the session's record row decides: an
+     * attempt it names landed, so nothing goes back; otherwise none did, and the put-in items go back. A record that
+     * cannot be read now leaves the write for the next pass.
+     */
+    private void settleAbandoned(Kept write, long waitMillis) {
+        if (write.uncertain) {
+            Boolean landed = recordSays(write, waitMillis);
+            if (landed == null) {
+                return;
+            }
+            if (landed) {
+                logLanded(write);
+                finishKept(write);
+                return;
+            }
+        }
         giveBackPutIns(write);
         finishKept(write);
+    }
+
+    /** What the session's record row says of {@code write}'s attempts; {@code null} if it cannot be read in time. */
+    private Boolean recordSays(Kept write, long waitMillis) {
+        try {
+            return submit(() -> landedEarlier(write.token, write.attempts))
+                    .get(Math.max(1L, waitMillis), TimeUnit.MILLISECONDS);
+        } catch (ExecutionException e) {
+            log(e.getCause(), plugin.i18n("log_bag_claim_failed"), write.ownerUuid, write.page);
+        } catch (TimeoutException e) {
+            log(e, plugin.i18n("log_bag_claim_failed"), write.ownerUuid, write.page);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return null;
+    }
+
+    private void logLanded(Kept write) {
+        plugin.getLogger().info(plugin.i18n("log_bag_save_landed")
+                .replace("{PAGE}", String.valueOf(write.page))
+                .replace("{OWNER}", nameOf(write.ownerUuid)));
     }
 
     private void finishKept(Kept write) {
@@ -1078,8 +1341,16 @@ public class BagEditClaimService {
             return;
         }
         Held claim = held.get(write.id);
-        if (claim != null && claim.sessionEnded && held.remove(write.id, claim)) {
-            writeReleases(java.util.Collections.singletonList(claim));
+        if (claim != null && claim.token.equals(write.token)) {
+            if (claim.sessionEnded && held.remove(write.id, claim)) {
+                writeReleases(java.util.Collections.singletonList(claim));
+            }
+        } else if (claims != null && storage != null) {
+            // The claim is gone: nothing releases it, so its record row is deleted here (best effort).
+            submit(() -> {
+                forgetRecord(write.token);
+                return null;
+            });
         }
         onMainThread(() -> RemoteBagContentGUI.keptWriteSettled(write.ownerUuid, write.page));
     }
@@ -1089,17 +1360,28 @@ public class BagEditClaimService {
         if (putIn.isEmpty()) {
             return;
         }
-        onMainThread(() -> {
-            if (!returner.giveBack(write.holderUuid, write.ownerUuid, write.page, putIn)) {
-                owed.computeIfAbsent(write.holderUuid, player -> new java.util.concurrent.CopyOnWriteArrayList<>())
-                        .add(new Owed(write.ownerUuid, write.page, putIn));
+        returns.add(new Return(write.holderUuid, write.ownerUuid, write.page, putIn));
+        onMainThread(this::drainReturns);
+    }
+
+    /**
+     * Makes every queued give-back (main thread; at disable, the disabling thread): into the inventory of a player on
+     * this server, and otherwise kept as owed for their next join here and logged with the player, the page and the
+     * items.
+     */
+    public void drainReturns() {
+        Return item;
+        while ((item = returns.poll()) != null) {
+            if (!returner.giveBack(item.holderUuid, item.ownerUuid, item.page, item.items)) {
+                owed.computeIfAbsent(item.holderUuid, player -> new java.util.concurrent.CopyOnWriteArrayList<>())
+                        .add(new Owed(item.ownerUuid, item.page, item.items));
                 plugin.getLogger().error(plugin.i18n("log_bag_items_owed")
-                        .replace("{PAGE}", String.valueOf(write.page))
-                        .replace("{OWNER}", nameOf(write.ownerUuid))
-                        .replace("{ITEMS}", ItemReturns.describe(putIn))
-                        .replace("{PLAYER}", nameOf(write.holderUuid)));
+                        .replace("{PAGE}", String.valueOf(item.page))
+                        .replace("{OWNER}", nameOf(item.ownerUuid))
+                        .replace("{ITEMS}", ItemReturns.describe(item.items))
+                        .replace("{PLAYER}", nameOf(item.holderUuid)));
             }
-        });
+        }
     }
 
     /**
@@ -1108,6 +1390,7 @@ public class BagEditClaimService {
      * @param player the player who joined
      */
     public void deliverOwed(Player player) {
+        drainReturns();
         List<Owed> due = owed.remove(player.getUniqueId());
         if (due == null) {
             return;
@@ -1140,16 +1423,30 @@ public class BagEditClaimService {
         }
     }
 
-    /** A kept write still pending at the end of disable: logged with its items; put-in items go back if safe. */
-    private void abandonAtDisable(Kept write) {
+    /**
+     * A kept write still pending at the end of disable: logged with its items. Its put-in items are queued to go back
+     * only when no attempt can still land: none running (in-flight guard, R2-4), and, if one is in doubt, the record
+     * row read now says none landed (R2-1); one it names landed gives nothing back, and an unreadable record gives
+     * nothing back either.
+     */
+    private void abandonAtDisable(Kept write, long recordsUntilNanos) {
         kept.remove(write.id, write);
-        Future<Boolean> running = write.inFlight;
+        Future<WriteOutcome> running = write.inFlight;
         List<ItemStack> returned = new ArrayList<>();
-        if (running == null) {
-            // No attempt is running, so none can land later: the put-in items go back to a player still online.
-            List<ItemStack> putIn = ItemReturns.putIn(write.base == null ? null : write.base.getItems(), write.items);
-            if (!putIn.isEmpty() && returner.giveBack(write.holderUuid, write.ownerUuid, write.page, putIn)) {
-                returned = putIn;
+        if (running == null || running.isDone()) {
+            long left = TimeUnit.NANOSECONDS.toMillis(recordsUntilNanos - System.nanoTime());
+            Boolean landed = !write.uncertain && running == null ? Boolean.FALSE
+                    : left > 0 ? recordSays(write, left) : null;
+            if (Boolean.TRUE.equals(landed)) {
+                logLanded(write);
+                return;
+            }
+            if (Boolean.FALSE.equals(landed)) {
+                List<ItemStack> putIn = ItemReturns.putIn(write.base == null ? null : write.base.getItems(), write.items);
+                if (!putIn.isEmpty()) {
+                    returns.add(new Return(write.holderUuid, write.ownerUuid, write.page, putIn));
+                    returned = putIn;
+                }
             }
         }
         plugin.getLogger().error(plugin.i18n("log_bag_save_abandoned")

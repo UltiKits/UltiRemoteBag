@@ -219,16 +219,18 @@ public class RemoteBagService {
     }
 
     /**
-     * The stored contents of a page, read from the database now; {@code null} when no row is stored. Safe off the
-     * main thread.
+     * Runs {@code action} in one transaction of the page table's operator (UltiKits/UltiRemoteBag#54, gate 1 round 2).
+     * On SQLite and MySQL the framework gives every operator of one module the same transaction manager, whose
+     * connection is bound to the calling thread: a claim written through the claims operator inside {@code action}
+     * is in the same transaction. On JSON, which belongs to one server, only this table's changes are rolled back.
      *
-     * @param playerUuid the bag's owner
-     * @param page       the page number
-     * @return the stored contents, or {@code null}
+     * @param action what to run
+     * @param <R>    its result
+     * @return what {@code action} returned, after the commit
+     * @throws Exception what {@code action} or the commit threw, after the rollback
      */
-    public String storedContents(UUID playerUuid, int page) {
-        List<RemoteBagData> rows = storedRows(playerUuid, page);
-        return rows.isEmpty() ? null : rows.get(0).getContents();
+    public <R> R inPageTransaction(java.util.concurrent.Callable<R> action) throws Exception {
+        return dataOperator.transaction(action);
     }
 
     /**

@@ -128,7 +128,7 @@ log_bag_save_pending: "无法保存 {PLAYER} 编辑的 {OWNER} 的背包第 {PAG
 log_bag_save_landed: "已保存 {OWNER} 的背包第 {PAGE} 页保留的改动"
 log_bag_save_abandoned: "模块在 {PLAYER} 编辑的 {OWNER} 的背包第 {PAGE} 页保留的改动保存之前停止；编辑后的该页内容为：{ITEMS}。已归还给 {PLAYER} 的物品：{RETURNED}"
 log_bag_items_owed: "{PLAYER} 不在本服务器上，放入 {OWNER} 的背包第 {PAGE} 页但未存储的物品将在其下次加入本服务器时归还：{ITEMS}"
-log_bag_items_owed_dropped: "模块在 {PLAYER} 再次加入之前停止；以下放入背包页但未存储的物品未能归还：{ITEMS}"
+log_bag_items_owed_dropped: "模块在 {PLAYER} 再次加入之前停止；放入 {OWNER} 的背包第 {PAGE} 页但未存储的以下物品未能归还：{ITEMS}"
 log_bag_deserialize_failed: "反序列化背包物品失败"
 log_skipped_slot: "跳过背包第 {PAGE} 页中无法读取的槽位：键 '{KEY}'（{REASON}）；该页其余内容保留"
 log_skipped_slot_not_a_number: "不是槽位编号"

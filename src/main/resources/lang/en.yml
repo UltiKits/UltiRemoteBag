@@ -128,7 +128,7 @@ log_bag_save_pending: "Could not save bag page {PAGE} of {OWNER} edited by {PLAY
 log_bag_save_landed: "Saved the kept changes of bag page {PAGE} of {OWNER}"
 log_bag_save_abandoned: "The module stopped before the kept changes of bag page {PAGE} of {OWNER} edited by {PLAYER} could be saved; the page as edited held: {ITEMS}. Items given back to {PLAYER}: {RETURNED}"
 log_bag_items_owed: "{PLAYER} is not on this server, so the items put into bag page {PAGE} of {OWNER} that were not stored are kept for their next join here: {ITEMS}"
-log_bag_items_owed_dropped: "The module stopped before {PLAYER} joined again; these items put into a bag page and not stored could not be given back: {ITEMS}"
+log_bag_items_owed_dropped: "The module stopped before {PLAYER} joined again; the items put into bag page {PAGE} of {OWNER} and not stored could not be given back: {ITEMS}"
 log_bag_deserialize_failed: "Failed to deserialize bag items"
 log_skipped_slot: "Skipping unreadable slot in bag page {PAGE}: key '{KEY}' ({REASON}); the rest of the page is kept"
 log_skipped_slot_not_a_number: "not a slot number"
