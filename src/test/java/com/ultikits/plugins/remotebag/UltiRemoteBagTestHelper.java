@@ -154,6 +154,12 @@ public final class UltiRemoteBagTestHelper {
         field.set(null, value);
     }
 
+    public static Object getStaticField(Class<?> clazz, String fieldName) throws Exception {
+        Field field = clazz.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(null);
+    }
+
     public static void setField(Object target, String fieldName, Object value) throws Exception {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);

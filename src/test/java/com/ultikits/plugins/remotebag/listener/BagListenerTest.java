@@ -96,5 +96,25 @@ class BagListenerTest {
             order.verify(lockService).releaseAll(playerUuid);
             order.verify(bagService).clearCache(playerUuid);
         }
+
+        @Test
+        @DisplayName("F8 (UltiRemoteBag#54, gate 1): the locks, claims and cache are released even if saving the open page throws")
+        void releasesEvenIfTheQuitSaveThrows() throws Exception {
+            PlayerQuitEvent event = mock(PlayerQuitEvent.class);
+            when(event.getPlayer()).thenReturn(player);
+            mc.obliviate.inventory.InventoryAPI broken = mock(mc.obliviate.inventory.InventoryAPI.class);
+            when(broken.getPlayersCurrentGui(any())).thenThrow(new IllegalStateException("test: the quit save fails"));
+            Object before = UltiRemoteBagTestHelper.getStaticField(mc.obliviate.inventory.InventoryAPI.class, "instance");
+            UltiRemoteBagTestHelper.setStaticField(mc.obliviate.inventory.InventoryAPI.class, "instance", broken);
+            try {
+                org.assertj.core.api.Assertions.assertThatThrownBy(() -> listener.onPlayerQuit(event))
+                        .isInstanceOf(IllegalStateException.class);
+            } finally {
+                UltiRemoteBagTestHelper.setStaticField(mc.obliviate.inventory.InventoryAPI.class, "instance", before);
+            }
+
+            verify(lockService).releaseAll(playerUuid);
+            verify(bagService).clearCache(playerUuid);
+        }
     }
 }

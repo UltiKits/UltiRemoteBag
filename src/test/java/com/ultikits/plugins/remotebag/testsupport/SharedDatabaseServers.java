@@ -95,6 +95,8 @@ public final class SharedDatabaseServers {
     public static final int PAGE_SIZE = RemoteBagConfig.PAGE_CAPACITY;
     /** Bottom row slot 4 -- the Save icon in edit mode. */
     public static final int TOOLBAR_SAVE_SLOT = 49;
+    /** The real-time deadline of one storage call in these tests, in milliseconds. */
+    public static final long CALL_DEADLINE_MILLIS = 300L;
 
     /** Which storage the servers share. */
     public enum Backend {
@@ -255,7 +257,23 @@ public final class SharedDatabaseServers {
             UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "nanoTime", (java.util.function.LongSupplier) nanos::get);
             UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "mainThread", (Executor) mainThreadTasks::add);
             UltiRemoteBagTestHelper.setFieldIfPresent(lockService, "claimService", claimService);
+            // The page writes the claim service keeps and retries (UltiKits/UltiRemoteBag#54, gate-1 F2), and a
+            // short real-time deadline for every storage call, so a call that never returns is given up on
+            // within the test's patience.
+            UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "bagService", bagService);
+            UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "callDeadlineMillis", CALL_DEADLINE_MILLIS);
             listener = new BagListener(bagService, lockService);
+        }
+
+        /** The player joins this server again (the module's join handler, if it has one). */
+        public void join(PlayerMock player) throws Exception {
+            java.lang.reflect.Method onJoin;
+            try {
+                onJoin = BagListener.class.getMethod("onPlayerJoin", org.bukkit.event.player.PlayerJoinEvent.class);
+            } catch (NoSuchMethodException none) {
+                return;
+            }
+            onJoin.invoke(listener, new org.bukkit.event.player.PlayerJoinEvent(player, "join"));
         }
 
         /** Moves this server's monotonic clock on (its wall clock is left alone). */
