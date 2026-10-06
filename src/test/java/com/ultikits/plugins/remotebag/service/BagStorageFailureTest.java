@@ -736,8 +736,9 @@ class BagStorageFailureTest {
     }
 
     @Test
-    @DisplayName("R2-2: another server's takeover cannot slip in between a save's fence and its page write")
-    void aTakeoverCannotSlipBetweenTheFenceAndThePageWrite() throws Exception {
+    @DisplayName("R2-2: another server's takeover started while a save runs does not succeed (the fence moved the counter it waits on); "
+            + "that fence and page write are one transaction is proven by aSaveIsFencedOnTheClaimInOneTransaction")
+    void aTakeoverStartedDuringASaveDoesNotSucceed() throws Exception {
         assumeRelational();
         StorageFaults bagsA = bagsOf(serverA).onlyMethods("updateIf");
         Window editing = ownerEditsPage(serverA);
@@ -778,6 +779,106 @@ class BagStorageFailureTest {
 
         assertThat(count(owner.getInventory(), Material.EMERALD)).as("given back at disable").isEqualTo(1);
         assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).isEqualTo(1);
+    }
+
+    // ==================== Gate 1 round 3 ====================
+
+    /**
+     * Models MySQL's {@code socketTimeout} on {@code server}'s page store: its next transaction runs on a thread of its
+     * own (the database server), and the caller is told it failed after 200 ms while that transaction goes on.
+     *
+     * @return the "database server" thread, once the transaction has started
+     */
+    private java.util.concurrent.atomic.AtomicReference<Thread> clientGivesUpOnTheNextTransaction(Server server) throws Exception {
+        Object real = com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.getField(server.bagService, "dataOperator");
+        java.util.concurrent.atomic.AtomicReference<Thread> databaseSide = new java.util.concurrent.atomic.AtomicReference<>();
+        Object proxy = java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
+                new Class<?>[] {com.ultikits.ultitools.interfaces.DataOperator.class}, (self, method, args) -> {
+                    if (method.getName().equals("transaction") && args != null && args.length == 1
+                            && args[0] instanceof java.util.concurrent.Callable && databaseSide.get() == null) {
+                        Thread transaction = new Thread(() -> {
+                            try {
+                                method.invoke(real, args);
+                            } catch (Exception ignored) {
+                                // The database side's own outcome; the test reads the store.
+                            }
+                        }, "modelled database-side transaction");
+                        databaseSide.set(transaction);
+                        transaction.start();
+                        transaction.join(200L);
+                        if (transaction.isAlive()) {
+                            throw new com.ultikits.ultitools.exceptions.DataAccessException(
+                                    com.ultikits.ultitools.exceptions.ErrorCode.DATA_OPERATION_FAILED,
+                                    "test: socket timeout -- the client gave up, the database goes on",
+                                    new java.sql.SQLException("test: read timed out"));
+                        }
+                        return null;
+                    }
+                    try {
+                        return method.invoke(real, args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+        com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.setField(server.bagService, "dataOperator", proxy);
+        return databaseSide;
+    }
+
+    /** How many record rows (a session's save receipt: an id without {@code :}) the claims table holds. */
+    private long receiptRows() {
+        return servers.claimStore().getAll().stream().filter(row -> !row.getId().contains(":")).count();
+    }
+
+    @Test
+    @DisplayName("R3-1 (PC): a save still running on the database when the module stops is not given back; it commits afterwards and exists once")
+    void aSaveStillRunningOnTheDatabaseAtDisableIsNotGivenBack() throws Exception {
+        assumeRelational();
+        StorageFaults receiptInsert = claimsOf(serverA).onlyMethods("insert");
+        java.util.concurrent.atomic.AtomicReference<Thread> databaseSide = clientGivesUpOnTheNextTransaction(serverA);
+        Window editing = ownerEditsPage(serverA);
+        // The database has fenced the claim and written the page; its receipt write -- the last statement -- waits.
+        receiptInsert.set(StorageFaults.Mode.HANG);
+        editing.close();
+
+        serverA.shutdown();
+        assertThat(count(owner.getInventory(), Material.EMERALD)).as("not given back: the save may still commit").isZero();
+        verify(serverA.logger, atLeastOnce()).error(contains("log_bag_save_abandoned"));
+
+        receiptInsert.heal();
+        databaseSide.get().join(5_000L);
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.EMERALD)).as("the save committed after the stop").isEqualTo(1);
+        assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).as("one emerald").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("R3-2: a claim found lost with no save pending leaves no receipt row behind")
+    void aLostClaimLeavesNoReceiptRow() throws Exception {
+        Window editing = ownerEditsPage(serverA);
+        editing.save();
+        assertThat(receiptRows()).as("precondition: the save wrote its receipt").isEqualTo(1L);
+        assertThat(bTakesOver(false)).isTrue();
+        serverA.advance(TIMEOUT_MS / 3 + 1);
+        serverA.renewOffMainThread();
+        serverA.runMainThread();
+        editing.close();
+        backgroundPass(serverA);
+
+        assertThat(receiptRows()).as("the receipt of a session that lost its claim is deleted").isZero();
+    }
+
+    @Test
+    @DisplayName("R3-3: the display cache shows a page only once its save committed")
+    void theCacheIsUpdatedOnlyAfterTheCommit() throws Exception {
+        StorageFaults receiptInsert = claimsOf(serverA).onlyMethods("insert");
+        serverA.bagService.loadBagIfNeeded(ownerId());
+        Window editing = ownerEditsPage(serverA);
+        receiptInsert.set(StorageFaults.Mode.THROW);
+
+        editing.close();
+
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.EMERALD)).as("rolled back").isZero();
+        assertThat(count(serverA.bagService.getBagPage(ownerId(), PAGE), Material.EMERALD))
+                .as("the cache does not show the rolled-back page").isZero();
     }
 
     private PlayerMock otherPlayer() {
