@@ -45,7 +45,6 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
-import java.util.ArrayDeque;
 import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.ArrayList;
@@ -227,7 +226,7 @@ public final class SharedDatabaseServers {
         /** This server's monotonic clock, in nanoseconds; its origin is arbitrary, as {@code System.nanoTime}'s is. */
         public final AtomicLong nanos;
         /** Work handed to this server's main thread, run only when the test drains it. */
-        public final Queue<Runnable> mainThreadTasks = new ArrayDeque<>();
+        public final Queue<Runnable> mainThreadTasks = new java.util.concurrent.ConcurrentLinkedQueue<>();
         private final DataOperator<RemoteBagData> serverBags;
 
         private Server(String name) throws Exception {
@@ -250,6 +249,8 @@ public final class SharedDatabaseServers {
                     ? new PrimaryKeyStore<>(openSqlite(RemoteBagEditClaim.class), false, hooks)
                     : new PrimaryKeyStore<>(claims, backend == Backend.JSON, hooks);
             UltiRemoteBagTestHelper.setField(claimService, "claims", serverClaims);
+            // What the container's plugin hands out, so the claim service's own start (init) works here.
+            lenient().when(plugin.getDataOperator(RemoteBagEditClaim.class)).thenReturn(serverClaims);
             UltiRemoteBagTestHelper.setField(claimService, "clock", (java.util.function.LongSupplier) wallClock::get);
             UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "nanoTime", (java.util.function.LongSupplier) nanos::get);
             UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "mainThread", (Executor) mainThreadTasks::add);
@@ -267,6 +268,16 @@ public final class SharedDatabaseServers {
             Thread renewer = new Thread(claimService::renewDue, name + "-renewal-test-thread");
             renewer.start();
             renewer.join(10_000L);
+        }
+
+        /**
+         * Starts this server's claim service the way the module does at enable ({@code init}), with the
+         * background renewal ticking every {@code tickMillis} of real time; renewals become due on this server's
+         * monotonic clock ({@link #nanos}).
+         */
+        public void startClaimService(long tickMillis) throws Exception {
+            UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "renewTickMillis", tickMillis);
+            claimService.init();
         }
 
         /** The main thread runs the work queued for it (it was stalled until now). */

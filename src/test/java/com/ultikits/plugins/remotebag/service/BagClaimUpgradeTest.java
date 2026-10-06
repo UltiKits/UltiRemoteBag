@@ -143,8 +143,7 @@ class BagClaimUpgradeTest {
             assertThat(sqlite(file, "SELECT * FROM remote_bags ORDER BY id")).as("remote_bags' rows are unchanged")
                     .isEqualTo(rowsBefore);
         } finally {
-            service.releaseAllHeld();
-            UltiRemoteBagTestHelper.setFieldIfPresent(service, "renewer", null);
+            service.shutdown();
         }
     }
 
