@@ -78,6 +78,76 @@ class BagClaimUpgradeTest {
                 .as("the bag table is unchanged").isEqualTo("remote_bags");
     }
 
+    private static java.util.List<String> sqlite(java.nio.file.Path file, String sql) throws Exception {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        try (java.sql.Connection c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + file.toAbsolutePath());
+             java.sql.ResultSet rows = c.createStatement().executeQuery(sql)) {
+            int columns = rows.getMetaData().getColumnCount();
+            while (rows.next()) {
+                StringBuilder line = new StringBuilder();
+                for (int i = 1; i <= columns; i++) {
+                    line.append(i > 1 ? "|" : "").append(rows.getString(i));
+                }
+                out.add(line.toString());
+            }
+        }
+        return out;
+    }
+
+    @Test
+    @DisplayName("Real SQLite: a database with remote_bags only gets remote_bag_claims at start; remote_bags' columns and rows are byte-identical; every page can be claimed")
+    void upgradeOnRealSqlite() throws Exception {
+        com.ultikits.plugins.remotebag.MockBukkitSupport.bootstrapLiveServer();
+        try {
+            upgradeOnRealSqliteWithALiveServer();
+        } finally {
+            com.ultikits.plugins.remotebag.MockBukkitSupport.safeUnmock();
+        }
+    }
+
+    private void upgradeOnRealSqliteWithALiveServer() throws Exception {
+        java.nio.file.Path file = dir.resolve("upgrade.db");
+        org.sqlite.SQLiteDataSource source = new org.sqlite.SQLiteDataSource();
+        source.setUrl("jdbc:sqlite:" + file.toAbsolutePath());
+        // What the current master wrote: the remote_bags table and its rows, nothing else.
+        DataOperator<RemoteBagData> bags =
+                new com.ultikits.ultitools.interfaces.impl.data.sqlite.SQLiteDataOperator<>(source, RemoteBagData.class);
+        UUID owner = UUID.randomUUID();
+        for (int page = 1; page <= 3; page++) {
+            bags.insert(RemoteBagData.create(owner, page, SharedDatabaseServers.serialize(
+                    pageWith(page, new ItemStack(Material.DIAMOND, page)))));
+        }
+        java.util.List<String> columnsBefore = sqlite(file, "PRAGMA table_info(remote_bags)");
+        java.util.List<String> rowsBefore = sqlite(file, "SELECT * FROM remote_bags ORDER BY id");
+        assertThat(sqlite(file, "SELECT name FROM sqlite_master WHERE type='table' AND name='remote_bag_claims'"))
+                .as("precondition: no claims table").isEmpty();
+
+        UltiToolsPlugin plugin = mock(UltiToolsPlugin.class);
+        when(plugin.getDataOperator(RemoteBagEditClaim.class)).thenAnswer(inv ->
+                new com.ultikits.ultitools.interfaces.impl.data.sqlite.SQLiteDataOperator<>(source, RemoteBagEditClaim.class));
+        when(plugin.getLogger()).thenReturn(mock(com.ultikits.ultitools.interfaces.impl.logger.PluginLogger.class));
+        BagEditClaimService service = new BagEditClaimService();
+        UltiRemoteBagTestHelper.setField(service, "plugin", plugin);
+        UltiRemoteBagTestHelper.setField(service, "config", UltiRemoteBagTestHelper.createDefaultConfig());
+        try {
+            service.init();
+
+            assertThat(sqlite(file, "SELECT name FROM sqlite_master WHERE type='table' AND name='remote_bag_claims'"))
+                    .as("the claims table is created at start").containsExactly("remote_bag_claims");
+            for (int page = 1; page <= 3; page++) {
+                assertThat(service.claim(owner, page, owner)).as("page %d can be claimed", page)
+                        .isEqualTo(BagEditClaimService.Outcome.CLAIMED);
+            }
+            assertThat(sqlite(file, "PRAGMA table_info(remote_bags)")).as("remote_bags' columns are unchanged")
+                    .isEqualTo(columnsBefore);
+            assertThat(sqlite(file, "SELECT * FROM remote_bags ORDER BY id")).as("remote_bags' rows are unchanged")
+                    .isEqualTo(rowsBefore);
+        } finally {
+            service.releaseAllHeld();
+            UltiRemoteBagTestHelper.setFieldIfPresent(service, "renewer", null);
+        }
+    }
+
     @Test
     @DisplayName("Data written by the current master (bag rows, no claims): every page opens for editing and no bag row's contents change")
     void upgradeWithoutMigration() throws Exception {

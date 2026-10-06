@@ -12,40 +12,60 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Test support: a store with the one property of the relational backends the bag edit claim relies on
- * that the framework's JSON operator does not have (UltiKits/UltiRemoteBag#54, Phase 17 plan 17-84).
+ * Test support: one server's operator on the shared claims table, with hooks that let "another server"
+ * act between this server's read and its write (UltiKits/UltiRemoteBag#54, Phase 17 plan 17-84).
  * <p>
- * The SQLite and MySQL operators create every table with {@code PRIMARY KEY (id)}, so an insert of an id
- * that is already stored fails with a {@link DataAccessException}; the JSON operator ignores such an insert
- * and returns normally. Everything is forwarded to the real operator, except that {@link #insert} of a
- * stored id throws, as the relational backends do. {@link #beforeNextInsert} runs something -- "another
- * server" -- between this caller's read and its insert, once, which is how two first claims of one page
- * meet.
+ * Everything is forwarded to the real operator. {@link Hooks#beforeNextInsert} and
+ * {@link Hooks#beforeNextUpdateIf} run something once, immediately before the next insert or conditional
+ * write any server makes through a store sharing those hooks -- which is how two claims of one page meet.
+ * On the JSON backend the store can also give the table the relational primary key ({@code enforce}): the
+ * SQLite and MySQL operators create every table with {@code PRIMARY KEY (id)}, so an insert of an id that is
+ * already stored fails, while the JSON operator ignores it and returns normally. Over real SQLite
+ * {@code enforce} is off: the table's own key does it.
  */
 public final class PrimaryKeyStore<T extends BaseDataEntity<String>> implements DataOperator<T> {
 
+    /** Hooks shared by every server's store, so one server's action can run inside another's. */
+    public static final class Hooks {
+        private final AtomicReference<Runnable> beforeNextInsert = new AtomicReference<>();
+        private final AtomicReference<Runnable> beforeNextUpdateIf = new AtomicReference<>();
+        private final AtomicReference<String> lastUpdateIfThread = new AtomicReference<>();
+
+        /** Runs {@code otherServer} once, immediately before the next insert. */
+        public void beforeNextInsert(Runnable otherServer) {
+            beforeNextInsert.set(otherServer);
+        }
+
+        /** Runs {@code otherServer} once, immediately before the next conditional write. */
+        public void beforeNextUpdateIf(Runnable otherServer) {
+            beforeNextUpdateIf.set(otherServer);
+        }
+
+        /** The name of the thread that made the last conditional write, or {@code null}. */
+        public String lastUpdateIfThread() {
+            return lastUpdateIfThread.get();
+        }
+    }
+
     private final DataOperator<T> real;
     private final boolean enforce;
-    private final AtomicReference<Runnable> beforeNextInsert = new AtomicReference<>();
+    private final Hooks hooks;
 
     /**
      * @param real    the operator to forward to
-     * @param enforce whether an insert of a stored id throws (the relational backends) or is passed on
-     *                (the JSON backend, which ignores it)
+     * @param enforce whether an insert of a stored id throws here (JSON standing in for the relational
+     *                backends); off over a real relational table, whose key does it
+     * @param hooks   the hooks shared by every server's store
      */
-    public PrimaryKeyStore(DataOperator<T> real, boolean enforce) {
+    public PrimaryKeyStore(DataOperator<T> real, boolean enforce, Hooks hooks) {
         this.real = real;
         this.enforce = enforce;
-    }
-
-    /** Runs {@code otherServer} once, immediately before the next insert this store is asked for. */
-    public void beforeNextInsert(Runnable otherServer) {
-        beforeNextInsert.set(otherServer);
+        this.hooks = hooks;
     }
 
     @Override
     public void insert(T obj) {
-        Runnable other = beforeNextInsert.getAndSet(null);
+        Runnable other = hooks.beforeNextInsert.getAndSet(null);
         if (other != null) {
             other.run();
         }
@@ -54,6 +74,16 @@ public final class PrimaryKeyStore<T extends BaseDataEntity<String>> implements 
                     "Failed to insert entity: duplicate primary key " + obj.getId());
         }
         real.insert(obj);
+    }
+
+    @Override
+    public boolean updateIf(T entity, WhereCondition... expected) {
+        Runnable other = hooks.beforeNextUpdateIf.getAndSet(null);
+        if (other != null) {
+            other.run();
+        }
+        hooks.lastUpdateIfThread.set(Thread.currentThread().getName());
+        return real.updateIf(entity, expected);
     }
 
     @Override
@@ -114,11 +144,6 @@ public final class PrimaryKeyStore<T extends BaseDataEntity<String>> implements 
     @Override
     public int updateCounted(T entity) {
         return real.updateCounted(entity);
-    }
-
-    @Override
-    public boolean updateIf(T entity, WhereCondition... expected) {
-        return real.updateIf(entity, expected);
     }
 
     @Override

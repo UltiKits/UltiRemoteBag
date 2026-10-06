@@ -103,7 +103,7 @@ class BagEditClaimTest {
             assertThat(claim.getPlayerUuid()).isEqualTo(ownerId().toString());
             assertThat(claim.getPageNumber()).isEqualTo(PAGE);
             assertThat(held(claim)).as("it holds a token").isTrue();
-            assertThat(claim.getClaimedAt()).isEqualTo(serverA.clock.get());
+            assertThat(claim.getClaimedAt()).isEqualTo(serverA.wallClock.get());
         }
 
         @Test
@@ -145,7 +145,7 @@ class BagEditClaimTest {
             start(true);
             Window[] fromB = new Window[1];
             // Server B claims in the moment between server A's read (no row) and A's insert.
-            servers.claimKey().beforeNextInsert(() -> fromB[0] = serverB.openAsAdmin(admin, ownerId(), PAGE));
+            servers.claimHooks().beforeNextInsert(() -> fromB[0] = serverB.openAsAdmin(admin, ownerId(), PAGE));
 
             Window fromA = serverA.openAsOwner(owner, PAGE);
 
@@ -162,7 +162,7 @@ class BagEditClaimTest {
             Window[] fromB = new Window[1];
             // Server B claims in the moment between server A's read (no row) and A's insert, which the JSON
             // store then ignores and returns from normally.
-            servers.claimKey().beforeNextInsert(() -> fromB[0] = serverB.openAsAdmin(admin, ownerId(), PAGE));
+            servers.claimHooks().beforeNextInsert(() -> fromB[0] = serverB.openAsAdmin(admin, ownerId(), PAGE));
 
             Window fromA = serverA.openAsOwner(owner, PAGE);
 
@@ -184,12 +184,12 @@ class BagEditClaimTest {
             serverA.openAsOwner(owner, PAGE);
             // Server A crashes: nothing is closed, released or renewed again (the window is simply abandoned).
 
-            serverB.clock.set(serverA.clock.get() + TIMEOUT_MS - 1_000L);
+            serverB.wallClock.set(serverA.wallClock.get() + TIMEOUT_MS - 1_000L);
             Window early = serverB.openAsAdmin(admin, ownerId(), PAGE);
             assertThat(early.isReadOnly()).as("before the timeout, read-only").isTrue();
             early.close();
 
-            serverB.clock.set(serverA.clock.get() + TIMEOUT_MS + 1_000L);
+            serverB.wallClock.set(serverA.wallClock.get() + TIMEOUT_MS + 1_000L);
             Window late = serverB.openAsAdmin(admin, ownerId(), PAGE);
             assertThat(late.isEdit()).as("after the timeout, B claims and edits").isTrue();
             late.pickUp(SLOT);
@@ -207,14 +207,14 @@ class BagEditClaimTest {
             assertThat(editing.isEdit()).isTrue();
 
             for (int step = 1; step <= 9; step++) {
-                serverA.advance(TIMEOUT_MS / 3);
+                serverA.wallClock.addAndGet(TIMEOUT_MS / 3);
                 serverA.claimService.renewDue();
-                serverB.clock.set(serverA.clock.get());
+                serverB.wallClock.set(serverA.wallClock.get());
                 Window view = serverB.openAsAdmin(admin, ownerId(), PAGE);
                 assertThat(view.isReadOnly()).as("after %d thirds of the timeout B is still read-only", step).isTrue();
                 view.close();
             }
-            assertThat(claim().getClaimedAt()).as("the claim was renewed").isEqualTo(serverA.clock.get());
+            assertThat(claim().getClaimedAt()).as("the claim was renewed").isEqualTo(serverA.wallClock.get());
         }
 
         @Test
@@ -223,13 +223,13 @@ class BagEditClaimTest {
             start(true);
             Window stalled = serverA.openAsOwner(owner, PAGE);
             // Server A stalls; server B's clock moves past the timeout and its administrator takes the page.
-            serverB.clock.set(serverA.clock.get() + TIMEOUT_MS + 1_000L);
+            serverB.wallClock.set(serverA.wallClock.get() + TIMEOUT_MS + 1_000L);
             Window taking = serverB.openAsAdmin(admin, ownerId(), PAGE);
             assertThat(taking.isEdit()).as("precondition: B took the expired claim").isTrue();
             taking.pickUp(SLOT);
             taking.close();
 
-            serverA.advance(TIMEOUT_MS + 1_000L);
+            serverA.wallClock.addAndGet(TIMEOUT_MS + 1_000L);
             serverA.claimService.renewDue();
             verify(serverA.logger, times(1)).error(contains("log_bag_claim_lost"));
             serverA.claimService.renewDue();

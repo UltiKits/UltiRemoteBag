@@ -62,7 +62,7 @@ class RemoteBagSharedDatabaseTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        servers = SharedDatabaseServers.start(dir);
+        servers = SharedDatabaseServers.start(dir, backend());
         serverA = servers.newServer("A");
         serverB = servers.newServer("B");
         owner = servers.live().addPlayer("Owner");
@@ -72,6 +72,11 @@ class RemoteBagSharedDatabaseTest {
     @AfterEach
     void tearDown() throws Exception {
         servers.stop();
+    }
+
+    /** The shared storage; {@link RemoteBagSharedDatabaseSqliteTest} runs every case on real SQLite. */
+    protected SharedDatabaseServers.Backend backend() {
+        return SharedDatabaseServers.Backend.JSON;
     }
 
     private UUID ownerId() {

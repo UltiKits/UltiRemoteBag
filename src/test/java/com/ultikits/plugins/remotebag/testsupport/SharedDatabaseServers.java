@@ -16,6 +16,7 @@ import com.ultikits.ultitools.context.SimpleContainer;
 import com.ultikits.ultitools.entities.WhereCondition;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.interfaces.impl.data.json.SimpleJsonDataOperator;
+import com.ultikits.ultitools.interfaces.impl.data.sqlite.SQLiteDataOperator;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
 
 import mc.obliviate.inventory.InventoryAPI;
@@ -38,8 +39,15 @@ import org.bukkit.inventory.ItemStack;
 import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
+import org.sqlite.SQLiteDataSource;
 
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.util.ArrayDeque;
+import java.util.Queue;
+import java.util.concurrent.Executor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -66,11 +74,17 @@ import static org.mockito.Mockito.mock;
  * that a per-server cache does not.
  *
  * <p>
- * The edit claims ({@code remote_bag_claims}, UltiKits/UltiRemoteBag#54) live in a second shared store, the
- * same framework operator behind a {@link PrimaryKeyStore}, which by default gives it the primary key the
- * relational backends give the table, so that two first claims of one page meet it
- * ({@link #startWithoutPrimaryKey} keeps the JSON behaviour, which ignores a duplicate insert). Each server has its own clock, so a server can be
- * stopped in time ("crashed") while another's moves on.
+ * Two backends. {@link #startSqlite}: one real SQLite file that every server opens through its own framework
+ * {@link SQLiteDataOperator}s (its own connections), as two servers open one MySQL database. {@link #start}:
+ * the framework's JSON operator, one instance shared by every server. The edit claims
+ * ({@code remote_bag_claims}, UltiKits/UltiRemoteBag#54) reach each server through a {@link PrimaryKeyStore}
+ * whose shared hooks let one server act between another's read and write; on JSON it also gives the table the
+ * relational primary key ({@link #startWithoutPrimaryKey} keeps the JSON behaviour).
+ * <p>
+ * Each server has its own wall clock, its own monotonic clock ({@code System.nanoTime} stand-in) and its own
+ * main-thread queue: work the claim service hands to the main thread waits there until the test runs it, so
+ * a stalled main thread is a queue nobody drains. Renewals are run on a separate thread
+ * ({@link Server#renewOffMainThread}).
  *
  * <h2>What is modelled</h2>
  * The two servers share one player list (a player is on one of them at a time in the scenarios), and the
@@ -83,47 +97,95 @@ public final class SharedDatabaseServers {
     /** Bottom row slot 4 -- the Save icon in edit mode. */
     public static final int TOOLBAR_SAVE_SLOT = 49;
 
+    /** Which storage the servers share. */
+    public enum Backend {
+        /** The framework's JSON operator: one instance, shared. */
+        JSON,
+        /** The framework's JSON operator, with a duplicate insert ignored as JSON does (no primary key). */
+        JSON_WITHOUT_PRIMARY_KEY,
+        /** One real SQLite file, opened by every server through its own operators. */
+        SQLITE
+    }
+
     private final ServerMock server;
     private final InventoryAPI inventoryApi;
     private final RemoteBagConfig config;
+    private final Backend backend;
+    private final Path sqliteFile;
+    private final PrimaryKeyStore.Hooks hooks = new PrimaryKeyStore.Hooks();
+    /** The test's own view of the shared tables (JSON: the shared instances). */
     private final DataOperator<RemoteBagData> bags;
-    private final DataOperator<RemoteBagEditClaim> claimsJson;
-    private final PrimaryKeyStore<RemoteBagEditClaim> claimsWithKey;
+    private final DataOperator<RemoteBagEditClaim> claims;
 
-    private SharedDatabaseServers(Path storeDir, boolean primaryKey) throws Exception {
+    private SharedDatabaseServers(Path storeDir, Backend backend) throws Exception {
         server = MockBukkitSupport.bootstrapLiveServer();
         UltiRemoteBagTestHelper.setUp();
         inventoryApi = new InventoryAPI(MockBukkit.createMockPlugin("ObliviateHost"));
         inventoryApi.init();
         config = UltiRemoteBagTestHelper.createDefaultConfig();
-        bags = new SimpleJsonDataOperator<>(storeDir.resolve("remote_bags").toString(), RemoteBagData.class);
-        claimsJson = new SimpleJsonDataOperator<>(storeDir.resolve("remote_bag_claims").toString(), RemoteBagEditClaim.class);
-        claimsWithKey = new PrimaryKeyStore<>(claimsJson, primaryKey);
+        this.backend = backend;
+        this.sqliteFile = storeDir.resolve("shared.db");
+        if (backend == Backend.SQLITE) {
+            bags = openSqlite(RemoteBagData.class);
+            claims = openSqlite(RemoteBagEditClaim.class);
+        } else {
+            bags = new SimpleJsonDataOperator<>(storeDir.resolve("remote_bags").toString(), RemoteBagData.class);
+            claims = new SimpleJsonDataOperator<>(storeDir.resolve("remote_bag_claims").toString(), RemoteBagEditClaim.class);
+        }
     }
 
-    /** Boots the live server and empty shared stores in {@code storeDir}; claims have a primary key. */
+    /** Boots the live server and empty shared JSON stores in {@code storeDir}; claims have a primary key. */
     public static SharedDatabaseServers start(Path storeDir) throws Exception {
-        return new SharedDatabaseServers(storeDir, true);
+        return start(storeDir, Backend.JSON);
     }
 
     /** As {@link #start}, but the claims store ignores a duplicate insert, as the JSON backend does. */
     public static SharedDatabaseServers startWithoutPrimaryKey(Path storeDir) throws Exception {
-        return new SharedDatabaseServers(storeDir, false);
+        return start(storeDir, Backend.JSON_WITHOUT_PRIMARY_KEY);
     }
 
-    /** The shared claims store, as every server sees it. */
+    /** Boots the live server and one empty SQLite file in {@code storeDir} that every server opens. */
+    public static SharedDatabaseServers startSqlite(Path storeDir) throws Exception {
+        return start(storeDir, Backend.SQLITE);
+    }
+
+    public static SharedDatabaseServers start(Path storeDir, Backend backend) throws Exception {
+        return new SharedDatabaseServers(storeDir, backend);
+    }
+
+    public Backend backend() {
+        return backend;
+    }
+
+    /** A new framework SQLite operator (its own connections) on the shared file. */
+    public <T extends com.ultikits.ultitools.abstracts.data.BaseDataEntity<String>> DataOperator<T> openSqlite(Class<T> type) {
+        SQLiteDataSource source = new SQLiteDataSource();
+        source.setUrl("jdbc:sqlite:" + sqliteFile.toAbsolutePath());
+        return new SQLiteDataOperator<>(source, type);
+    }
+
+    /** Whether the shared SQLite file has a table of this name (SQLite backend only). */
+    public boolean sqliteTableExists(String table) throws Exception {
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + sqliteFile.toAbsolutePath());
+             ResultSet rows = connection.createStatement().executeQuery(
+                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = '" + table + "'")) {
+            return rows.next();
+        }
+    }
+
+    /** The shared claims table, as the test reads it (no hooks). */
     public DataOperator<RemoteBagEditClaim> claimStore() {
-        return claimsWithKey;
+        return claims;
     }
 
-    /** The claims store's wrapper, for running another server between a read and an insert. */
-    public PrimaryKeyStore<RemoteBagEditClaim> claimKey() {
-        return claimsWithKey;
+    /** The hooks shared by every server's claims store. */
+    public PrimaryKeyStore.Hooks claimHooks() {
+        return hooks;
     }
 
     /** The stored claim of a page, or {@code null}. */
     public RemoteBagEditClaim claimRow(UUID ownerUuid, int page) {
-        return claimsJson.getById(ownerUuid + ":" + page);
+        return claims.getById(ownerUuid + ":" + page);
     }
 
     /** Tears the live server down. */
@@ -160,32 +222,59 @@ public final class SharedDatabaseServers {
         public final BagLockService lockService;
         public final BagListener listener;
         public final BagEditClaimService claimService;
-        /** This server's clock, in epoch milliseconds; tests move it on. */
-        public final AtomicLong clock = new AtomicLong(1_000_000_000_000L);
+        /** This server's wall clock, in epoch milliseconds. */
+        public final AtomicLong wallClock = new AtomicLong(1_700_000_000_000L);
+        /** This server's monotonic clock, in nanoseconds; its origin is arbitrary, as {@code System.nanoTime}'s is. */
+        public final AtomicLong nanos;
+        /** Work handed to this server's main thread, run only when the test drains it. */
+        public final Queue<Runnable> mainThreadTasks = new ArrayDeque<>();
+        private final DataOperator<RemoteBagData> serverBags;
 
         private Server(String name) throws Exception {
             this.name = name;
+            this.nanos = new AtomicLong(Math.abs((long) name.hashCode()) * 1_000_000_007L);
+            this.serverBags = backend == Backend.SQLITE ? openSqlite(RemoteBagData.class) : bags;
             plugin = mock(UltiRemoteBag.class);
             logger = mock(PluginLogger.class);
             lenient().when(plugin.getLogger()).thenReturn(logger);
             lenient().when(plugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
             bagService = new RemoteBagService(plugin, config);
-            UltiRemoteBagTestHelper.setField(bagService, "dataOperator", bags);
+            UltiRemoteBagTestHelper.setField(bagService, "dataOperator", serverBags);
             lockService = new BagLockService();
             UltiRemoteBagTestHelper.setField(lockService, "plugin", plugin);
             UltiRemoteBagTestHelper.setField(lockService, "config", config);
             claimService = new BagEditClaimService();
             UltiRemoteBagTestHelper.setField(claimService, "plugin", plugin);
             UltiRemoteBagTestHelper.setField(claimService, "config", config);
-            UltiRemoteBagTestHelper.setField(claimService, "claims", claimStore());
-            UltiRemoteBagTestHelper.setField(claimService, "clock", (java.util.function.LongSupplier) clock::get);
+            DataOperator<RemoteBagEditClaim> serverClaims = backend == Backend.SQLITE
+                    ? new PrimaryKeyStore<>(openSqlite(RemoteBagEditClaim.class), false, hooks)
+                    : new PrimaryKeyStore<>(claims, backend == Backend.JSON, hooks);
+            UltiRemoteBagTestHelper.setField(claimService, "claims", serverClaims);
+            UltiRemoteBagTestHelper.setField(claimService, "clock", (java.util.function.LongSupplier) wallClock::get);
+            UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "nanoTime", (java.util.function.LongSupplier) nanos::get);
+            UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "mainThread", (Executor) mainThreadTasks::add);
             UltiRemoteBagTestHelper.setFieldIfPresent(lockService, "claimService", claimService);
             listener = new BagListener(bagService, lockService);
         }
 
-        /** Moves this server's clock on. */
+        /** Moves this server's monotonic clock on (its wall clock is left alone). */
         public void advance(long millis) {
-            clock.addAndGet(millis);
+            nanos.addAndGet(millis * 1_000_000L);
+        }
+
+        /** Runs one renewal pass of this server's claims on a thread that is not the main (test) thread. */
+        public void renewOffMainThread() throws InterruptedException {
+            Thread renewer = new Thread(claimService::renewDue, name + "-renewal-test-thread");
+            renewer.start();
+            renewer.join(10_000L);
+        }
+
+        /** The main thread runs the work queued for it (it was stalled until now). */
+        public void runMainThread() {
+            Runnable task;
+            while ((task = mainThreadTasks.poll()) != null) {
+                task.run();
+            }
         }
 
         /** The owner opens their own page on this server, as {@code /bag <page>} does. */
