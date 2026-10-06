@@ -346,14 +346,18 @@ class BagEditClaimTest {
         assertThat(serverA.openAsOwner(owner, PAGE).isEdit()).isTrue();
         assertThat(serverA.openAsAdmin(admin, ownerId(), 2).isEdit()).isTrue();
         serverA.startClaimService(20L);
+        // The task itself, held before disable: the service drops its own reference when it stops it.
+        ScheduledExecutorService renewer =
+                (ScheduledExecutorService) UltiRemoteBagTestHelper.getField(serverA.claimService, "renewer");
+        assertThat(renewer).as("precondition: the background task runs").isNotNull();
+        assertThat(renewer.isShutdown()).isFalse();
 
         serverA.shutdown();
 
         assertThat(held(claim())).as("page 1's claim is released").isFalse();
         assertThat(held(servers.claimRow(ownerId(), 2))).as("page 2's claim is released").isFalse();
-        ScheduledExecutorService renewer =
-                (ScheduledExecutorService) UltiRemoteBagTestHelper.getField(serverA.claimService, "renewer");
-        assertThat(renewer == null || renewer.isShutdown()).as("the background task ended").isTrue();
+        assertThat(renewer.isTerminated()).as("the background task ended").isTrue();
+        assertThat(UltiRemoteBagTestHelper.getField(serverA.claimService, "renewer")).as("and is not kept").isNull();
         long counter = claim().getRenewals();
         serverA.advance(TIMEOUT_MS);
         Thread.sleep(150L);
