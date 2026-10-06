@@ -267,27 +267,40 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
 
 #### Known limitations
 
-- A writer that does not use the claim can still change a page while a window has it open: a server running an
-  older version of this module (for example during a rolling upgrade -- upgrade every server together), another
-  plugin writing `remote_bags`, or someone editing the table by hand (`sqlite3`, a MySQL client). The window's
-  save is then refused and its put-in items are given back, but an item taken out of the page during that session
-  stays with the player while the other writer's page may still hold it: that item can exist twice.
-- A server cut off from the database for a full `lock.timeout_seconds` while another server still reaches it, or
-  frozen as a whole (its background threads included) for that long, has its claim taken over. Its window turned
-  read-only when the first renewal failed, so nothing is edited after that; when the database answers again, the
-  claim is found lost and the items put in during the session are given back (unless the record shows the save
-  had been written), with the same limitation for items taken out since the last save and before the window turned read-only (up to about half `lock.timeout_seconds` after the cut).
-- **Accepted residual (maintainer, 2026-10-06): a stop or crash during a database outage while a save is kept.** Any
-  kept save not written by the end of the stop's flush, and any kept save at a crash: its put-in items are lost
-  (logged with the items; the one exception is a stop that can still decide the save was not written while the
-  player is online, which gives them back), and the items taken out during that session can exist twice. In practice
-  this is at most one page per player: a player has one page open at a time, and no page opens while the database
-  does not answer. Items
-  owed to a player who left are also held in memory until they join again: a restart loses them; each is logged,
-  with the player, the page and the items, when it becomes owed and again when the module stops.
-- On the JSON storage backend, which belongs to one server, the fence and the page write are not one transaction
-  (JSON has none across two tables); with one server that changes nothing.
-- On MySQL the comparison of a page's stored contents follows the column's collation, which ignores letter case.
+When several servers share one database, the module keeps every item in exactly one place in normal play, and
+across crashes, restarts and a database that stops answering. A few rare situations remain in which an item can be
+lost or can exist twice. They are listed here so you can avoid them.
+
+**What to do:** keep the shared database responsive and on a low-latency link to every server; set `socketTimeout`
+and a moderate `wait_timeout` on MySQL (see above); upgrade every server sharing the database together; do not edit
+the bag tables by hand while servers are running.
+
+- **Something other than this module changes a page while a window has it open**: a server still on an older
+  version of this module during a rolling upgrade, another plugin writing `remote_bags`, or a hand edit of the
+  table. The window's save is refused and the items put in go back to the player, but an item taken out in that
+  session can exist twice.
+- **The database is very slow at the moment a page is opened.** If opening a page waits more than about two
+  seconds for the database, it opens read-only. If that slow call then completes after the player has quickly
+  reopened the same page, the reopened window can lose its claim. In rare cases an item the player takes out of
+  it can then exist twice.
+- **One server is cut off from a database the other servers still reach, for a full `lock.timeout_seconds`** (or
+  the whole server process freezes for that long). Another server takes the page over. The cut-off server's window
+  turns read-only when its first renewal fails, and the items put in are given back once the database answers.
+  Items taken out between its last save and the moment it turned read-only can exist twice; that is at most
+  about half `lock.timeout_seconds` after the cut.
+- **The server stops or crashes during a database outage while a save is still waiting to be written** (accepted by
+  the maintainer). A save not written by the end of the stop's five-second flush, or pending at a crash: its put-in
+  items are lost and its taken-out items can exist twice, all logged with the items. The one exception is a stop
+  that can still tell the save was not written while the player is online: then the put-in items go back. In
+  practice this is at most one page per player, because a player has one page open at a time and no page opens
+  while the database does not answer. With a database that does not answer at all, a stop can take up to about 16
+  seconds.
+- **Items owed to a player who left** (their save was refused after they quit) are held in memory until they join
+  this server again. A restart loses them; each is logged with the player, the page and the items when it becomes
+  owed and again at module stop.
+- **Two small technical notes.** On MySQL, comparing a page's stored contents follows the column's collation, which
+  ignores letter case. On the JSON backend, which belongs to one server, the claim check and the page write are
+  not one transaction; with one server that changes nothing.
 
 多台服务器共享 MySQL 时（UltiKits/UltiRemoteBag#54）：同一背包页同一时间只能在一台服务器上编辑——打开编辑时在数据库表
 `remote_bag_claims` 中占用该页；另一台服务器占用期间，本服务器对所有者和管理员都以只读方式打开。单台服务器上的规则不变（所有者优先于
@@ -303,12 +316,7 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
 本服务器的会话且计数器仍是其最后确认的值时推进计数器，再在页面仍是窗口读取时的内容时写入页面，并记录这次保存已写入；因此在 SQLite 和 MySQL 上，
 保存只会在本服务器持有该页占用时生效，无论它多晚执行——另一台服务器接手之后，被耽搁的保存不会写入任何内容；报告了数据库错误的保存是否实际已写入，
 从这条记录中读取而不是猜测：重试和占用丢失后的放弃都只在该保存的事务结束后读取（占用行的锁保证这一顺序）；模块停止时，在先锁定占用行的事务中读取，因此会等待仍在数据库上运行的保存（MySQL 的 `socketTimeout` 可能放弃一个随后被数据库提交的保存）。在停止期限内无法判定的保存不会被归还，而是连同物品作为未判定记录在日志中。如果服务器网络可能留下半开连接，请为 MySQL 连接设置套接字或语句超时（例如 JDBC URL 中的
-`socketTimeout`），框架本身不设置；保存进行中断开的连接还会让该页的占用行在数据库上保持锁定，直到数据库丢弃该会话，期间任何服务器都无法接手该页——结束这种失效会话并释放其锁的是 MySQL 的 `wait_timeout`（默认 28800 秒，即八小时），请将其设为适中的值；`innodb_lock_wait_timeout` 只限制其他服务器每次等待该锁的时长。升级无需迁移。已知限制：不使用占用的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags`
-的其他插件、手动编辑数据表）仍可能在窗口打开时改动该页——保存会被拒绝、放入的物品会归还，但该会话中取出的物品留在玩家身上，而对方写入的页面
-可能仍含有它，从而出现两份；与数据库断开整整一个超时而另一台服务器仍可访问，或整个服务器进程（包括后台线程）冻结这么久时，占用会被接手——
-窗口在第一次续期失败时已变为只读，数据库恢复后发现占用丢失，归还会话中放入的物品（除非记录表明保存已写入），自上次保存起、到窗口变为只读为止（断开后最多约半个 `lock.timeout_seconds`）取出的物品同样可能出现两份；
-维护者已接受的残留风险：在数据库故障期间停止模块或服务器崩溃，而某个保留的保存仍未写入时——即到停止时的冲刷结束仍未写入的任何保留保存，以及崩溃——放入的物品会丢失（连同物品记录在日志中；例外：停止时仍能判定其未写入且玩家在线，则归还给玩家），取出的物品可能出现两份；实际上每名玩家最多一页（玩家同一时间只打开一页，数据库不响应时也无法打开新页）；欠离线玩家的物品同样保存在内存中，直到其再次加入——重启会丢失它们，每一件在欠下时和模块停止时都会连同玩家、页码与物品
-记录在日志中；JSON 存储只属于一台服务器，其栅栏与页面写入不在同一个事务中，这在单台服务器上没有影响。
+`socketTimeout`），框架本身不设置；保存进行中断开的连接还会让该页的占用行在数据库上保持锁定，直到数据库丢弃该会话，期间任何服务器都无法接手该页——结束这种失效会话并释放其锁的是 MySQL 的 `wait_timeout`（默认 28800 秒，即八小时），请将其设为适中的值；`innodb_lock_wait_timeout` 只限制其他服务器每次等待该锁的时长。升级无需迁移。已知限制（均为罕见情况，均会记录日志）。运维建议：让共享数据库保持响应迅速、与每台服务器之间低延迟；为 MySQL 设置 `socketTimeout` 和适中的 `wait_timeout`；共享数据库的所有服务器一起升级；服务器运行时不要手动编辑背包数据表。一、本模块以外的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags` 的其他插件、手动编辑数据表）在窗口打开时改动该页：保存被拒绝、放入的物品归还，但该会话中取出的物品可能出现两份。二、打开页面时数据库非常慢：等待超过约两秒的打开会以只读方式打开；如果这次缓慢的调用在玩家迅速重新打开同一页之后才完成，重新打开的窗口可能失去占用，在罕见情况下玩家从中取出的物品可能出现两份。三、某台服务器与其他服务器仍可访问的数据库断开整整一个 `lock.timeout_seconds`（或整个服务器进程冻结这么久）：另一台服务器接手该页；断开的服务器在第一次续期失败时窗口变为只读，数据库恢复后归还放入的物品，自上次保存到变为只读之间（断开后最多约半个超时）取出的物品可能出现两份。四、在数据库故障期间停止或崩溃，而某个保存仍在等待写入（维护者已接受）：到停止时五秒冲刷结束仍未写入的保存、或崩溃时待写入的保存，放入的物品丢失、取出的物品可能出现两份，均连同物品记录在日志中；例外：停止时仍能判定其未写入且玩家在线，则归还放入的物品；实际上每名玩家最多一页；数据库完全不响应时，停止最多约 16 秒。五、欠离线玩家的物品保存在内存中直到其再次加入本服务器，重启会丢失，欠下时和模块停止时都会连同玩家、页码与物品记录在日志中。六、两条技术说明：MySQL 上页面内容的比较遵循列的排序规则（不区分大小写）；JSON 存储只属于一台服务器，其占用检查与页面写入不在同一个事务中，单台服务器上没有影响。
 
 ## 🔧 开发者 API
 
