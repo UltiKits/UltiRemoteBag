@@ -169,8 +169,9 @@ public class BagEditClaimService {
          * @param holderUuid the player whose editing session held the claim
          * @param ownerUuid  the bag owner
          * @param page       the page number
+         * @param token      the lost claim's session token: only the window holding that claim acts on it
          */
-        void claimLost(UUID holderUuid, UUID ownerUuid, int page);
+        void claimLost(UUID holderUuid, UUID ownerUuid, int page, String token);
     }
 
     /** Called on the main thread when one of this server's claims could not be confirmed (once per claim). */
@@ -179,8 +180,9 @@ public class BagEditClaimService {
          * @param holderUuid the player whose editing session holds the claim
          * @param ownerUuid  the bag owner
          * @param page       the page number
+         * @param token      the claim's session token: only the window holding that claim acts on it
          */
-        void claimTroubled(UUID holderUuid, UUID ownerUuid, int page);
+        void claimTroubled(UUID holderUuid, UUID ownerUuid, int page, String token);
     }
 
     /** Gives items back to a player on the main thread. */
@@ -1024,6 +1026,47 @@ public class BagEditClaimService {
         }
     }
 
+    /**
+     * Releases a claim on the storage pool without waiting for it (the background pass): a release that does not
+     * answer only keeps the claim until it answers or another server takes it over after a timeout. Its failure is
+     * logged by the call itself.
+     */
+    private void releaseWithoutWaiting(Held claim) {
+        if (claims == null) {
+            return;
+        }
+        claim.released = true;
+        submit(() -> {
+            try {
+                claims.updateIf(claimRow(claim.ownerUuid, claim.page, "", claim.renewals + 1),
+                        WhereCondition.builder().column("holder_token").value(claim.token).build(),
+                        WhereCondition.builder().column("holder_run").value(run).build());
+            } catch (RuntimeException e) {
+                log(e, plugin.i18n("log_bag_claim_release_failed"), claim.ownerUuid, claim.page);
+            } finally {
+                try {
+                    forgetRecord(claim.token);
+                } catch (RuntimeException ignored) {
+                    // Best effort: a receipt nobody reads takes up one row.
+                }
+            }
+            return null;
+        });
+    }
+
+    /**
+     * The token of the claim this run holds for a page, or {@code null}: what an editing window records when it
+     * opens, so a notice about another session's claim of the same page does not touch it.
+     *
+     * @param ownerUuid the bag owner
+     * @param page      the page number
+     * @return the session token, or {@code null}
+     */
+    public String tokenOf(UUID ownerUuid, int page) {
+        Held claim = held.get(RemoteBagEditClaim.idOf(ownerUuid, page));
+        return claim == null ? null : claim.token;
+    }
+
     /** Releases claims in parallel, waiting for all of them at most one main-thread deadline. */
     private void writeReleases(List<Held> releasing) {
         if (releasing.isEmpty() || claims == null) {
@@ -1233,7 +1276,9 @@ public class BagEditClaimService {
             claim.released = true;
             onMainThread(() -> {
                 plugin.getLogger().error(fill(plugin.i18n("log_bag_claim_lost"), claim.ownerUuid, claim.page));
-                lostListener.claimLost(claim.holderUuid, claim.ownerUuid, claim.page);
+                // The notice names the lost claim's token: a window of a later session of the page holds another
+                // token and is left alone (gate 2 Codex run 2).
+                lostListener.claimLost(claim.holderUuid, claim.ownerUuid, claim.page, claim.token);
             });
         }
         Kept write = kept.get(id);
@@ -1251,7 +1296,7 @@ public class BagEditClaimService {
     private void trouble(Held claim) {
         if (!claim.troubled) {
             claim.troubled = true;
-            onMainThread(() -> troubleListener.claimTroubled(claim.holderUuid, claim.ownerUuid, claim.page));
+            onMainThread(() -> troubleListener.claimTroubled(claim.holderUuid, claim.ownerUuid, claim.page, claim.token));
         }
     }
 
@@ -1481,7 +1526,14 @@ public class BagEditClaimService {
         Held claim = held.get(write.id);
         if (claim != null && claim.token.equals(write.token)) {
             if (claim.sessionEnded && held.remove(write.id, claim)) {
-                writeReleases(java.util.Collections.singletonList(claim));
+                if (stopping) {
+                    // Module disable: waited for within disable's own bound, before the pool is shut down.
+                    writeReleases(java.util.Collections.singletonList(claim));
+                } else {
+                    // Submitted, never waited for: this runs on the background pass, whose schedule a release that
+                    // does not answer must not hold up (gate 2 Codex run 2).
+                    releaseWithoutWaiting(claim);
+                }
             }
         } else if (claims != null && storage != null) {
             // The claim is gone: nothing releases it, so its record row is deleted here (best effort).

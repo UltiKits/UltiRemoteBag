@@ -76,6 +76,13 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * read-only and writes nothing.
      */
     private boolean editRightsLost;
+
+    /**
+     * The token of the edit claim this window's session holds, recorded when it opens; {@code null} for a read-only
+     * window or without a claim service. A background notice acts on this window only if it names this token, so a
+     * notice queued for an earlier session of the same page leaves this one alone (gate 2 Codex run 2).
+     */
+    private String claimToken;
     
     /**
      * 内容区域槽位数（前 5 行 = 45 槽）
@@ -172,6 +179,10 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     @Override
     protected void setupContent(InventoryOpenEvent event) {
+        BagEditClaimService claims = lockService.getClaimService();
+        if (accessMode == AccessMode.EDIT && claims != null) {
+            claimToken = claims.tokenOf(ownerUuid, pageNum);
+        }
         // 加载背包内容到内容区域
         loadBagContents();
         
@@ -762,10 +773,11 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * @param holderUuid the player whose editing session holds the claim
      * @param ownerUuid  the bag owner
      * @param page       the page number
+     * @param token      the claim's session token; a window holding another claim is left alone
      */
-    public static void claimTroubled(UUID holderUuid, UUID ownerUuid, int page) {
+    public static void claimTroubled(UUID holderUuid, UUID ownerUuid, int page, String token) {
         RemoteBagContentGUI window = openWindowOf(holderUuid, ownerUuid, page);
-        if (window != null && window.isEditable()) {
+        if (window != null && window.isEditable() && window.holdsClaim(token)) {
             window.keepAndTurnReadOnly();
         }
     }
@@ -888,12 +900,18 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * @param holderUuid the player whose editing session held the claim
      * @param ownerUuid  the bag owner
      * @param page       the page number
+     * @param token      the lost claim's session token; a window holding another claim is left alone
      */
-    public static void claimLost(UUID holderUuid, UUID ownerUuid, int page) {
+    public static void claimLost(UUID holderUuid, UUID ownerUuid, int page, String token) {
         RemoteBagContentGUI window = openWindowOf(holderUuid, ownerUuid, page);
-        if (window != null && window.isEditable()) {
+        if (window != null && window.isEditable() && window.holdsClaim(token)) {
             window.loseEditRights(true);
         }
+    }
+
+    /** Whether this window's session holds the claim with {@code token}. */
+    private boolean holdsClaim(String token) {
+        return token != null && token.equals(claimToken);
     }
 
     /** Turns this window read-only for good, says so, and gives back what was put in since its last save. */

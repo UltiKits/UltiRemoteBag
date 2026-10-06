@@ -63,7 +63,7 @@ class BagEditClaimServiceFailureTest {
         UltiRemoteBagTestHelper.setField(service, "nanoTime", (LongSupplier) () -> nanos);
         UltiRemoteBagTestHelper.setField(service, "mainThread", (Executor) Runnable::run);
         UltiRemoteBagTestHelper.setField(service, "lostListener",
-                (BagEditClaimService.ClaimLostListener) (holder, owner, page) -> { });
+                (BagEditClaimService.ClaimLostListener) (holder, owner, page, token) -> { });
     }
 
     private RemoteBagEditClaim stored(String run, String token, long renewals) {
@@ -122,7 +122,9 @@ class BagEditClaimServiceFailureTest {
         // Decision 3: "a failed renewal puts the window into read-only immediately" -- a renewal that throws is a
         // failed renewal, not only one that finds the claim changed (gate 1 of plan 17-84, finding F1).
         assertThat(troubled).as("the holder's window is told at once").hasSize(1);
-        assertThat(troubled.get(0)).containsExactly(HOLDER, OWNER, 1);
+        // The notice also names the claim's token (gate 2 Codex run 2), so only that session's window acts on it.
+        assertThat(java.util.Arrays.copyOf(troubled.get(0), 3)).containsExactly(HOLDER, OWNER, 1);
+        assertThat(troubled.get(0)[3]).as("the claim's token").isNotNull();
         verify(logger, org.mockito.Mockito.atLeastOnce()).warn(any(Throwable.class), anyString());
         assertThat(service.isLost(OWNER, 1)).as("unknown is not lost: the claim is kept").isFalse();
 
