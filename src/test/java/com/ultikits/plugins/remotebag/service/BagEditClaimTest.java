@@ -412,9 +412,11 @@ class BagEditClaimTest {
         Window editing = serverA.openAsOwner(owner, PAGE);
         owner.setItemOnCursor(new ItemStack(Material.EMERALD));
         editing.place(OTHER_SLOT);
-        for (int slot = 0; slot < 36; slot++) {
+        // Every slot the inventory has (storage, armour, off-hand): nothing fits.
+        for (int slot = 0; slot < owner.getInventory().getSize(); slot++) {
             owner.getInventory().setItem(slot, new ItemStack(Material.STONE, 64));
         }
+        assertThat(owner.getInventory().addItem(new ItemStack(Material.EMERALD))).as("precondition: the inventory is full").isNotEmpty();
         servers.writePageElsewhere(ownerId(), PAGE, pageWith(SLOT + 1, new ItemStack(Material.GOLD_INGOT)));
 
         editing.close();
