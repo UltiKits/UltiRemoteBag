@@ -165,6 +165,20 @@ public final class SharedDatabaseServers {
         return new SQLiteDataOperator<>(source, type);
     }
 
+    private SQLiteDataSource sqliteSource() {
+        SQLiteDataSource source = new SQLiteDataSource();
+        source.setUrl("jdbc:sqlite:" + sqliteFile.toAbsolutePath());
+        return source;
+    }
+
+    /** A framework SQLite operator on {@code source}, in {@code transactions}' transactions. */
+    private <T extends com.ultikits.ultitools.abstracts.data.BaseDataEntity<String>> DataOperator<T> openSqlite(
+            SQLiteDataSource source, com.ultikits.ultitools.manager.DataSourceTransactionManager transactions, Class<T> type) {
+        SQLiteDataOperator<T> operator = new SQLiteDataOperator<>(source, type);
+        operator.setTransactionManager(transactions);
+        return operator;
+    }
+
     /** Whether the shared SQLite file has a table of this name (SQLite backend only). */
     public boolean sqliteTableExists(String table) throws Exception {
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + sqliteFile.toAbsolutePath());
@@ -234,7 +248,12 @@ public final class SharedDatabaseServers {
         private Server(String name) throws Exception {
             this.name = name;
             this.nanos = new AtomicLong(Math.abs((long) name.hashCode()) * 1_000_000_007L);
-            this.serverBags = backend == Backend.SQLITE ? openSqlite(RemoteBagData.class) : bags;
+            // On SQLite each server's operators share one data source and one transaction manager, as the
+            // framework's SQLiteDataStore wires the operators of one module: a transaction spans both tables.
+            SQLiteDataSource serverSource = backend == Backend.SQLITE ? sqliteSource() : null;
+            com.ultikits.ultitools.manager.DataSourceTransactionManager transactions = backend == Backend.SQLITE
+                    ? new com.ultikits.ultitools.manager.DataSourceTransactionManager(serverSource) : null;
+            this.serverBags = backend == Backend.SQLITE ? openSqlite(serverSource, transactions, RemoteBagData.class) : bags;
             plugin = mock(UltiRemoteBag.class);
             logger = mock(PluginLogger.class);
             lenient().when(plugin.getLogger()).thenReturn(logger);
@@ -248,7 +267,7 @@ public final class SharedDatabaseServers {
             UltiRemoteBagTestHelper.setField(claimService, "plugin", plugin);
             UltiRemoteBagTestHelper.setField(claimService, "config", config);
             DataOperator<RemoteBagEditClaim> serverClaims = backend == Backend.SQLITE
-                    ? new PrimaryKeyStore<>(openSqlite(RemoteBagEditClaim.class), false, hooks)
+                    ? new PrimaryKeyStore<>(openSqlite(serverSource, transactions, RemoteBagEditClaim.class), false, hooks)
                     : new PrimaryKeyStore<>(claims, backend == Backend.JSON, hooks);
             UltiRemoteBagTestHelper.setField(claimService, "claims", serverClaims);
             // What the container's plugin hands out, so the claim service's own start (init) works here.

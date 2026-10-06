@@ -30,8 +30,9 @@ import java.util.function.Predicate;
  *   <li>{@link Mode#HANG}: the call blocks until {@link #release} and then runs for real -- a statement on a
  *       half-open connection that returns, and lands, much later.</li>
  *   <li>{@link Mode#COMMIT_THEN_THROW}: the call runs for real and then throws -- the write landed, but the
- *       server was told it failed (a connection that broke after the commit). Applies once, then the store is
- *       healthy again.</li>
+ *       server was told it failed (a connection that broke after the commit). Applies once, to the first selected
+ *       call, then the store is healthy again: armed on {@code transaction} and {@code updateIf}, it hits the
+ *       outermost of the two, so a whole transaction commits and then reports an error.</li>
  * </ul>
  */
 public final class StorageFaults {
@@ -153,12 +154,25 @@ public final class StorageFaults {
                     throw outage();
                 case HANG:
                     hung.incrementAndGet();
+                    boolean interrupted = false;
                     try {
-                        hang.await(15, TimeUnit.SECONDS);
+                        // Uninterruptible, as a JDBC call blocked on the network is: a pool shut down with
+                        // shutdownNow() does not stop it, and the call still runs for real afterwards.
+                        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+                        while (hang.getCount() > 0 && System.nanoTime() < until) {
+                            try {
+                                hang.await(until - System.nanoTime(), TimeUnit.NANOSECONDS);
+                            } catch (InterruptedException e) {
+                                interrupted = true;
+                            }
+                        }
                         return forward(real, method, args);
                     } finally {
                         // After the real call: "no call is hung" means every hung call has also finished.
                         hung.decrementAndGet();
+                        if (interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
                     }
                 case COMMIT_THEN_THROW:
                     mode = Mode.NONE;

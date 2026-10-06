@@ -387,7 +387,7 @@ class BagStorageFailureTest {
     @Test
     @DisplayName("F2: a write that landed although it reported an error is not taken for a refusal")
     void aWriteThatLandedButReportedAnErrorIsNotGivenBack() throws Exception {
-        StorageFaults bagsA = bagsOf(serverA).onlyMethods("updateIf");
+        StorageFaults bagsA = bagsOf(serverA).onlyMethods("transaction", "updateIf");
         Window editing = ownerEditsPage(serverA);
         bagsA.set(StorageFaults.Mode.COMMIT_THEN_THROW);
 
@@ -560,6 +560,224 @@ class BagStorageFailureTest {
         assertThat(servers.storedRowCount(ownerId(), PAGE)).as("deleted").isZero();
         assertThat(held(claim())).as("released after the delete").isFalse();
         verify(serverA.logger, never()).error(anyString());
+    }
+
+    // ==================== Gate 1 round 2: fenced saves, settled outcomes, guards ====================
+
+    /** B's admin sees the claim, waits one full timeout of B's clock, takes the page over and empties it. */
+    private boolean bTakesOverAndAdminTakesAll() {
+        return bTakesOver(true);
+    }
+
+    /** B's admin sees the claim, waits one full timeout of B's clock and takes the page over; empties it if asked. */
+    private boolean bTakesOver(boolean emptyIt) {
+        Window look = serverB.openAsAdmin(admin, ownerId(), PAGE);
+        if (look.gui != null) {
+            look.close();
+        }
+        serverB.advance(TIMEOUT_MS + 1);
+        Window taken = serverB.openAsAdmin(admin, ownerId(), PAGE);
+        if (!taken.isEdit()) {
+            if (taken.gui != null) {
+                taken.close();
+            }
+            return false;
+        }
+        for (int slot = 0; emptyIt && slot < SharedDatabaseServers.PAGE_SIZE; slot++) {
+            if (taken.shown(slot) != null) {
+                taken.pickUp(slot);
+                SharedDatabaseServers.returnCursorToInventory(admin);
+            }
+        }
+        taken.close();
+        return true;
+    }
+
+    private void assumeRelational() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(backend() == SharedDatabaseServers.Backend.SQLITE,
+                "the JSON backend belongs to one server: its two files share no transaction");
+    }
+
+    @Test
+    @DisplayName("R2-1 (N1): a save that landed although it reported an error is not given back at disable, the database still down")
+    void aLandedSaveThatReportedAnErrorIsNotGivenBackAtDisable() throws Exception {
+        StorageFaults bagsA = bagsOf(serverA).onlyMethods("transaction", "updateIf");
+        Window editing = ownerEditsPage(serverA);
+        bagsA.set(StorageFaults.Mode.COMMIT_THEN_THROW);
+        editing.close();
+        bagsA.onlyMethods();
+        bagsA.set(StorageFaults.Mode.THROW);
+
+        serverA.shutdown();
+        bagsA.heal();
+
+        assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).as("one emerald").isEqualTo(1);
+        assertThat(count(owner.getInventory(), Material.EMERALD)).as("not given back: the save had landed").isZero();
+    }
+
+    @Test
+    @DisplayName("R2-1 (N2): a save that landed although it reported an error is not given back when the claim is later found lost")
+    void aLandedSaveThatReportedAnErrorIsNotGivenBackAfterATakeover() throws Exception {
+        StorageFaults bagsA = bagsOf(serverA).onlyMethods("transaction", "updateIf");
+        StorageFaults claimsA = claimsOf(serverA);
+        Window editing = ownerEditsPage(serverA);
+        bagsA.set(StorageFaults.Mode.COMMIT_THEN_THROW);
+        editing.close();
+        bagsA.onlyMethods();
+        bagsA.set(StorageFaults.Mode.THROW);
+        claimsA.set(StorageFaults.Mode.THROW);
+        backgroundPass(serverA);
+
+        assertThat(bTakesOverAndAdminTakesAll()).as("B took the page over and emptied it").isTrue();
+        bagsA.heal();
+        claimsA.heal();
+        backgroundPass(serverA);
+        backgroundPass(serverA);
+
+        assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).as("one emerald (B's admin has it)").isEqualTo(1);
+        assertThat(count(owner.getInventory(), Material.EMERALD)).as("not given back to the owner").isZero();
+    }
+
+    @Test
+    @DisplayName("R2-2 (N4): a save started while the claim was confirmed and held up past a takeover writes nothing once it runs")
+    void aLateSaveCannotLandAfterATakeover() throws Exception {
+        StorageFaults bagsA = bagsOf(serverA).onlyMethods("transaction", "updateIf");
+        StorageFaults claimsA = claimsOf(serverA).onlyMethods("updateIf", "getById");
+        Window editing = ownerEditsPage(serverA);
+        Window look = serverB.openAsAdmin(admin, ownerId(), PAGE);
+        if (look.gui != null) {
+            look.close();
+        }
+        claimsA.set(StorageFaults.Mode.HANG);
+        serverA.advance(TIMEOUT_MS / 2);
+        bagsA.set(StorageFaults.Mode.HANG);
+        editing.save();
+
+        serverB.advance(TIMEOUT_MS + 1);
+        Window taken = serverB.openAsAdmin(admin, ownerId(), PAGE);
+        assertThat(taken.isEdit()).as("B took over after a full timeout").isTrue();
+        bagsA.heal();
+        claimsA.heal();
+        assertThat(waitUntil(() -> bagsA.hungCalls() == 0 && claimsA.hungCalls() == 0)).isTrue();
+        Thread.sleep(200L);
+
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.EMERALD))
+                .as("A's late save did not land after B took over").isZero();
+        taken.close();
+        backgroundPass(serverA);
+        backgroundPass(serverA);
+        editing.close();
+        backgroundPass(serverA);
+        assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).as("one emerald").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("R2-4: a claim found lost while its save is still running gives nothing back until that save settles, then once")
+    void aLostClaimWithASaveInFlightGivesBackOnceAfterItSettles() throws Exception {
+        StorageFaults bagsA = bagsOf(serverA).onlyMethods("transaction", "updateIf");
+        StorageFaults claimsA = claimsOf(serverA);
+        Window editing = ownerEditsPage(serverA);
+        bagsA.set(StorageFaults.Mode.HANG);
+        editing.close();
+        claimsA.set(StorageFaults.Mode.THROW);
+        backgroundPass(serverA);
+        // B takes over and changes nothing: the page still is what A's save read, so only the claim can stop it.
+        assertThat(bTakesOver(false)).as("B took the page over").isTrue();
+        claimsA.heal();
+        backgroundPass(serverA);
+        backgroundPass(serverA);
+        assertThat(count(owner.getInventory(), Material.EMERALD)).as("nothing given back while the save may still land").isZero();
+
+        bagsA.heal();
+        assertThat(waitUntil(() -> bagsA.hungCalls() == 0)).isTrue();
+        backgroundPass(serverA);
+        backgroundPass(serverA);
+
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.EMERALD)).as("the late save wrote nothing").isZero();
+        assertThat(count(owner.getInventory(), Material.EMERALD)).as("given back once it settled").isEqualTo(1);
+        assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).as("one emerald").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("R2-4: disable with a save still running gives nothing back; the save landing afterwards leaves one emerald")
+    void disableWithASaveInFlightGivesNothingBack() throws Exception {
+        StorageFaults bagsA = bagsOf(serverA).onlyMethods("updateIf");
+        Window editing = ownerEditsPage(serverA);
+        bagsA.set(StorageFaults.Mode.HANG);
+        editing.close();
+
+        serverA.shutdown();
+        assertThat(count(owner.getInventory(), Material.EMERALD)).as("not given back: the save is still running").isZero();
+        bagsA.heal();
+        assertThat(waitUntil(() -> bagsA.hungCalls() == 0)).isTrue();
+        Thread.sleep(200L);
+
+        assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).as("one emerald, never two").isLessThanOrEqualTo(1);
+        verify(serverA.logger, atLeastOnce()).error(contains("log_bag_save_abandoned"));
+    }
+
+    @Test
+    @DisplayName("R2-2: a save is fenced on the claim in one transaction -- it raises the claim's counter, and a failed page write takes that back")
+    void aSaveIsFencedOnTheClaimInOneTransaction() throws Exception {
+        assumeRelational();
+        StorageFaults bagsA = bagsOf(serverA).onlyMethods("updateIf");
+        Window editing = ownerEditsPage(serverA);
+        long before = claim().getRenewals();
+
+        editing.save();
+        long afterSave = claim().getRenewals();
+        assertThat(afterSave).as("the save's fence raised the counter").isEqualTo(before + 1);
+
+        owner.getInventory().addItem(new ItemStack(Material.GOLD_INGOT));
+        putIn(editing, OTHER_SLOT + 2, Material.GOLD_INGOT);
+        bagsA.set(StorageFaults.Mode.THROW);
+        editing.save();
+        assertThat(claim().getRenewals()).as("the page write failed: the fence was rolled back with it").isEqualTo(afterSave);
+    }
+
+    @Test
+    @DisplayName("R2-2: another server's takeover cannot slip in between a save's fence and its page write")
+    void aTakeoverCannotSlipBetweenTheFenceAndThePageWrite() throws Exception {
+        assumeRelational();
+        StorageFaults bagsA = bagsOf(serverA).onlyMethods("updateIf");
+        Window editing = ownerEditsPage(serverA);
+        Window look = serverB.openAsAdmin(admin, ownerId(), PAGE);
+        if (look.gui != null) {
+            look.close();
+        }
+        serverB.advance(TIMEOUT_MS + 1);
+        java.util.concurrent.atomic.AtomicReference<BagEditClaimService.Outcome> fromB = new java.util.concurrent.atomic.AtomicReference<>();
+        Thread[] other = new Thread[1];
+        bagsA.onceBefore(() -> {
+            other[0] = new Thread(() -> fromB.set(serverB.claimService.claim(ownerId(), PAGE, admin.getUniqueId())));
+            other[0].start();
+        });
+
+        editing.save();
+        other[0].join(5_000L);
+
+        assertThat(fromB.get()).as("B did not take the page over in the middle of A's save").isNotEqualTo(BagEditClaimService.Outcome.CLAIMED);
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.EMERALD)).as("A's save landed").isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("R2-3: a give-back that cannot reach the main thread (framework disabled at stop) is made at disable, on the disabling thread")
+    void aGiveBackTheMainThreadRejectedIsMadeAtDisable() throws Exception {
+        StorageFaults bagsA = bagsOf(serverA);
+        Window editing = ownerEditsPage(serverA);
+        bagsA.set(StorageFaults.Mode.THROW);
+        editing.close();
+        servers.writePageElsewhere(ownerId(), PAGE, pageWith(SLOT + 1, new ItemStack(Material.GOLD_INGOT)));
+        bagsA.heal();
+        // As Bukkit's scheduler is reached while the framework is already disabled at server stop: nothing runs.
+        com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.setField(serverA.claimService, "mainThread",
+                (java.util.concurrent.Executor) task -> { });
+
+        backgroundPass(serverA);
+        serverA.shutdown();
+
+        assertThat(count(owner.getInventory(), Material.EMERALD)).as("given back at disable").isEqualTo(1);
+        assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).isEqualTo(1);
     }
 
     private PlayerMock otherPlayer() {
