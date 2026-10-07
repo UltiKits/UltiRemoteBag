@@ -60,6 +60,12 @@ import static org.mockito.Mockito.verify;
  * Real SQLite, as in {@link BagEditClaimTest}: each server opens the shared file through its own operators, has its
  * own monotonic clock moved by the test, and its own main-thread queue. {@link StorageFaults} breaks one server's
  * store only. {@link BagStorageFailureJsonTest} runs every case on the JSON backend as well.
+ * <p>
+ * <b>Timing (plan 17-86).</b> No case depends on how fast the runner is for a call that is meant to succeed: such
+ * calls have a deadline no healthy call overruns ({@link SharedDatabaseServers#HEALTHY_CALL_DEADLINE_MILLIS}); the
+ * short {@link SharedDatabaseServers#CALL_DEADLINE_MILLIS} applies only while a case holds a call in a hang. And a
+ * case waits for the calls the service leaves running by design (a release after a kept write lands, a receipt
+ * deletion) before it reads the store ({@link #renewOffMainThread}); a case that times a pass does not.
  */
 @DisplayName("Storage failures of the edit claim and the page save have their decided answers (UltiRemoteBag#54, gate 1 F1-F4, F8)")
 class BagStorageFailureTest {
@@ -91,6 +97,8 @@ class BagStorageFailureTest {
         servers = SharedDatabaseServers.start(dir, backend());
         serverA = servers.newServer("A");
         serverB = servers.newServer("B");
+        serverA.healthyCallsGetAGenerousDeadline();
+        serverB.healthyCallsGetAGenerousDeadline();
         owner = servers.live().addPlayer("Owner");
         admin = servers.live().addPlayer("Admin");
         servers.seedPage(ownerId(), PAGE, pageWith(SLOT, new ItemStack(Material.DIAMOND)));
@@ -101,9 +109,10 @@ class BagStorageFailureTest {
         for (StorageFaults fault : faults) {
             fault.heal();
         }
+        // Every storage thread has ended before the temporary directory is deleted (plan 17-86).
         for (Server server : new Server[] {serverA, serverB}) {
             if (server != null) {
-                server.claimService.shutdown();
+                server.stopClaimService();
             }
         }
         servers.stop();
@@ -114,13 +123,13 @@ class BagStorageFailureTest {
     }
 
     private StorageFaults claimsOf(Server server) throws Exception {
-        StorageFaults fault = StorageFaults.install(server.claimService, "claims");
+        StorageFaults fault = StorageFaults.install(server.claimService, "claims").whileHangArmed(server::hangArmed);
         faults.add(fault);
         return fault;
     }
 
     private StorageFaults bagsOf(Server server) throws Exception {
-        StorageFaults fault = StorageFaults.install(server.bagService, "dataOperator");
+        StorageFaults fault = StorageFaults.install(server.bagService, "dataOperator").whileHangArmed(server::hangArmed);
         faults.add(fault);
         return fault;
     }
@@ -172,10 +181,20 @@ class BagStorageFailureTest {
     }
 
     /** One background pass of {@code server} (renewals and kept writes), then its main thread runs. */
-    private static void backgroundPass(Server server) throws InterruptedException {
+    private void backgroundPass(Server server) throws Exception {
         server.advance(TIMEOUT_MS / 3 + 1);
-        server.renewOffMainThread();
+        renewOffMainThread(server);
         server.runMainThread();
+    }
+
+    /**
+     * One renewal pass of {@code server} off the main thread, then the calls it left running by design (a release,
+     * a receipt deletion) are let finish, so the store is read after them, not racing them. Not for a pass the case
+     * times: those call {@link Server#renewOffMainThread} directly.
+     */
+    private void renewOffMainThread(Server server) throws Exception {
+        server.renewOffMainThread();
+        servers.awaitStorageCallsSettled();
     }
 
     /** The owner's edit is stored: the emerald in, the diamond out; each exists exactly once. */
@@ -859,7 +878,7 @@ class BagStorageFailureTest {
         assertThat(receiptRows()).as("precondition: the save wrote its receipt").isEqualTo(1L);
         assertThat(bTakesOver(false)).isTrue();
         serverA.advance(TIMEOUT_MS / 3 + 1);
-        serverA.renewOffMainThread();
+        renewOffMainThread(serverA);
         serverA.runMainThread();
         editing.close();
         backgroundPass(serverA);
@@ -1052,7 +1071,7 @@ class BagStorageFailureTest {
         released.setRenewals(released.getRenewals() + 1);
         servers.claimStore().updateCounted(released);
         serverA.advance(TIMEOUT_MS / 3 + 1);
-        serverA.renewOffMainThread();
+        renewOffMainThread(serverA);
         assertThat(serverA.mainThreadTasks).as("precondition: the notice is queued").isNotEmpty();
 
         old.close();
@@ -1080,15 +1099,15 @@ class BagStorageFailureTest {
         Window old = serverA.openAsOwner(owner, PAGE);
         claimsA.set(StorageFaults.Mode.THROW);
         serverA.advance(TIMEOUT_MS / 3 + 1);
-        serverA.renewOffMainThread();
+        renewOffMainThread(serverA);
         assertThat(serverA.mainThreadTasks).as("precondition: the notice is queued").isNotEmpty();
         claimsA.heal();
         // The old window closes before the notice runs: its save is kept (the claim is unconfirmed), then lands,
         // and the claim is released; the owner claims the page again.
         old.close();
         serverA.advance(1);
-        serverA.renewOffMainThread();
-        serverA.renewOffMainThread();
+        renewOffMainThread(serverA);
+        renewOffMainThread(serverA);
         Window next = serverA.openAsOwner(owner, PAGE);
         assertThat(next.isEdit()).as("precondition: the page was claimed again").isTrue();
         owner.getInventory().addItem(new ItemStack(Material.GOLD_INGOT));

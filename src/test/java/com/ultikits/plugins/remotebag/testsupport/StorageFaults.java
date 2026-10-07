@@ -12,9 +12,11 @@ import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 /**
@@ -34,6 +36,11 @@ import java.util.function.Predicate;
  *       call, then the store is healthy again: armed on {@code transaction} and {@code updateIf}, it hits the
  *       outermost of the two, so a whole transaction commits and then reports an error.</li>
  * </ul>
+ * <p>
+ * Two hooks let a test tell a stall it made apart from a call that is merely slow (plan 17-86, CI flakes of
+ * UltiKits/UltiRemoteBag#56): {@link #whileHangArmed} reports when a {@link Mode#HANG} is armed and disarmed, so the
+ * server can keep its short call deadline for exactly that window, and {@link #anyCallParked} says whether some call
+ * is blocked in a hang right now.
  */
 public final class StorageFaults {
 
@@ -49,7 +56,11 @@ public final class StorageFaults {
         COMMIT_THEN_THROW
     }
 
+    /** Every thread blocked in a {@link Mode#HANG} right now, across every installed fault. */
+    private static final Set<Thread> PARKED = ConcurrentHashMap.newKeySet();
+
     private volatile Mode mode = Mode.NONE;
+    private volatile Consumer<Boolean> hangArmed = armed -> { };
     private volatile Set<String> methods = new HashSet<>();
     private volatile Predicate<Object> firstArgument = argument -> true;
     private volatile CountDownLatch hang = new CountDownLatch(1);
@@ -74,11 +85,30 @@ public final class StorageFaults {
 
     /** Arms {@code next} for the selected calls. */
     public StorageFaults set(Mode next) {
+        boolean wasHang = mode == Mode.HANG;
         if (next == Mode.HANG) {
             hang = new CountDownLatch(1);
         }
         this.mode = next;
+        if (wasHang != (next == Mode.HANG)) {
+            hangArmed.accept(next == Mode.HANG);
+        }
         return this;
+    }
+
+    /**
+     * Calls {@code listener} with {@code true} when a {@link Mode#HANG} is armed and with {@code false} when it is
+     * disarmed ({@link #set} to another mode, or {@link #heal}). {@link #release} lets hung calls go but leaves the
+     * hang armed, so it reports nothing.
+     */
+    public StorageFaults whileHangArmed(Consumer<Boolean> listener) {
+        this.hangArmed = listener;
+        return this;
+    }
+
+    /** Whether some call, of any installed fault, is blocked in a hang right now. */
+    public static boolean anyCallParked() {
+        return !PARKED.isEmpty();
     }
 
     /** Restricts the fault to these method names (for example {@code updateIf}). */
@@ -104,7 +134,7 @@ public final class StorageFaults {
 
     /** The store is healthy again; a hung call is let go and runs for real. */
     public void heal() {
-        mode = Mode.NONE;
+        set(Mode.NONE);
         release();
     }
 
@@ -159,12 +189,18 @@ public final class StorageFaults {
                         // Uninterruptible, as a JDBC call blocked on the network is: a pool shut down with
                         // shutdownNow() does not stop it, and the call still runs for real afterwards.
                         long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
-                        while (hang.getCount() > 0 && System.nanoTime() < until) {
-                            try {
-                                hang.await(until - System.nanoTime(), TimeUnit.NANOSECONDS);
-                            } catch (InterruptedException e) {
-                                interrupted = true;
+                        PARKED.add(Thread.currentThread());
+                        try {
+                            while (hang.getCount() > 0 && System.nanoTime() < until) {
+                                try {
+                                    hang.await(until - System.nanoTime(), TimeUnit.NANOSECONDS);
+                                } catch (InterruptedException e) {
+                                    interrupted = true;
+                                }
                             }
+                        } finally {
+                            // Let go: from here the call runs for real, and counts as running, not parked.
+                            PARKED.remove(Thread.currentThread());
                         }
                         return forward(real, method, args);
                     } finally {

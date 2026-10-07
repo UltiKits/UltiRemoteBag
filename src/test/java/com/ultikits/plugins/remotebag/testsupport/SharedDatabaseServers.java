@@ -97,6 +97,15 @@ public final class SharedDatabaseServers {
     public static final int TOOLBAR_SAVE_SLOT = 49;
     /** The real-time deadline of one storage call in these tests, in milliseconds. */
     public static final long CALL_DEADLINE_MILLIS = 300L;
+    /**
+     * The deadline of a storage call that is meant to succeed, for a test that opts in
+     * ({@link Server#healthyCallsGetAGenerousDeadline}): no healthy call overruns it, however slow the runner
+     * (plan 17-86: on a busy CI runner a healthy call overran {@link #CALL_DEADLINE_MILLIS} and was taken for one
+     * that never returns).
+     */
+    public static final long HEALTHY_CALL_DEADLINE_MILLIS = 5_000L;
+    /** How long {@link #awaitStorageCallsSettled} and {@link Server#stopClaimService} wait, at most. */
+    private static final long SETTLE_PATIENCE_MILLIS = 20_000L;
 
     /** Which storage the servers share. */
     public enum Backend {
@@ -117,6 +126,8 @@ public final class SharedDatabaseServers {
     /** The test's own view of the shared tables (JSON: the shared instances). */
     private final DataOperator<RemoteBagData> bags;
     private final DataOperator<RemoteBagEditClaim> claims;
+    /** Every server started, so their storage pools can be waited for together. */
+    private final List<Server> started = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     private SharedDatabaseServers(Path storeDir, Backend backend) throws Exception {
         server = MockBukkitSupport.bootstrapLiveServer();
@@ -225,7 +236,44 @@ public final class SharedDatabaseServers {
 
     /** A new "server" on the shared store. */
     public Server newServer(String name) throws Exception {
-        return new Server(name);
+        Server next = new Server(name);
+        started.add(next);
+        return next;
+    }
+
+    /**
+     * Waits until no storage call of any server is still running, unless some call is held in a
+     * {@link StorageFaults} hang (then returns at once: inside a stall the test drives the timing itself).
+     * <p>
+     * A background pass and a kept write's settling leave calls running by design -- a release is submitted and
+     * never waited for, a receipt is deleted best-effort -- so a test that reads the store right after them must
+     * first let them finish, or it races them (plan 17-86). The pools are only read, never replaced.
+     *
+     * @throws IllegalStateException if calls are still running after twenty seconds
+     */
+    public void awaitStorageCallsSettled() throws Exception {
+        long until = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(SETTLE_PATIENCE_MILLIS);
+        int quietPolls = 0;
+        // Three quiet polls in a row: a call handed to an idle worker is briefly neither queued nor counted active.
+        while (quietPolls < 3) {
+            if (System.nanoTime() > until) {
+                throw new IllegalStateException("storage calls still running after " + SETTLE_PATIENCE_MILLIS + " ms");
+            }
+            quietPolls = StorageFaults.anyCallParked() || runningStorageCalls() == 0 ? quietPolls + 1 : 0;
+            Thread.sleep(5L);
+        }
+    }
+
+    private int runningStorageCalls() throws Exception {
+        int running = 0;
+        for (Server each : started) {
+            java.util.concurrent.ExecutorService pool = each.observeStoragePool();
+            if (pool instanceof java.util.concurrent.ThreadPoolExecutor) {
+                java.util.concurrent.ThreadPoolExecutor threads = (java.util.concurrent.ThreadPoolExecutor) pool;
+                running += threads.getActiveCount() + threads.getQueue().size();
+            }
+        }
+        return running;
     }
 
     /** One server's own beans over the shared store. */
@@ -244,6 +292,13 @@ public final class SharedDatabaseServers {
         /** Work handed to this server's main thread, run only when the test drains it. */
         public final Queue<Runnable> mainThreadTasks = new java.util.concurrent.ConcurrentLinkedQueue<>();
         private final DataOperator<RemoteBagData> serverBags;
+        /** The deadline of this server's storage calls while no hang is armed on it. */
+        private long healthyDeadlineMillis = CALL_DEADLINE_MILLIS;
+        /** How many {@link StorageFaults} hangs are armed on this server's stores. */
+        private int hangsArmed;
+        /** Every storage pool this server's claim service has had, so stopping can wait for each to end. */
+        private final java.util.Set<java.util.concurrent.ExecutorService> pools =
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
 
         private Server(String name) throws Exception {
             this.name = name;
@@ -282,6 +337,70 @@ public final class SharedDatabaseServers {
             UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "bagService", bagService);
             UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "callDeadlineMillis", CALL_DEADLINE_MILLIS);
             listener = new BagListener(bagService, lockService);
+        }
+
+        /**
+         * Healthy storage calls of this server get {@link #HEALTHY_CALL_DEADLINE_MILLIS}; the short
+         * {@link #CALL_DEADLINE_MILLIS} applies only while a hang is armed on it ({@link #hangArmed}), where the
+         * test stalls a call on purpose and wants it given up on quickly.
+         */
+        public synchronized void healthyCallsGetAGenerousDeadline() throws Exception {
+            healthyDeadlineMillis = HEALTHY_CALL_DEADLINE_MILLIS;
+            applyDeadline();
+        }
+
+        /** A {@link StorageFaults} hang on this server's stores was armed ({@code true}) or disarmed. */
+        public synchronized void hangArmed(boolean armed) {
+            hangsArmed += armed ? 1 : -1;
+            try {
+                applyDeadline();
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        private void applyDeadline() throws Exception {
+            UltiRemoteBagTestHelper.setFieldIfPresent(claimService, "callDeadlineMillis",
+                    hangsArmed > 0 ? CALL_DEADLINE_MILLIS : healthyDeadlineMillis);
+        }
+
+        /** The claim service's current storage pool ({@code null} before first use), remembered for stopping. */
+        synchronized java.util.concurrent.ExecutorService observeStoragePool() throws Exception {
+            Object pool;
+            try {
+                pool = UltiRemoteBagTestHelper.getField(claimService, "storage");
+            } catch (NoSuchFieldException none) {
+                return null;
+            }
+            if (pool instanceof java.util.concurrent.ExecutorService) {
+                pools.add((java.util.concurrent.ExecutorService) pool);
+                return (java.util.concurrent.ExecutorService) pool;
+            }
+            return null;
+        }
+
+        /**
+         * Stops this server's claim service and waits (bounded) until every storage pool it had has ended, so no
+         * storage thread still writes to the test's temporary directory while it is deleted (plan 17-86). Hung calls
+         * must be let go first ({@link StorageFaults#heal}).
+         *
+         * @return whether every pool ended in time
+         */
+        public boolean stopClaimService() throws Exception {
+            observeStoragePool();
+            claimService.shutdown();
+            long until = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(SETTLE_PATIENCE_MILLIS);
+            List<java.util.concurrent.ExecutorService> ending;
+            synchronized (this) {
+                ending = new ArrayList<>(pools);
+            }
+            boolean ended = true;
+            for (java.util.concurrent.ExecutorService pool : ending) {
+                pool.shutdown();
+                long left = Math.max(0L, until - System.nanoTime());
+                ended &= pool.awaitTermination(left, java.util.concurrent.TimeUnit.NANOSECONDS);
+            }
+            return ended;
         }
 
         /** The player joins this server again (the module's join handler, if it has one). */
@@ -371,6 +490,8 @@ public final class SharedDatabaseServers {
         /** This server's module is disabled (server stop, {@code /upm uninstall}). */
         @SuppressWarnings("unchecked")
         public void shutdown() throws Exception {
+            // The pool the disable shuts down (and forgets), so stopping the test can still wait for it.
+            observeStoragePool();
             UltiRemoteBag module = mock(UltiRemoteBag.class);
             lenient().when(module.getLogger()).thenReturn(logger);
             lenient().when(module.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
