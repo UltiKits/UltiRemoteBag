@@ -342,6 +342,27 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- This version requires UltiTools 6.3.0 or later and declares `api-version: 630` in `plugin.yml`
+  (it was `621`; the last release, 1.0.0, declared `620`). An older framework refuses the module
+  before its start-up runs, with a warning that the UltiTools version is outdated; the refusal names
+  the module by its `plugin.yml` `name:`, `UltiRemoteBag`. The README's framework minimum and its
+  UltiTools-API badge now say UltiTools 6.3.0+, and its server and Java badges say Paper 1.21+ and
+  Java 21+ (they said Minecraft 1.13–1.21 and Java 8+). Adding or replacing a module JAR needs a server restart; `/ul reload` does not load it
+  (UltiKits/UltiTools-Reborn#544).
+- 本版本需要 UltiTools 6.3.0 或更高版本，并在 `plugin.yml` 中声明 `api-version: 630`（原为 `621`；上一个发布版本 1.0.0 声明的是 `620`）。更早的框架会在模块的启动逻辑
+  运行之前拒绝加载它，并给出 UltiTools 版本过旧的警告；拒绝信息以 `plugin.yml` 的 `name:` 即 `UltiRemoteBag` 指代本模块。
+  README 中的框架最低版本和 UltiTools-API 徽章已改为 UltiTools 6.3.0+，服务端与 Java 徽章改为 Paper 1.21+、Java 21+
+  （原为 Minecraft 1.13–1.21、Java 8+）。新增或替换模块 JAR 后需要重启服务器，`/ul reload` 不会加载它
+  （UltiKits/UltiTools-Reborn#544）。
+
+- `plugin.yml` now declares `identify-string: ultiremotebag`, the key of this module's entry in the
+  UltiCloud catalogue. The framework's update check and `/upm update` skip a module that does not
+  declare it, so this module now takes part in both: a later published version carrying the same key
+  is reported at startup and can be installed with `/upm update` (UltiKits/UltiTools-Reborn#474).
+- `plugin.yml` 现在声明 `identify-string: ultiremotebag`，即本模块在 UltiCloud 模块目录中的条目键。框架的更新检查和
+  `/upm update` 会跳过未声明该键的模块，因此本模块现在会参与两者：带有同一键的更高发布版本会在启动时提示，
+  并可用 `/upm update` 安装（UltiKits/UltiTools-Reborn#474）。
+
 - The main menu's `Slots Used: x/y` line now reports a page's real capacity. A full page reads
   `Slots Used: 45/45`. It used to read `Slots Used: 45/54` at the shipped settings — promising nine
   slots a player could never fill — and `Slots Used: 45/18` on a server that had lowered
