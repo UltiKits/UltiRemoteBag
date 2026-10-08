@@ -59,7 +59,16 @@ public class BagOpenResult {
         /** An admin holds the page, so it does not open. */
         BLOCKED_BY_ADMIN,
         /** The owner holds the page, so it does not open. */
-        BLOCKED_IN_USE
+        BLOCKED_IN_USE,
+        /** Another server sharing the database is editing the page, so it opens read-only (UltiKits/UltiRemoteBag#54). */
+        READ_ONLY_OTHER_SERVER,
+        /** The page's edit claim could not be read or written, so it opens read-only (UltiKits/UltiRemoteBag#54). */
+        READ_ONLY_CLAIM_FAILED,
+        /**
+         * The page's last changes on this server are still being written (a save the database did not answer is
+         * kept and retried), so it opens read-only and shows them (UltiKits/UltiRemoteBag#54).
+         */
+        READ_ONLY_SAVE_PENDING
     }
     
     /**
@@ -81,6 +90,33 @@ public class BagOpenResult {
         return new BagOpenResult(true, AccessMode.READ_ONLY, Notice.READ_ONLY_IN_USE, ownerLock);
     }
     
+    /**
+     * Read-only because another server sharing the database is editing the page (UltiKits/UltiRemoteBag#54).
+     *
+     * @return the read-only result with the other-server notice
+     */
+    public static BagOpenResult readOnlyElsewhere() {
+        return new BagOpenResult(true, AccessMode.READ_ONLY, Notice.READ_ONLY_OTHER_SERVER, null);
+    }
+
+    /**
+     * Read-only because the page's edit claim could not be read or written (UltiKits/UltiRemoteBag#54).
+     *
+     * @return the read-only result with the claim-failed notice
+     */
+    public static BagOpenResult readOnlyClaimFailed() {
+        return new BagOpenResult(true, AccessMode.READ_ONLY, Notice.READ_ONLY_CLAIM_FAILED, null);
+    }
+
+    /**
+     * Read-only because this server is still writing the page's last changes (UltiKits/UltiRemoteBag#54).
+     *
+     * @return the read-only result with the save-pending notice
+     */
+    public static BagOpenResult readOnlySavePending() {
+        return new BagOpenResult(true, AccessMode.READ_ONLY, Notice.READ_ONLY_SAVE_PENDING, null);
+    }
+
     /**
      * 创建被阻止的结果
      * 
@@ -112,6 +148,15 @@ public class BagOpenResult {
                 break;
             case BLOCKED_BY_ADMIN:
                 text = plugin.i18n("bag_blocked_by_admin");
+                break;
+            case READ_ONLY_OTHER_SERVER:
+                text = plugin.i18n("bag_read_only_other_server");
+                break;
+            case READ_ONLY_CLAIM_FAILED:
+                text = plugin.i18n("bag_read_only_claim_failed");
+                break;
+            case READ_ONLY_SAVE_PENDING:
+                text = plugin.i18n("bag_read_only_save_pending");
                 break;
             default:
                 text = plugin.i18n("bag_blocked_in_use");

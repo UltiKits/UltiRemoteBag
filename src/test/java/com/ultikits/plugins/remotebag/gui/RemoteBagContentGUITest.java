@@ -50,6 +50,7 @@ class RemoteBagContentGUITest {
     private UltiToolsPlugin mockPlugin;
     private Player player;
     private UUID playerUuid;
+    private RemoteBagService.PageRead pageRead;
     private UUID ownerUuid;
 
     @BeforeEach
@@ -70,12 +71,17 @@ class RemoteBagContentGUITest {
         // below would refuse for a reason that has nothing to do with what it tests. The refusal
         // itself is asserted in SaveCurrentContents#refusesWhenTheLockIsNoLongerOurs.
         lenient().when(lockService.mayWrite(any(), anyInt(), any())).thenReturn(true);
-        // What a real service answers for a cache it persisted. saveCurrentContents now propagates
-        // this, so an unstubbed mock would answer false and every save case would report failure.
-        lenient().when(bagService.saveBag(any())).thenReturn(true);
         config = UltiRemoteBagTestHelper.createDefaultConfig();
         mockPlugin = mock(UltiToolsPlugin.class);
         when(mockPlugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        // A page's save is the service's savePage over what the window read, since
+        // UltiKits/UltiRemoteBag#54 (maintainer decision 2026-10-06 00:04). What a real service answers for
+        // a page with no row, read and written: an unstubbed mock would answer null, i.e. "not written",
+        // and every save case would report failure.
+        RemoteBagService real = new RemoteBagService(mockPlugin, config);
+        UltiRemoteBagTestHelper.setField(real, "dataOperator", new com.ultikits.plugins.remotebag.service.InMemoryRemoteBagStore());
+        pageRead = real.readPage(UUID.randomUUID(), 1);
+        lenient().when(bagService.savePage(any(), anyInt(), any(), any())).thenReturn(pageRead);
 
         playerUuid = UUID.randomUUID();
         ownerUuid = UUID.randomUUID();
@@ -205,8 +211,7 @@ class RemoteBagContentGUITest {
             gui.onClose(event);
 
             // Verify save was called
-            verify(bagService).setBagPage(eq(ownerUuid), eq(1), any(ItemStack[].class));
-            verify(bagService).saveBag(ownerUuid);
+            verify(bagService).savePage(eq(ownerUuid), eq(1), any(ItemStack[].class), any());
             // Verify lock release
             verify(lockService).release(ownerUuid, 1, playerUuid);
         }
@@ -220,8 +225,7 @@ class RemoteBagContentGUITest {
             gui.onClose(event);
 
             // Should NOT save
-            verify(bagService, never()).setBagPage(any(), anyInt(), any());
-            verify(bagService, never()).saveBag(any());
+            verify(bagService, never()).savePage(any(), anyInt(), any(), any());
             // Should still release lock
             verify(lockService).release(ownerUuid, 1, playerUuid);
         }
@@ -263,8 +267,7 @@ class RemoteBagContentGUITest {
             saveMethod.setAccessible(true);
             saveMethod.invoke(gui);
 
-            verify(bagService).setBagPage(eq(ownerUuid), eq(1), any(ItemStack[].class));
-            verify(bagService).saveBag(ownerUuid);
+            verify(bagService).savePage(eq(ownerUuid), eq(1), any(ItemStack[].class), any());
         }
 
         @Test
@@ -304,21 +307,20 @@ class RemoteBagContentGUITest {
             Object written = saveMethod.invoke(gui);
 
             assertThat(written).as("the write must be reported as not performed").isEqualTo(false);
-            verify(bagService, never()).setBagPage(any(), anyInt(), any());
-            verify(bagService, never()).saveBag(any());
+            verify(bagService, never()).savePage(any(), anyInt(), any(), any());
             verify(player).sendMessage(contains("msg_save_refused_lock_taken"));
         }
 
         @Test
         @DisplayName("Reports failure, with a message, when the persistence write did not land")
         void reportsFailureWhenThePersistenceWriteFails() throws Exception {
-            // saveBag returns false when an update throws IllegalAccessException: the edit is in the
-            // cache and not in the database, so it is lost on the next restart. Discarding that result
-            // and reporting success is the same defect as reporting a save with an empty cache, one
-            // layer in -- raised as a P2 on pull request #34's second external review round.
+            // savePage returns null when the page was not written (a conditional write that missed, a row
+            // that vanished, a field-access failure). Discarding that result and reporting success is the
+            // same defect as reporting a save that did not happen -- raised as a P2 on pull request #34's
+            // second external review round.
             RemoteBagContentGUI gui = createGui(AccessMode.EDIT);
             when(lockService.mayWrite(ownerUuid, 1, playerUuid)).thenReturn(true);
-            when(bagService.saveBag(ownerUuid)).thenReturn(false);
+            when(bagService.savePage(eq(ownerUuid), eq(1), any(), any())).thenReturn(null);
 
             Inventory mockInventory = mock(Inventory.class);
             setInventory(gui, mockInventory);
@@ -349,7 +351,7 @@ class RemoteBagContentGUITest {
             Object written = saveMethod.invoke(gui);
 
             assertThat(written).isEqualTo(true);
-            verify(bagService).saveBag(ownerUuid);
+            verify(bagService).savePage(eq(ownerUuid), eq(1), any(ItemStack[].class), any());
         }
     }
 
@@ -403,14 +405,13 @@ class RemoteBagContentGUITest {
             contents[0] = mockItem;
             contents[10] = mockItem;
 
-            when(bagService.getBagPage(ownerUuid, 1)).thenReturn(contents);
+            when(bagService.readPage(ownerUuid, 1)).thenReturn(com.ultikits.plugins.remotebag.service.PageReads.of(contents));
 
             Method loadMethod = RemoteBagContentGUI.class.getDeclaredMethod("loadBagContents");
             loadMethod.setAccessible(true);
             loadMethod.invoke(gui);
 
-            verify(bagService).loadBagIfNeeded(ownerUuid);
-            verify(bagService).getBagPage(ownerUuid, 1);
+            verify(bagService).readPage(ownerUuid, 1);
             verify(mockInventory).setItem(0, mockItem);
             verify(mockInventory).setItem(10, mockItem);
         }
@@ -423,13 +424,13 @@ class RemoteBagContentGUITest {
             Inventory mockInventory = mock(Inventory.class);
             setInventory(gui, mockInventory);
 
-            when(bagService.getBagPage(ownerUuid, 1)).thenReturn(null);
+            when(bagService.readPage(ownerUuid, 1)).thenReturn(com.ultikits.plugins.remotebag.service.PageReads.of(null));
 
             Method loadMethod = RemoteBagContentGUI.class.getDeclaredMethod("loadBagContents");
             loadMethod.setAccessible(true);
             loadMethod.invoke(gui);
 
-            verify(bagService).loadBagIfNeeded(ownerUuid);
+            verify(bagService).readPage(ownerUuid, 1);
             // No setItem calls when contents is null
             verify(mockInventory, never()).setItem(anyInt(), any(ItemStack.class));
         }
@@ -446,7 +447,7 @@ class RemoteBagContentGUITest {
             ItemStack[] contents = new ItemStack[45];
             contents[5] = mockItem; // Only slot 5 has an item
 
-            when(bagService.getBagPage(ownerUuid, 1)).thenReturn(contents);
+            when(bagService.readPage(ownerUuid, 1)).thenReturn(com.ultikits.plugins.remotebag.service.PageReads.of(contents));
 
             Method loadMethod = RemoteBagContentGUI.class.getDeclaredMethod("loadBagContents");
             loadMethod.setAccessible(true);
@@ -469,7 +470,7 @@ class RemoteBagContentGUITest {
             ItemStack[] contents = new ItemStack[10]; // Smaller than 45
             contents[0] = mockItem;
 
-            when(bagService.getBagPage(ownerUuid, 1)).thenReturn(contents);
+            when(bagService.readPage(ownerUuid, 1)).thenReturn(com.ultikits.plugins.remotebag.service.PageReads.of(contents));
 
             Method loadMethod = RemoteBagContentGUI.class.getDeclaredMethod("loadBagContents");
             loadMethod.setAccessible(true);
@@ -573,7 +574,7 @@ class RemoteBagContentGUITest {
                 when(mockInventory.getSize()).thenReturn(54);
                 setInventory(gui, mockInventory);
 
-                when(bagService.getBagPage(ownerUuid, 1)).thenReturn(null);
+                when(bagService.readPage(ownerUuid, 1)).thenReturn(com.ultikits.plugins.remotebag.service.PageReads.of(null));
 
                 InventoryOpenEvent event = mock(InventoryOpenEvent.class);
 
@@ -583,7 +584,7 @@ class RemoteBagContentGUITest {
                 setupContent.invoke(gui, event);
 
                 // Verify loadBagContents was called
-                verify(bagService).loadBagIfNeeded(ownerUuid);
+                verify(bagService).readPage(ownerUuid, 1);
                 // Verify setupToolbar was called (btn_back is from toolbar)
                 verify(mockPlugin).i18n("btn_back");
             }
@@ -888,9 +889,16 @@ class RemoteBagContentGUITest {
     // ==================== Helper Methods ====================
 
     private RemoteBagContentGUI createGui(AccessMode mode) {
-        return new RemoteBagContentGUI(
+        RemoteBagContentGUI gui = new RemoteBagContentGUI(
                 player, mockPlugin, ownerUuid, 1,
                 bagService, lockService, config, mode);
+        // As if the window had opened and read its page: a save is conditioned on that read.
+        try {
+            UltiRemoteBagTestHelper.setField(gui, "pageRead", pageRead);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+        return gui;
     }
 
     private void setInventory(RemoteBagContentGUI gui, Inventory inventory) {

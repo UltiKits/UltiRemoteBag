@@ -386,8 +386,7 @@ class RemoteBagDeserializationTest {
     void serializedFormatIsWhatTheseCasesSeed() {
         ItemStack[] contents = new ItemStack[45];
         contents[40] = new ItemStack(Material.DIAMOND);
-        service.setBagPage(playerUuid, PAGE, contents);
-        service.saveBag(playerUuid);
+        service.savePage(playerUuid, PAGE, contents, service.readPage(playerUuid, PAGE));
 
         String written = store.storedContents(playerUuid.toString(), PAGE);
         assertThat(written)

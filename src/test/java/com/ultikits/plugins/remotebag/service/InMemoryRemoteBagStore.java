@@ -24,6 +24,12 @@ import java.util.List;
  * <p>Only the operations this module's service actually uses are implemented. Every other method
  * throws rather than returning a plausible empty value, so a test cannot assert "nothing was
  * stored" against an operation this class silently ignores.
+ *
+ * <p>Every read hands out a detached copy and every write replaces the stored row by id, as the
+ * framework's operators do (UltiTools-Reborn#522). It used to hand out the stored instances, so a
+ * service that changed a row it had read changed the store before writing; {@link #updateIf} -- the
+ * conditional write a page save is since UltiKits/UltiRemoteBag#54 -- can only compare the stored row
+ * with what was read if the two are different objects.
  */
 public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
 
@@ -44,7 +50,7 @@ public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
     }
 
     public List<RemoteBagData> rows() {
-        return Collections.unmodifiableList(rows);
+        return Collections.unmodifiableList(copies(rows));
     }
 
     /** Seeds a row as if it had been written by an earlier server run. */
@@ -72,7 +78,7 @@ public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
 
     @Override
     public List<RemoteBagData> getAll() {
-        return new ArrayList<>(rows);
+        return copies(rows);
     }
 
     @Override
@@ -80,7 +86,7 @@ public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
         List<RemoteBagData> matches = new ArrayList<>();
         for (RemoteBagData row : rows) {
             if (matchesAll(row, whereConditions)) {
-                matches.add(row);
+                matches.add(copy(row));
             }
         }
         return matches;
@@ -88,7 +94,7 @@ public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
 
     @Override
     public boolean exist(RemoteBagData object) {
-        return rows.contains(object);
+        return stored(object.getId()) != null;
     }
 
     @Override
@@ -98,6 +104,11 @@ public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
 
     @Override
     public RemoteBagData getById(Object id) {
+        RemoteBagData row = stored(id);
+        return row == null ? null : copy(row);
+    }
+
+    private RemoteBagData stored(Object id) {
         for (RemoteBagData row : rows) {
             if (String.valueOf(id).equals(row.getId())) {
                 return row;
@@ -109,17 +120,62 @@ public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
     @Override
     public void insert(RemoteBagData obj) {
         obj.setId(String.valueOf(nextId++));
-        rows.add(obj);
+        rows.add(copy(obj));
     }
 
     @Override
     public void update(RemoteBagData obj) {
-        // The service mutates the very instance getAll(...) handed back, so the row is already
-        // current; this records that the write happened for tests that care about the row identity.
         updateCount++;
-        if (!rows.contains(obj)) {
-            rows.add(obj);
+        replace(obj);
+    }
+
+    @Override
+    public int updateCounted(RemoteBagData obj) {
+        updateCount++;
+        return replace(obj) ? 1 : 0;
+    }
+
+    /**
+     * Writes {@code entity} over the stored row with its id only if that row still matches every
+     * condition, as the framework's operators do (one check-and-write).
+     */
+    @Override
+    public boolean updateIf(RemoteBagData entity, WhereCondition... expected) {
+        RemoteBagData row = stored(entity.getId());
+        if (row == null || !matchesAll(row, expected)) {
+            return false;
         }
+        updateCount++;
+        return replace(entity);
+    }
+
+    private boolean replace(RemoteBagData obj) {
+        for (int i = 0; i < rows.size(); i++) {
+            if (String.valueOf(obj.getId()).equals(rows.get(i).getId())) {
+                rows.set(i, copy(obj));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static RemoteBagData copy(RemoteBagData row) {
+        RemoteBagData copy = RemoteBagData.builder()
+                .playerUuid(row.getPlayerUuid())
+                .pageNumber(row.getPageNumber())
+                .contents(row.getContents())
+                .lastUpdated(row.getLastUpdated())
+                .build();
+        copy.setId(row.getId());
+        return copy;
+    }
+
+    private static List<RemoteBagData> copies(List<RemoteBagData> source) {
+        List<RemoteBagData> result = new ArrayList<>();
+        for (RemoteBagData row : source) {
+            result.add(copy(row));
+        }
+        return result;
     }
 
     @Override
@@ -170,6 +226,12 @@ public class InMemoryRemoteBagStore implements DataOperator<RemoteBagData> {
         }
         if ("id".equals(column)) {
             return String.valueOf(value).equals(row.getId());
+        }
+        if ("contents".equals(column)) {
+            return String.valueOf(value).equals(row.getContents());
+        }
+        if ("last_updated".equals(column)) {
+            return String.valueOf(value).equals(String.valueOf(row.getLastUpdated()));
         }
         throw new UnsupportedOperationException(
                 "no in-memory matcher for column '" + column + "'; add one before asserting against it");

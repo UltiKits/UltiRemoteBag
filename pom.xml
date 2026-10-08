@@ -120,6 +120,23 @@
             <version>4.101.0</version>
             <scope>test</scope>
         </dependency>
+        <!-- Test scope only, never in the built jar: the shared-database tests run two "servers" on one
+             real SQLite file through the framework's own SQLiteDataOperator, which takes a plain DataSource
+             and declares no driver (UltiKits/UltiRemoteBag#54). Same coordinates as UltiWorlds' test pins. -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.41.2.2</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- AbstractRelationalDataOperator uses commons-dbutils' QueryRunner; the framework declares it
+             provided (Paper's libraries: block supplies it at runtime). Test scope only. -->
+        <dependency>
+            <groupId>commons-dbutils</groupId>
+            <artifactId>commons-dbutils</artifactId>
+            <version>1.8.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
     
     <build>

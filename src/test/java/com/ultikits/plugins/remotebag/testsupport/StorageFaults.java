@@ -1,0 +1,236 @@
+package com.ultikits.plugins.remotebag.testsupport;
+
+import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
+import com.ultikits.ultitools.exceptions.DataAccessException;
+import com.ultikits.ultitools.exceptions.ErrorCode;
+import com.ultikits.ultitools.interfaces.DataOperator;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.sql.SQLException;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+
+/**
+ * Test support: a database that fails for one server only, the way a real one does (UltiKits/UltiRemoteBag#54,
+ * gate-1 findings F1 and F2 of plan 17-84).
+ * <p>
+ * {@link #install} replaces one server bean's {@link DataOperator} field with a proxy that forwards every call
+ * to the real operator unless a fault is armed. A fault applies to the methods named in {@link #onlyMethods}
+ * (all methods when none are named) and to calls whose first argument passes {@link #onlyFirstArgument}:
+ * <ul>
+ *   <li>{@link Mode#THROW}: the call throws the framework's {@link DataAccessException} without reaching the
+ *       database -- an outage, a dead pooled connection, pool exhaustion.</li>
+ *   <li>{@link Mode#HANG}: the call blocks until {@link #release} and then runs for real -- a statement on a
+ *       half-open connection that returns, and lands, much later.</li>
+ *   <li>{@link Mode#COMMIT_THEN_THROW}: the call runs for real and then throws -- the write landed, but the
+ *       server was told it failed (a connection that broke after the commit). Applies once, to the first selected
+ *       call, then the store is healthy again: armed on {@code transaction} and {@code updateIf}, it hits the
+ *       outermost of the two, so a whole transaction commits and then reports an error.</li>
+ * </ul>
+ * <p>
+ * Two hooks let a test tell a stall it made apart from a call that is merely slow (plan 17-86, CI flakes of
+ * UltiKits/UltiRemoteBag#56): {@link #whileHangArmed} reports when a {@link Mode#HANG} is armed and disarmed, so the
+ * server can keep its short call deadline for exactly that window, and {@link #anyCallParked} says whether some call
+ * is blocked in a hang right now.
+ */
+public final class StorageFaults {
+
+    /** What an armed fault does. */
+    public enum Mode {
+        /** Forward every call. */
+        NONE,
+        /** Throw without reaching the database. */
+        THROW,
+        /** Block until released, then run for real. */
+        HANG,
+        /** Run for real, then throw; once. */
+        COMMIT_THEN_THROW
+    }
+
+    /** Every thread blocked in a {@link Mode#HANG} right now, across every installed fault. */
+    private static final Set<Thread> PARKED = ConcurrentHashMap.newKeySet();
+
+    private volatile Mode mode = Mode.NONE;
+    private volatile Consumer<Boolean> hangArmed = armed -> { };
+    private volatile Set<String> methods = new HashSet<>();
+    private volatile Predicate<Object> firstArgument = argument -> true;
+    private volatile CountDownLatch hang = new CountDownLatch(1);
+    private final AtomicInteger hung = new AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicReference<Runnable> before = new java.util.concurrent.atomic.AtomicReference<>();
+
+    /**
+     * Wraps {@code bean}'s operator field {@code field} and returns the faults that drive it.
+     *
+     * @param bean  a server's service
+     * @param field the name of its {@link DataOperator} field
+     * @return the switch for that server's store
+     */
+    public static StorageFaults install(Object bean, String field) throws Exception {
+        StorageFaults faults = new StorageFaults();
+        Object real = UltiRemoteBagTestHelper.getField(bean, field);
+        Object proxy = Proxy.newProxyInstance(StorageFaults.class.getClassLoader(), new Class<?>[] {DataOperator.class},
+                (self, method, args) -> faults.invoke(real, method, args));
+        UltiRemoteBagTestHelper.setField(bean, field, proxy);
+        return faults;
+    }
+
+    /** Arms {@code next} for the selected calls. */
+    public StorageFaults set(Mode next) {
+        boolean wasHang = mode == Mode.HANG;
+        if (next == Mode.HANG) {
+            hang = new CountDownLatch(1);
+        }
+        this.mode = next;
+        if (wasHang != (next == Mode.HANG)) {
+            hangArmed.accept(next == Mode.HANG);
+        }
+        return this;
+    }
+
+    /**
+     * Calls {@code listener} with {@code true} when a {@link Mode#HANG} is armed and with {@code false} when it is
+     * disarmed ({@link #set} to another mode, or {@link #heal}). {@link #release} lets hung calls go but leaves the
+     * hang armed, so it reports nothing.
+     */
+    public StorageFaults whileHangArmed(Consumer<Boolean> listener) {
+        this.hangArmed = listener;
+        return this;
+    }
+
+    /** Whether some call, of any installed fault, is blocked in a hang right now. */
+    public static boolean anyCallParked() {
+        return !PARKED.isEmpty();
+    }
+
+    /** Restricts the fault to these method names (for example {@code updateIf}). */
+    public StorageFaults onlyMethods(String... names) {
+        this.methods = new HashSet<>(Arrays.asList(names));
+        return this;
+    }
+
+    /** Restricts the fault to calls whose first argument passes {@code test}. */
+    public StorageFaults onlyFirstArgument(Predicate<Object> test) {
+        this.firstArgument = test;
+        return this;
+    }
+
+    /**
+     * Runs {@code otherServer} once, immediately before the next selected call reaches the database (no fault
+     * is needed): how another server acts in the middle of this server's action.
+     */
+    public StorageFaults onceBefore(Runnable otherServer) {
+        before.set(otherServer);
+        return this;
+    }
+
+    /** The store is healthy again; a hung call is let go and runs for real. */
+    public void heal() {
+        set(Mode.NONE);
+        release();
+    }
+
+    /** Lets every hung call go on (it then runs for real); the fault itself stays armed. */
+    public void release() {
+        hang.countDown();
+    }
+
+    /** How many calls are hung right now. */
+    public int hungCalls() {
+        return hung.get();
+    }
+
+    /** Waits (real time, at most two seconds) until at least {@code calls} calls are hung. */
+    public boolean awaitHung(int calls) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 2_000L;
+        while (System.currentTimeMillis() < deadline) {
+            if (hung.get() >= calls) {
+                return true;
+            }
+            Thread.sleep(5L);
+        }
+        return hung.get() >= calls;
+    }
+
+    private boolean applies(Method method, Object[] args) {
+        if (method.getDeclaringClass().equals(Object.class)) {
+            return false;
+        }
+        if (!methods.isEmpty() && !methods.contains(method.getName())) {
+            return false;
+        }
+        return firstArgument.test(args == null || args.length == 0 ? null : args[0]);
+    }
+
+    private Object invoke(Object real, Method method, Object[] args) throws Throwable {
+        if (applies(method, args)) {
+            Runnable other = before.getAndSet(null);
+            if (other != null) {
+                other.run();
+            }
+        }
+        Mode now = mode;
+        if (now != Mode.NONE && applies(method, args)) {
+            switch (now) {
+                case THROW:
+                    throw outage();
+                case HANG:
+                    hung.incrementAndGet();
+                    boolean interrupted = false;
+                    try {
+                        // Uninterruptible, as a JDBC call blocked on the network is: a pool shut down with
+                        // shutdownNow() does not stop it, and the call still runs for real afterwards.
+                        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+                        PARKED.add(Thread.currentThread());
+                        try {
+                            while (hang.getCount() > 0 && System.nanoTime() < until) {
+                                try {
+                                    hang.await(until - System.nanoTime(), TimeUnit.NANOSECONDS);
+                                } catch (InterruptedException e) {
+                                    interrupted = true;
+                                }
+                            }
+                        } finally {
+                            // Let go: from here the call runs for real, and counts as running, not parked.
+                            PARKED.remove(Thread.currentThread());
+                        }
+                        return forward(real, method, args);
+                    } finally {
+                        // After the real call: "no call is hung" means every hung call has also finished.
+                        hung.decrementAndGet();
+                        if (interrupted) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                case COMMIT_THEN_THROW:
+                    mode = Mode.NONE;
+                    forward(real, method, args);
+                    throw outage();
+                default:
+                    break;
+            }
+        }
+        return forward(real, method, args);
+    }
+
+    private static Object forward(Object real, Method method, Object[] args) throws Throwable {
+        try {
+            return method.invoke(real, args);
+        } catch (InvocationTargetException e) {
+            throw e.getCause();
+        }
+    }
+
+    private static DataAccessException outage() {
+        return new DataAccessException(ErrorCode.DATA_OPERATION_FAILED, "test: database unreachable",
+                new SQLException("test: connection reset"));
+    }
+}

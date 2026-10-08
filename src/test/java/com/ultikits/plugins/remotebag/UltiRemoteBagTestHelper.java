@@ -1,6 +1,7 @@
 package com.ultikits.plugins.remotebag;
 
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
+import com.ultikits.plugins.remotebag.service.RemoteBagService;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
 
@@ -12,6 +13,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 
 import java.lang.reflect.Field;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -117,6 +120,31 @@ public final class UltiRemoteBagTestHelper {
         return player;
     }
 
+    /**
+     * Puts a page into a service's read cache, as a read of the database would have.
+     * <p>
+     * Tests used {@code RemoteBagService#setBagPage} for this; it was removed with UltiKits/UltiRemoteBag#54
+     * (maintainer decision 2026-10-06 00:04), because nothing may put a page into the cache that is not
+     * what the database holds -- the cache is never written back. A test that only needs the read cache to
+     * hold a page (the window's counts) seeds it here.
+     *
+     * @param service the service whose cache to seed
+     * @param owner   the bag's owner
+     * @param page    the page number
+     * @param items   the page's items
+     */
+    @SuppressWarnings({"unchecked", "PMD.AvoidAccessibilityAlteration"})
+    public static void cachePage(RemoteBagService service, UUID owner, int page, ItemStack[] items) {
+        try {
+            Field field = RemoteBagService.class.getDeclaredField("bagCache");
+            field.setAccessible(true);
+            Map<UUID, Map<Integer, ItemStack[]>> cache = (Map<UUID, Map<Integer, ItemStack[]>>) field.get(service);
+            cache.computeIfAbsent(owner, k -> new HashMap<>()).put(page, items);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("could not seed the bag cache", e);
+        }
+    }
+
     // --- Reflection ---
 
     public static void setStaticField(Class<?> clazz, String fieldName, Object value)
@@ -124,6 +152,12 @@ public final class UltiRemoteBagTestHelper {
         Field field = clazz.getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(null, value);
+    }
+
+    public static Object getStaticField(Class<?> clazz, String fieldName) throws Exception {
+        Field field = clazz.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field.get(null);
     }
 
     public static void setField(Object target, String fieldName, Object value) throws Exception {

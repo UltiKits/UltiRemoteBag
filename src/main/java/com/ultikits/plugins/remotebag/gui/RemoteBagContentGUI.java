@@ -3,8 +3,10 @@ package com.ultikits.plugins.remotebag.gui;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.BagOpenResult;
 import com.ultikits.plugins.remotebag.enums.AccessMode;
+import com.ultikits.plugins.remotebag.service.BagEditClaimService;
 import com.ultikits.plugins.remotebag.service.BagLockService;
 import com.ultikits.plugins.remotebag.service.RemoteBagService;
+import com.ultikits.plugins.remotebag.util.ItemReturns;
 import com.ultikits.plugins.remotebag.util.SoundUtil;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.abstracts.gui.BaseInventoryPage;
@@ -30,6 +32,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -60,6 +63,26 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     private final UUID ownerUuid;
     private final int pageNum;
     private final AccessMode accessMode;
+
+    /**
+     * What this window read of its page when it opened (or last refreshed), or what its last save wrote:
+     * its next save is written only if the stored page is still this, so a stale window can never
+     * overwrite a page another server changed (UltiKits/UltiRemoteBag#54).
+     */
+    private RemoteBagService.PageRead pageRead;
+
+    /**
+     * Set when this window's edit claim was lost (UltiKits/UltiRemoteBag#54): from then on the window behaves
+     * read-only and writes nothing.
+     */
+    private boolean editRightsLost;
+
+    /**
+     * The token of the edit claim this window's session holds, recorded when it opens; {@code null} for a read-only
+     * window or without a claim service. A background notice acts on this window only if it names this token, so a
+     * notice queued for an earlier session of the same page leaves this one alone (gate 2 Codex run 2).
+     */
+    private String claimToken;
     
     /**
      * 内容区域槽位数（前 5 行 = 45 槽）
@@ -156,6 +179,10 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     @Override
     protected void setupContent(InventoryOpenEvent event) {
+        BagEditClaimService claims = lockService.getClaimService();
+        if (accessMode == AccessMode.EDIT && claims != null) {
+            claimToken = claims.tokenOf(ownerUuid, pageNum);
+        }
         // 加载背包内容到内容区域
         loadBagContents();
         
@@ -184,10 +211,20 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * administrator can still act on the wrong picture.
      */
     private void loadBagContents() {
-        // 确保背包数据已加载
-        bagService.loadBagIfNeeded(ownerUuid);
-
-        ItemStack[] contents = bagService.getBagPage(ownerUuid, pageNum);
+        BagEditClaimService claims = lockService.getClaimService();
+        ItemStack[] keptContent = claims == null || isEditable() ? null : claims.keptItems(ownerUuid, pageNum);
+        ItemStack[] contents;
+        if (keptContent != null) {
+            // This server is still writing the page's last changes (a save the database did not answer): a view
+            // shows them, not the older stored page (UltiKits/UltiRemoteBag#54). Read-only, so nothing is saved
+            // from it.
+            contents = keptContent;
+        } else {
+            // Read from the database, not from the cache: this is what the window's save is conditioned on
+            // (UltiKits/UltiRemoteBag#54).
+            pageRead = bagService.readPage(ownerUuid, pageNum);
+            contents = pageRead == null ? null : pageRead.getItems();
+        }
         for (int i = 0; i < CONTENT_SIZE; i++) {
             // 物品直接放入，不设置 Icon 点击事件
             // 编辑模式下允许自由移动，只读模式在 onClick 中处理
@@ -284,18 +321,32 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         
         Icon icon = new Icon(item);
         icon.onClick(e -> {
+            if (lockService.isClaimedElsewhere(ownerUuid, pageNum)) {
+                // Still being edited on another server (UltiKits/UltiRemoteBag#54): stay read-only, say why,
+                // and show the page as stored now.
+                SoundUtil.playErrorSound(player, config);
+                player.sendMessage(BagOpenResult.readOnlyElsewhere().renderMessage(plugin));
+                loadBagContents();
+                return;
+            }
             // 检查是否可以升级为编辑模式
             if (lockService.canUpgradeToEdit(ownerUuid, pageNum)) {
                 player.sendMessage(ChatColor.GREEN + plugin.i18n("msg_upgrading_to_edit"));
                 player.closeInventory();
                 
-                // 重新以编辑模式打开
-                BagOpenResult result = lockService.adminOpen(ownerUuid, pageNum, player);
+                // 重新以编辑模式打开 -- as the owner when it is the viewer's own bag, which since
+                // UltiKits/UltiRemoteBag#54 can be open read-only because another server was editing it.
+                BagOpenResult result = player.getUniqueId().equals(ownerUuid)
+                        ? lockService.ownerOpen(ownerUuid, pageNum, player)
+                        : lockService.adminOpen(ownerUuid, pageNum, player);
                 if (result.isEditMode()) {
                     new RemoteBagContentGUI(player, plugin, ownerUuid, pageNum,
                             bagService, lockService, config, AccessMode.EDIT).open();
                 } else {
                     // 如果还是无法获取编辑权限，以只读模式重新打开
+                    if (result.getNotice() != null) {
+                        player.sendMessage(result.renderMessage(plugin));
+                    }
                     new RemoteBagContentGUI(player, plugin, ownerUuid, pageNum,
                             bagService, lockService, config, AccessMode.READ_ONLY).open();
                 }
@@ -452,7 +503,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return CANCEL;
         }
 
-        if (accessMode == AccessMode.READ_ONLY) {
+        if (!confirmEditable(true)) {
             if (isRefusalWorthAnnouncing(event, insideBagWindow)) {
                 SoundUtil.playErrorSound(player, config);
                 player.sendMessage(ChatColor.RED + plugin.i18n("msg_readonly_no_move"));
@@ -567,7 +618,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
                 continue;
             }
 
-            if (accessMode == AccessMode.READ_ONLY) {
+            if (!confirmEditable(true)) {
                 // In read-only the whole window is guarded, toolbar included, and "read-only" is the
                 // reason for all of it.
                 announceDragRefusal(plugin.i18n("msg_readonly_no_move"));
@@ -661,21 +712,242 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     @Override
     public void onClose(InventoryCloseEvent event) {
-        if (accessMode == AccessMode.EDIT) {
-            // 编辑模式 - 保存并释放锁
-            // Unconditional, and it has to stay that way until something in this class can hand the
-            // window's contents back. Edit-mode clicks are not cancelled, so an item the player has
-            // dragged in has already left their own inventory; a close that skips this call destroys
-            // it. That is why `save_on_close` was deleted rather than wired
-            // (UltiKits/UltiRemoteBag#18), and the constraint any future switch must satisfy is
-            // recorded in UltiKits/UltiRemoteBag#37.
-            saveCurrentContents();
-            lockService.release(ownerUuid, pageNum, player.getUniqueId());
-            SoundUtil.playCloseSound(player, config);
-        } else {
-            // 只读模式 - 仅释放只读会话
-            lockService.release(ownerUuid, pageNum, player.getUniqueId());
+        try {
+            if (confirmEditable(false)) {
+                // 编辑模式 - 保存并释放锁
+                // Unconditional, and it has to stay that way: edit-mode clicks are not cancelled, so an item
+                // the player has dragged in has already left their own inventory. That is why `save_on_close`
+                // was deleted rather than wired (UltiKits/UltiRemoteBag#18, #37). A save that is refused gives
+                // those items back instead (UltiKits/UltiRemoteBag#54).
+                saveCurrentContents(false);
+                SoundUtil.playCloseSound(player, config);
+            }
+        } finally {
+            // Always, even if the save threw: the lock and the edit claim (and with it the claim's background
+            // renewal) never outlive the window (UltiKits/UltiRemoteBag#54).
+            releaseLock();
+            // A view of another player's bag leaves no copy of it behind (UltiKits/UltiRemoteBag#54).
+            bagService.forgetUnlessOnline(ownerUuid);
         }
+    }
+
+    /** Whether this window may change its page: opened for editing, and not turned read-only since. */
+    private boolean isEditable() {
+        return accessMode == AccessMode.EDIT && !editRightsLost;
+    }
+
+    /**
+     * Whether this window may change its page right now, asking its edit claim first (from memory, no database
+     * call): a lost claim turns it read-only and gives back the items put in; a claim that could not be confirmed
+     * turns it read-only and keeps what it shows as a write made later (UltiKits/UltiRemoteBag#54, gate 1 F1). Asked
+     * before every edit click and drag, and before every save.
+     *
+     * @param windowStaysOpen whether the window stays open (a lost claim then redraws it from the stored page)
+     */
+    private boolean confirmEditable(boolean windowStaysOpen) {
+        if (!isEditable()) {
+            return false;
+        }
+        BagEditClaimService claims = lockService.getClaimService();
+        if (claims == null) {
+            return true;
+        }
+        switch (claims.editState(ownerUuid, pageNum, claimToken)) {
+            case LOST:
+                loseEditRights(windowStaysOpen);
+                return false;
+            case UNCONFIRMED:
+                keepAndTurnReadOnly();
+                return false;
+            default:
+                return true;
+        }
+    }
+
+    /**
+     * Called on the main thread when the edit claim of {@code holderUuid}'s session on this page could not be
+     * confirmed -- a renewal threw or did not answer in time (UltiKits/UltiRemoteBag#54; maintainer decision 3: "a
+     * failed renewal puts the window into read-only immediately"). The window that session has open turns read-only
+     * at once, and what it shows is kept and written as soon as the claim is confirmed again.
+     *
+     * @param holderUuid the player whose editing session holds the claim
+     * @param ownerUuid  the bag owner
+     * @param page       the page number
+     * @param token      the claim's session token; a window holding another claim is left alone
+     */
+    public static void claimTroubled(UUID holderUuid, UUID ownerUuid, int page, String token) {
+        RemoteBagContentGUI window = openWindowOf(holderUuid, ownerUuid, page);
+        if (window != null && window.isEditable() && window.holdsClaim(token)) {
+            window.keepAndTurnReadOnly();
+        }
+    }
+
+    /**
+     * Called on the main thread when a kept write of a page settled (written, refused or abandoned): every
+     * read-only window of the page on this server shows the page as stored now (UltiKits/UltiRemoteBag#54).
+     *
+     * @param ownerUuid the bag owner
+     * @param page      the page number
+     */
+    public static void keptWriteSettled(UUID ownerUuid, int page) {
+        if (InventoryAPI.getInstance() == null || Bukkit.getServer() == null) {
+            return;
+        }
+        for (Player viewer : new ArrayList<>(Bukkit.getOnlinePlayers())) {
+            Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
+            if (current instanceof RemoteBagContentGUI) {
+                RemoteBagContentGUI window = (RemoteBagContentGUI) current;
+                if (window.pageNum == page && ownerUuid.equals(window.ownerUuid) && !window.isEditable()) {
+                    try {
+                        window.loadBagContents();
+                    } catch (RuntimeException e) {
+                        // A view that cannot be redrawn now is redrawn by its Refresh button.
+                        window.plugin.getLogger().warn(e, window.plugin.i18n("log_bag_update_failed"));
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Module disable (UltiKits/UltiRemoteBag#54, gate 1 F3): every edit window still open keeps what it shows as a
+     * write -- the module's final flush writes it, or logs it -- and closes. Main thread.
+     */
+    public static void keepOpenEditWindowsForDisable() {
+        if (InventoryAPI.getInstance() == null || Bukkit.getServer() == null) {
+            return;
+        }
+        for (Player viewer : new ArrayList<>(Bukkit.getOnlinePlayers())) {
+            Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
+            if (current instanceof RemoteBagContentGUI) {
+                ((RemoteBagContentGUI) current).keepForDisable();
+            }
+        }
+    }
+
+    private void keepForDisable() {
+        try {
+            if (isEditable()) {
+                BagEditClaimService claims = lockService.getClaimService();
+                if (claims == null) {
+                    saveCurrentContents(false);
+                } else if (pageRead == null
+                        || !claims.keepWindow(player.getUniqueId(), ownerUuid, pageNum, currentContents(), pageRead, claimToken)) {
+                    // Lost: nothing may be written; what was put in goes back.
+                    loseEditRights(false);
+                }
+                editRightsLost = true;
+            }
+        } finally {
+            releaseLock();
+            bagService.forgetUnlessOnline(ownerUuid);
+            player.closeInventory();
+        }
+    }
+
+    /** The open window of {@code holderUuid} on this page, or {@code null}. */
+    private static RemoteBagContentGUI openWindowOf(UUID holderUuid, UUID ownerUuid, int page) {
+        if (holderUuid == null || InventoryAPI.getInstance() == null || Bukkit.getServer() == null) {
+            return null;
+        }
+        Player holder = Bukkit.getPlayer(holderUuid);
+        if (holder == null) {
+            return null;
+        }
+        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(holder);
+        if (current instanceof RemoteBagContentGUI) {
+            RemoteBagContentGUI window = (RemoteBagContentGUI) current;
+            if (window.pageNum == page && ownerUuid.equals(window.ownerUuid)) {
+                return window;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The claim could not be confirmed: read-only for good, and what the window shows is kept and written once the
+     * claim is confirmed again. Nothing is given back, because that write can still land.
+     */
+    private void keepAndTurnReadOnly() {
+        if (!isEditable()) {
+            return;
+        }
+        BagEditClaimService claims = lockService.getClaimService();
+        if (claims != null && (pageRead == null
+                || !claims.keepWindow(player.getUniqueId(), ownerUuid, pageNum, currentContents(), pageRead, claimToken))) {
+            loseEditRights(true);
+            return;
+        }
+        editRightsLost = true;
+        SoundUtil.playErrorSound(player, config);
+        player.sendMessage(plugin.i18n("bag_storage_trouble_read_only"));
+    }
+
+    /** What the window's content area holds now. */
+    private ItemStack[] currentContents() {
+        ItemStack[] contents = new ItemStack[CONTENT_SIZE];
+        for (int i = 0; i < CONTENT_SIZE; i++) {
+            contents[i] = getInventory().getItem(i);
+        }
+        return contents;
+    }
+
+    /**
+     * Called on the main thread when the edit claim of {@code holderUuid}'s session on this page was lost
+     * (UltiKits/UltiRemoteBag#54): the window that session has open turns read-only at once, says so, gives back
+     * the items put in since its last save, and shows the page as stored now.
+     *
+     * @param holderUuid the player whose editing session held the claim
+     * @param ownerUuid  the bag owner
+     * @param page       the page number
+     * @param token      the lost claim's session token; a window holding another claim is left alone
+     */
+    public static void claimLost(UUID holderUuid, UUID ownerUuid, int page, String token) {
+        RemoteBagContentGUI window = openWindowOf(holderUuid, ownerUuid, page);
+        if (window != null && window.isEditable() && window.holdsClaim(token)) {
+            window.loseEditRights(true);
+        }
+    }
+
+    /** Releases this window's lock, and with it its own session's edit claim (named by its token, gate 2 top-up). */
+    private void releaseLock() {
+        if (claimToken == null) {
+            lockService.release(ownerUuid, pageNum, player.getUniqueId());
+        } else {
+            lockService.release(ownerUuid, pageNum, player.getUniqueId(), claimToken);
+        }
+    }
+
+    /** Whether this window's session holds the claim with {@code token}. */
+    private boolean holdsClaim(String token) {
+        return token != null && token.equals(claimToken);
+    }
+
+    /** Turns this window read-only for good, says so, and gives back what was put in since its last save. */
+    private void loseEditRights(boolean windowStaysOpen) {
+        editRightsLost = true;
+        SoundUtil.playErrorSound(player, config);
+        player.sendMessage(plugin.i18n("bag_claim_lost_read_only"));
+        giveBackPutIns();
+        if (windowStaysOpen) {
+            loadBagContents();
+        }
+    }
+
+    /**
+     * Gives back to the viewer every item this window holds beyond what it read of its page (or what its last
+     * save wrote) -- the items put in since -- because they are not going to be stored (UltiKits/UltiRemoteBag#54;
+     * maintainer decision of 2026-10-06). Moving an item within the page counts as nothing. What does not fit in
+     * the inventory drops at the viewer's feet; one log line names the items, the player and the page. Items
+     * taken out of the page are not taken back.
+     */
+    private void giveBackPutIns() {
+        ItemReturns.giveBack(player, plugin, ownerUuid, pageNum, putInSinceRead());
+    }
+
+    /** The items this window shows beyond what it read, by type and amount. */
+    private List<ItemStack> putInSinceRead() {
+        return ItemReturns.putIn(pageRead == null ? null : pageRead.getItems(), currentContents());
     }
     
     /**
@@ -713,26 +985,47 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         }
 
         RemoteBagContentGUI page = (RemoteBagContentGUI) current;
-        if (page.accessMode != AccessMode.EDIT
+        if (!page.isEditable()
                 || !viewer.getUniqueId().equals(page.ownerUuid)) {
             return FlushOutcome.NO_OPEN_PAGE;
+        }
+        if (!page.confirmEditable(true)) {
+            // It turned read-only just now and has said why (UltiKits/UltiRemoteBag#54).
+            return FlushOutcome.NOT_WRITTEN;
         }
 
         return page.saveCurrentContents() ? FlushOutcome.WRITTEN : FlushOutcome.NOT_WRITTEN;
     }
 
     /**
+     * Saves the edit-mode page {@code viewer} still has open, whoever's bag it is, before their quit
+     * releases its lock. Paper closes a quitting player's window before the quit event, so this normally
+     * finds nothing; it exists so the quit listener does not depend on that order.
+     *
+     * @param viewer the quitting player
+     */
+    public static void saveOpenEditPageOnQuit(Player viewer) {
+        if (viewer == null || InventoryAPI.getInstance() == null) {
+            return;
+        }
+        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
+        if (current instanceof RemoteBagContentGUI && ((RemoteBagContentGUI) current).confirmEditable(false)) {
+            ((RemoteBagContentGUI) current).saveCurrentContents(false);
+        }
+    }
+
+    /**
      * What {@link #flushOpenEditPage(Player)} did.
      * <p>
      * Three outcomes rather than a boolean, because a caller that reports "saved" has to distinguish
-     * "there was nothing open, so persist the cache instead" from "there was an open page and it did
+     * "there was nothing open" from "there was an open page and it did
      * not write" — the second must report nothing, since the page has already told the viewer why,
      * whether it declined for lack of authority or the database write failed.
      */
     public enum FlushOutcome {
-        /** No flushable page was open; the caller should persist the cache itself. */
+        /** No flushable page was open; nothing was written (nothing is ever written from the cache). */
         NO_OPEN_PAGE,
-        /** An open edit page was written, which also persisted the rest of that player's cache. */
+        /** An open edit page was written (that page only). */
         WRITTEN,
         /**
          * An open edit page did not write: it no longer holds edit authority, or the database write
@@ -806,7 +1099,8 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
     /**
      * 保存当前 GUI 中的内容到背包服务
      * <p>
-     * Copies this page's live inventory into the service cache and persists it.
+     * Writes this page's live inventory as the page, conditionally on what the window read
+     * ({@link RemoteBagService#savePage}, UltiKits/UltiRemoteBag#54); no other page is written.
      * <p>
      * Defence in depth, explicitly secondary: the primary protection against a stale page
      * overwriting a newer one is that a lock can no longer expire while its page is open
@@ -821,6 +1115,19 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * @return true if the contents were written
      */
     private boolean saveCurrentContents() {
+        return saveCurrentContents(true);
+    }
+
+    /**
+     * @param windowStaysOpen whether the window stays open after this save (Save button, {@code /bag save}), so
+     *                        a refused save also redraws it from the page as stored now
+     */
+    private boolean saveCurrentContents(boolean windowStaysOpen) {
+        if (!confirmEditable(windowStaysOpen)) {
+            // Read-only now (UltiKits/UltiRemoteBag#54): a lost claim gave back what was put in, an unconfirmed one
+            // kept what the window shows as a write made later; either way this window writes nothing more.
+            return false;
+        }
         if (!lockService.mayWrite(ownerUuid, pageNum, player.getUniqueId())) {
             // Somebody else holds this page now. Writing would overwrite their committed edits with
             // a snapshot taken before they existed. Refusing silently would trade their loss for
@@ -830,19 +1137,57 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return false;
         }
 
-        ItemStack[] contents = new ItemStack[CONTENT_SIZE];
-        for (int i = 0; i < CONTENT_SIZE; i++) {
-            contents[i] = getInventory().getItem(i);
-        }
-        bagService.setBagPage(ownerUuid, pageNum, contents);
-        if (!bagService.saveBag(ownerUuid)) {
-            // The cache holds the edit but the database does not, so it is lost on the next restart.
-            // Discarding this result and reporting success is the same defect as reporting a save with
-            // an empty cache, one layer in.
+        if (pageRead == null) {
+            // Never read: there is nothing this window's contents may be written over.
             SoundUtil.playErrorSound(player, config);
             player.sendMessage(ChatColor.RED + plugin.i18n("msg_save_failed"));
             return false;
         }
-        return true;
+        ItemStack[] contents = currentContents();
+        BagEditClaimService claims = lockService.getClaimService();
+        if (claims == null) {
+            // Only this page, and only over what this window read (UltiKits/UltiRemoteBag#54).
+            RemoteBagService.PageRead written = bagService.savePage(ownerUuid, pageNum, contents, pageRead);
+            if (written == null) {
+                refused(windowStaysOpen);
+                return false;
+            }
+            pageRead = written;
+            return true;
+        }
+        // Only this page, only over what this window read, and only while its claim is confirmed; a write the
+        // database does not answer is kept and retried, never given back (UltiKits/UltiRemoteBag#54, gate 1 F2).
+        BagEditClaimService.SaveResult result =
+                claims.saveWindow(player.getUniqueId(), ownerUuid, pageNum, contents, pageRead, claimToken);
+        switch (result.getOutcome()) {
+            case WRITTEN:
+                pageRead = result.getWritten();
+                return true;
+            case LOST:
+                loseEditRights(windowStaysOpen);
+                return false;
+            case KEPT:
+                editRightsLost = true;
+                SoundUtil.playErrorSound(player, config);
+                player.sendMessage(ChatColor.YELLOW + plugin.i18n("msg_save_pending"));
+                return false;
+            default:
+                refused(windowStaysOpen);
+                return false;
+        }
+    }
+
+    /**
+     * The database refused the write: the stored page is not what this window read. Reporting success here would be
+     * the same defect as reporting a save that did not happen. What was put in since the read goes back to the viewer
+     * (UltiKits/UltiRemoteBag#54); a window that stays open then shows the page as stored now and saves over that.
+     */
+    private void refused(boolean windowStaysOpen) {
+        SoundUtil.playErrorSound(player, config);
+        player.sendMessage(ChatColor.RED + plugin.i18n("msg_save_failed"));
+        giveBackPutIns();
+        if (windowStaysOpen) {
+            loadBagContents();
+        }
     }
 }

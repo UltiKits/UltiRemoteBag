@@ -43,11 +43,14 @@ import static org.mockito.Mockito.mock;
  * round-trip case reads it back through {@code loadBagIfNeeded} after the cache has been cleared,
  * so the stored YAML has to deserialize into the same slot.
  * <p>
- * {@link #savingWithNoPageOpenStillPersistsTheCache()} is the control for the store itself: it
- * proves that this harness's {@code /bag save} does write a row when the cache already holds the
- * item. Without it, "the row now contains the diamond" could pass for the wrong reason — a store
- * that accepts anything — and "no row was written" (the pre-fix behaviour) could not be
+ * {@link #savingFlushesTheOpenEditPage()} is the control for the store itself: it proves that this
+ * harness's {@code /bag save} does write a row. Without it, "no row was written" could not be
  * distinguished from a store that never records anything at all.
+ * <p>
+ * Since UltiKits/UltiRemoteBag#54 (maintainer decision 2026-10-06 00:04) nothing is written from the
+ * cache: with no page open, {@code /bag save} writes nothing, because every change was written when it
+ * was made, and a cached copy written now could overwrite a page another server changed since. The
+ * cases that asserted a write from the cache assert that instead.
  */
 @DisplayName("/bag save with a content page still open (UltiRemoteBag#22)")
 class BagSaveOpenPageTest {
@@ -132,11 +135,11 @@ class BagSaveOpenPageTest {
         // UUID, so every cached page was re-queried, re-serialized and re-updated a second time and
         // last_updated was written twice. Invisible in the stored contents -- the second write stores
         // the same bytes -- so the store counts its updates.
+        // An existing row, so the write takes the update branch rather than the insert branch; stored
+        // before the page opens, which is when the page reads what its save is conditioned on.
+        store.seed(player.getUniqueId().toString(), PAGE, "");
         RemoteBagContentGUI page = openEditPage();
         page.getInventory().setItem(CONTENT_SLOT, new ItemStack(Material.DIAMOND));
-        // An existing row, so the write takes the update branch rather than the insert branch.
-        bagService.setBagPage(player.getUniqueId(), PAGE, new ItemStack[45]);
-        bagService.saveBag(player.getUniqueId());
         int updatesBefore = store.updateCount();
 
         command.saveBag(player);
@@ -213,11 +216,11 @@ class BagSaveOpenPageTest {
         Bukkit.getPluginManager().callEvent(new InventoryOpenEvent(player.getOpenInventory()));
         targetsPage.getInventory().setItem(CONTENT_SLOT, new ItemStack(Material.DIAMOND));
 
-        // Control: the sender does have a page of their own in the cache, so a flush that wrongly
-        // treated this page as the sender's would be visible as a write, not as silence.
+        // Control: the sender does have a stored, cached page of their own, so a flush that wrongly
+        // treated this page as the sender's would be visible as a write over it, not as silence.
         ItemStack[] own = new ItemStack[45];
         own[CONTENT_SLOT] = new ItemStack(Material.EMERALD);
-        bagService.setBagPage(player.getUniqueId(), PAGE, own);
+        storeAndCache(own);
 
         command.saveBag(player);
 
@@ -225,8 +228,9 @@ class BagSaveOpenPageTest {
                 .as("/bag save must not write the bag of the player whose page the sender is viewing")
                 .isNull();
         assertThat(store.storedContents(player.getUniqueId().toString(), PAGE))
-                .as("control: the sender's own cached page was still persisted by the same command")
-                .contains("minecraft:emerald");
+                .as("control: the sender's own stored page is untouched by the same command")
+                .contains("minecraft:emerald")
+                .doesNotContain("minecraft:diamond");
     }
 
     @Test
@@ -244,16 +248,16 @@ class BagSaveOpenPageTest {
         Bukkit.getPluginManager().callEvent(new InventoryOpenEvent(admin.getOpenInventory()));
         adminsViewOfOurBag.getInventory().setItem(CONTENT_SLOT, new ItemStack(Material.DIAMOND));
 
-        // The sender has no page open and a cached page of their own.
+        // The sender has no page open and a stored, cached page of their own.
         ItemStack[] own = new ItemStack[45];
         own[CONTENT_SLOT] = new ItemStack(Material.EMERALD);
-        bagService.setBagPage(player.getUniqueId(), PAGE, own);
+        storeAndCache(own);
 
         command.saveBag(player);
 
         String stored = store.storedContents(player.getUniqueId().toString(), PAGE);
         assertThat(stored)
-                .as("the sender's own cached page is what was persisted")
+                .as("the sender's own stored page is what is stored")
                 .contains("minecraft:emerald");
         assertThat(stored)
                 .as("the admin's in-progress view of this bag must not have been persisted by the sender")
@@ -288,27 +292,38 @@ class BagSaveOpenPageTest {
         // Without this, the case above could pass because the command never reports success at all.
         ItemStack[] cached = new ItemStack[45];
         cached[CONTENT_SLOT] = new ItemStack(Material.DIAMOND);
-        bagService.setBagPage(player.getUniqueId(), PAGE, cached);
+        storeAndCache(cached);
 
         command.saveBag(player);
 
         assertThat(messagesSentTo(player))
-                .as("control: a real save is still confirmed")
+                .as("control: with the sender's pages held (and stored), the save is confirmed")
                 .contains("bag_saved_manually");
     }
 
     @Test
-    @DisplayName("With no page open, /bag save still persists what the cache already holds")
-    void savingWithNoPageOpenStillPersistsTheCache() {
-        ItemStack[] cached = new ItemStack[45];
-        cached[CONTENT_SLOT] = new ItemStack(Material.DIAMOND);
-        bagService.setBagPage(player.getUniqueId(), PAGE, cached);
+    @DisplayName("With no page open, /bag save writes nothing from the cache: a cached copy is never written over the stored page (UltiRemoteBag#54)")
+    void savingWithNoPageOpenWritesNothingFromTheCache() {
+        // The stored page is empty; this server's cache holds an older copy with a diamond in it (the
+        // page was emptied on another server since this one read it).
+        store.seed(player.getUniqueId().toString(), PAGE, "");
+        ItemStack[] stale = new ItemStack[45];
+        stale[CONTENT_SLOT] = new ItemStack(Material.DIAMOND);
+        UltiRemoteBagTestHelper.cachePage(bagService, player.getUniqueId(), PAGE, stale);
+        int updatesBefore = store.updateCount();
 
         command.saveBag(player);
 
         assertThat(store.storedContents(player.getUniqueId().toString(), PAGE))
-                .as("control: this harness's /bag save really does write a row")
-                .contains("minecraft:diamond");
+                .as("the cached copy is not written over the stored page")
+                .doesNotContain("minecraft:diamond");
+        assertThat(store.updateCount()).as("nothing was written").isEqualTo(updatesBefore);
+    }
+
+    /** Stores a page for the sender and puts it in the read cache, as a read of it would. */
+    private void storeAndCache(ItemStack[] items) {
+        bagService.savePage(player.getUniqueId(), PAGE, items, bagService.readPage(player.getUniqueId(), PAGE));
+        UltiRemoteBagTestHelper.cachePage(bagService, player.getUniqueId(), PAGE, items);
     }
 
     /** Every chat line sent to this player since the last read, joined; i18n echoes its key. */

@@ -4,6 +4,7 @@ import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.RemoteBagData;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.Service;
+import com.ultikits.ultitools.entities.WhereCondition;
 import com.ultikits.ultitools.exceptions.DataAccessException;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.utils.EconomyUtils;
@@ -32,7 +33,17 @@ public class RemoteBagService {
 
     private DataOperator<RemoteBagData> dataOperator;
 
-    // Cache for player bags - Map<PlayerUUID, Map<PageNumber, ItemStack[]>>
+    /**
+     * Read cache of players' bag pages, {@code Map<PlayerUUID, Map<PageNumber, ItemStack[]>>}, for the
+     * views that only display them (the main window's counts, {@code /bag list}).
+     * <p>
+     * Nothing is ever written to the database from it (UltiKits/UltiRemoteBag#54; maintainer decision of
+     * 2026-10-06 00:04). A page is written only by its own window, from what that window shows, and only if
+     * the stored page is still what the window read ({@link #savePage}); a page is created, cleared or deleted
+     * from what the database holds at that moment. An entry belongs to the session that read it: the owner's
+     * is dropped when they quit this server, and one read for another player is dropped when the view or
+     * command that read it is done, unless that player is on this server ({@link #forgetUnlessOnline}).
+     */
     private final Map<UUID, Map<Integer, ItemStack[]>> bagCache = new ConcurrentHashMap<>();
 
     /**
@@ -114,83 +125,229 @@ public class RemoteBagService {
     }
     
     /**
-     * Set contents of a bag page.
+     * What one window read of one stored page: its items, and what it must still find stored for its
+     * save to be written ({@link #savePage}).
      */
-    public void setBagPage(UUID playerUuid, int page, ItemStack[] contents) {
-        bagCache.computeIfAbsent(playerUuid, k -> new HashMap<>()).put(page, contents);
-    }
-    
-    /**
-     * Save bag to database.
-     * <p>
-     * Reports whether EVERY cached page reached the database. Ways it can be false, and a caller
-     * that announces a save has to be able to tell them apart from success: nothing is cached at all
-     * for a player who has not opened a bag this session, so no row is written; an update can fail
-     * because the entity's fields cannot be read (the {@link com.ultikits.ultitools.exceptions.DataAccessException}
-     * that {@code DataOperator#updateCounted} wraps an {@link IllegalAccessException} in); or the
-     * page's stored row is gone by the time of the write (another server on a shared database deleted
-     * it), which {@code updateCounted} reports as 0 rows (UltiKits/UltiRemoteBag#50). The last two are
-     * logged and swallowed here because one bad page must not cost the others. Any other storage
-     * failure propagates. Use {@link #hasCachedPages(UUID)} to tell "nothing to write" from "a write failed".
-     *
-     * @param playerUuid 玩家 UUID
-     * @return true if every cached page was inserted or updated; false if there was nothing to write
-     *         or if any page failed
-     */
-    public boolean saveBag(UUID playerUuid) {
-        Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
-        if (pages == null || pages.isEmpty()) {
-            return false;
+    public static final class PageRead {
+        private final ItemStack[] items;
+        private final boolean stored;
+        private final String contents;
+        private final long lastUpdated;
+
+        PageRead(ItemStack[] items, boolean stored, String contents, long lastUpdated) {
+            this.items = items;
+            this.stored = stored;
+            this.contents = contents;
+            this.lastUpdated = lastUpdated;
         }
 
-        boolean written = true;
-        for (Map.Entry<Integer, ItemStack[]> entry : pages.entrySet()) {
-            String contents = serializeItems(entry.getValue());
+        /** The page's items as read. */
+        public ItemStack[] getItems() {
+            return items;
+        }
 
-            // Check if exists
-            List<RemoteBagData> existing = dataOperator.query()
-                    .where("player_uuid").eq(playerUuid.toString())
-                    .where("page_number").eq(entry.getKey())
-                    .list();
+        /** Whether a row was stored for the page when it was read. */
+        public boolean isStored() {
+            return stored;
+        }
 
-            if (existing.isEmpty()) {
-                dataOperator.insert(RemoteBagData.create(playerUuid, entry.getKey(), contents));
-            } else {
-                RemoteBagData data = existing.get(0);
-                data.setContents(contents);
-                data.setLastUpdated(System.currentTimeMillis());
-                try {
-                    // Counted: a row deleted between the read above and this write (another server on a
-                    // shared database) matches nothing, and update(T) would return normally for it
-                    // (UltiKits/UltiRemoteBag#50, UltiTools-Reborn#558).
-                    if (dataOperator.updateCounted(data) == 0) {
-                        plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
-                        // Same outcome as an unwritable page: keep going, but do not report a completed save.
-                        written = false;
-                    }
-                } catch (DataAccessException e) {
-                    // updateCounted wraps a field-access failure of the write in this exception; that is the
-                    // one the old update(T) threw as IllegalAccessException. Any other storage failure
-                    // propagates exactly as it did.
-                    if (!(e.getCause() instanceof IllegalAccessException)) {
-                        throw e;
-                    }
-                    plugin.getLogger().error(plugin.i18n("log_bag_update_failed"), e.getCause());
-                    // Keep going -- one unwritable page must not cost the others -- but do not let the
-                    // caller report a completed save.
-                    written = false;
+        /** The stored contents as read, in the storage format; {@code null} when none were stored. */
+        public String getContents() {
+            return contents;
+        }
+    }
+
+    /**
+     * Reads one page from the database for a window that shows it, and refreshes this page in the read
+     * cache if the player's bag is cached. The window keeps the result: its save is written only if the
+     * stored page is still this (UltiKits/UltiRemoteBag#54).
+     *
+     * @param playerUuid the bag's owner
+     * @param page       the page number
+     * @return the page as stored now; an empty page, not stored, when no row exists
+     */
+    public PageRead readPage(UUID playerUuid, int page) {
+        List<RemoteBagData> rows = storedRows(playerUuid, page);
+        PageRead read;
+        if (rows.isEmpty()) {
+            read = new PageRead(new ItemStack[PAGE_CAPACITY], false, null, 0L);
+        } else {
+            RemoteBagData row = rows.get(0);
+            read = new PageRead(deserializeItems(row.getContents(), page), true, row.getContents(), row.getLastUpdated());
+        }
+        Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
+        if (pages != null && read.isStored()) {
+            pages.put(page, com.ultikits.plugins.remotebag.util.ItemReturns.deepCopy(read.getItems()));
+        }
+        return read;
+    }
+
+    /**
+     * Saves one page from the window that shows it, so that it can never overwrite a change another server
+     * sharing the database made to the page (UltiKits/UltiRemoteBag#54; maintainer decision of 2026-10-06
+     * 00:04).
+     * <p>
+     * The write is {@code DataOperator#updateIf} conditioned on the stored contents {@code read} saw (on its
+     * {@code last_updated} for a row whose contents were {@code NULL}), so it applies only if nobody has
+     * written the page since the window read it. A page that had no row is inserted only if it still has none.
+     * Otherwise nothing is written, {@code log_bag_update_failed} is logged, and the stored page stays as the
+     * other writer left it: an item this window put in is then not in the bag, and an item it took out is
+     * still stored (two servers cannot have one page open for editing at once, so this takes a writer outside
+     * the module, or a server that stalled past {@code lock.timeout_seconds}). Only this page is written; no
+     * other page of the player is touched. On MySQL the comparison follows the column's collation, which
+     * ignores letter case: a change that only altered the case of an item's text is not detected.
+     *
+     * @param playerUuid the bag's owner
+     * @param page       the page number
+     * @param items      what the window shows now
+     * @param read       what the window read, or what its last save wrote
+     * @return the page as now stored, for the window's next save; {@code null} if nothing was written
+     */
+    public PageRead savePage(UUID playerUuid, int page, ItemStack[] items, PageRead read) {
+        return write(playerUuid, page, items, serializePage(items), read, true);
+    }
+
+    /**
+     * The page as stored after a write of {@code contents} that is known to have landed, for the window's next save.
+     *
+     * @param items    the items written
+     * @param contents {@code items} in the storage format
+     * @return what the window's next save is conditioned on
+     */
+    public PageRead storedRead(ItemStack[] items, String contents) {
+        return new PageRead(com.ultikits.plugins.remotebag.util.ItemReturns.deepCopy(items), true, contents, 0L);
+    }
+
+    /**
+     * Runs {@code action} in one transaction of the page table's operator (UltiKits/UltiRemoteBag#54, gate 1 round 2).
+     * On SQLite and MySQL the framework gives every operator of one module the same transaction manager, whose
+     * connection is bound to the calling thread: a claim written through the claims operator inside {@code action}
+     * is in the same transaction. On JSON, which belongs to one server, only this table's changes are rolled back.
+     *
+     * @param action what to run
+     * @param <R>    its result
+     * @return what {@code action} returned, after the commit
+     * @throws Exception what {@code action} or the commit threw, after the rollback
+     */
+    public <R> R inPageTransaction(java.util.concurrent.Callable<R> action) throws Exception {
+        return dataOperator.transaction(action);
+    }
+
+    /**
+     * The page in the storage format, for {@link #writePage}. Run where the items may be read (the main thread).
+     *
+     * @param items the page's items
+     * @return the stored form
+     */
+    public String serializePage(ItemStack[] items) {
+        return serializeItems(items);
+    }
+
+    /**
+     * The write of {@link #savePage}, with the contents already in the storage format and without its log line:
+     * the caller decides what a write that was not applied means (UltiKits/UltiRemoteBag#54). Safe off the main
+     * thread: it touches no Bukkit state.
+     *
+     * @param playerUuid the bag's owner
+     * @param page       the page number
+     * @param items      what the window shows (kept as the stored page's items in the result)
+     * @param contents   {@code items} in the storage format ({@link #serializePage})
+     * @param read       what the window read, or what its last save wrote
+     * @return the page as now stored; {@code null} if nothing was written because the stored page is not
+     *         {@code read} (or no longer exists)
+     * @throws RuntimeException a storage failure, as the data operator reports it
+     */
+    public PageRead writePage(UUID playerUuid, int page, ItemStack[] items, String contents, PageRead read) {
+        return write(playerUuid, page, items, contents, read, false);
+    }
+
+    private PageRead write(UUID playerUuid, int page, ItemStack[] items, String contents, PageRead read, boolean logMiss) {
+        List<RemoteBagData> rows = storedRows(playerUuid, page);
+        boolean written;
+        RemoteBagData target = null;
+        if (rows.isEmpty()) {
+            // The row this window read was deleted since (another server, an administrator): nothing to
+            // write it over, and re-creating it would undo the deletion (UltiKits/UltiRemoteBag#50).
+            written = !read.isStored() && insertPage(playerUuid, page, contents);
+        } else if (!read.isStored()) {
+            // A row was created for this page since the window read none: it is somebody else's.
+            written = false;
+        } else {
+            target = rows.get(0);
+            WhereCondition asRead = read.contents != null
+                    ? WhereCondition.builder().column("contents").value(read.contents).build()
+                    : WhereCondition.builder().column("last_updated").value(read.lastUpdated).build();
+            target.setContents(contents);
+            target.setLastUpdated(System.currentTimeMillis());
+            try {
+                written = dataOperator.updateIf(target, asRead);
+            } catch (DataAccessException e) {
+                // updateIf wraps a field-access failure of the write in this exception; any other storage
+                // failure propagates exactly as it did.
+                if (!(e.getCause() instanceof IllegalAccessException)) {
+                    throw e;
                 }
+                plugin.getLogger().error(plugin.i18n("log_bag_update_failed"), e.getCause());
+                return null;
             }
         }
-        return written;
+        if (!written) {
+            if (logMiss) {
+                plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
+            }
+            return null;
+        }
+        // Detached from the window's live stacks: this is the window's next baseline (gate 2 Codex P1).
+        ItemStack[] stored = com.ultikits.plugins.remotebag.util.ItemReturns.deepCopy(items);
+        if (logMiss) {
+            // A plain save: written with its own commit, so the display cache follows now. A fenced save's caller
+            // updates it after its transaction committed (rememberWritten).
+            rememberWritten(playerUuid, page, stored);
+        }
+        return new PageRead(stored, true, contents, target != null ? target.getLastUpdated() : 0L);
+    }
+
+    /**
+     * Shows a page in the display cache as written, if the player's bag is cached. Called only once the write has
+     * committed, so the cache never shows a page that a rollback took back (UltiKits/UltiRemoteBag#54, gate 1 R3-3).
+     *
+     * @param playerUuid the bag's owner
+     * @param page       the page number
+     * @param items      the page as written
+     */
+    public void rememberWritten(UUID playerUuid, int page, ItemStack[] items) {
+        Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
+        if (pages != null) {
+            pages.put(page, com.ultikits.plugins.remotebag.util.ItemReturns.deepCopy(items));
+        }
+    }
+
+    /**
+     * Inserts a page row, unless one is already stored for the page. Never overwrites a row.
+     *
+     * @return true if the row was inserted
+     */
+    private boolean insertPage(UUID playerUuid, int page, String contents) {
+        if (!storedRows(playerUuid, page).isEmpty()) {
+            return false;
+        }
+        dataOperator.insert(RemoteBagData.create(playerUuid, page, contents));
+        return true;
+    }
+
+    /** The rows stored for one page, read from the database now. */
+    private List<RemoteBagData> storedRows(UUID playerUuid, int page) {
+        return dataOperator.query()
+                .where("player_uuid").eq(playerUuid.toString())
+                .where("page_number").eq(page)
+                .list();
     }
 
     /**
      * Whether this player has any page in the cache at all.
      * <p>
-     * Lets a caller tell {@link #saveBag(UUID)}'s two falses apart: "there was nothing to write" and
-     * "a write failed" need different things said to the player, and reporting either as the other is
-     * the same defect class as reporting a save that did not happen.
+     * Lets {@code /bag save} tell "there is nothing of yours on this server" from "everything is stored":
+     * every change is written when it is made, so a cached page is always one that is stored.
      *
      * @param playerUuid 玩家 UUID
      * @return true if at least one page is cached for this player
@@ -199,16 +356,32 @@ public class RemoteBagService {
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
         return pages != null && !pages.isEmpty();
     }
-    
+
     /**
-     * Save all bags in cache.
+     * Re-reads a player's bag into the read cache, so a decision about which pages exist is made on what
+     * the database holds now, not on what this server read earlier (another server may have added or
+     * deleted pages since).
+     *
+     * @param playerUuid the player
      */
-    public void saveAllBags() {
-        for (UUID playerUuid : bagCache.keySet()) {
-            saveBag(playerUuid);
+    public void refreshBag(UUID playerUuid) {
+        bagCache.remove(playerUuid);
+        loadBagIfNeeded(playerUuid);
+    }
+
+    /**
+     * Drops a player's read cache entry unless that player is on this server, where their own session
+     * keeps it until they quit. Called when an administrator's view or command for another player is done,
+     * so no copy of a bag outlives the session that read it (UltiKits/UltiRemoteBag#54).
+     *
+     * @param playerUuid the bag's owner
+     */
+    public void forgetUnlessOnline(UUID playerUuid) {
+        if (Bukkit.getServer() == null || Bukkit.getPlayer(playerUuid) == null) {
+            bagCache.remove(playerUuid);
         }
     }
-    
+
     /**
      * Serialize items to YAML string.
      */
@@ -460,6 +633,9 @@ public class RemoteBagService {
      * @return 购买是否成功
      */
     public boolean purchaseBag(Player player) {
+        // Which pages exist, the price and the page created are decided on what is stored now: another
+        // server may have added a page since this one read the bag (UltiKits/UltiRemoteBag#54).
+        refreshBag(player.getUniqueId());
         if (!config.isEconomyEnabled() || !EconomyUtils.isAvailable()) {
             // 经济系统未启用，直接创建背包
             return createNewBagPage(player);
@@ -487,6 +663,9 @@ public class RemoteBagService {
     
     /**
      * 为玩家创建新的背包页
+     * <p>
+     * Writes only the new page's row, and only if no row is stored for that page number yet; no other page
+     * is written (UltiKits/UltiRemoteBag#54). The cache is updated after the row is stored.
      *
      * @param player 玩家
      * @return 是否成功
@@ -504,19 +683,20 @@ public class RemoteBagService {
             return false;
         }
         
-        // 创建空的背包页
+        return addEmptyPage(playerUuid, nextPage);
+    }
+
+    /**
+     * Stores a new empty page and adds it to the cache. A storage failure propagates with the cache
+     * unchanged; a row already stored for the page number (created on another server since this one read
+     * the bag) is left alone and reported as not created.
+     */
+    private boolean addEmptyPage(UUID playerUuid, int page) {
         ItemStack[] emptyContents = new ItemStack[PAGE_CAPACITY];
-        setBagPage(playerUuid, nextPage, emptyContents);
-
-        // 保存到数据库，失败时回滚缓存
-        try {
-            saveBag(playerUuid);
-        } catch (Exception e) {
-            Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
-            if (pages != null) pages.remove(nextPage);
-            throw e;
+        if (!insertPage(playerUuid, page, serializeItems(emptyContents))) {
+            return false;
         }
-
+        bagCache.computeIfAbsent(playerUuid, k -> new HashMap<>()).put(page, emptyContents);
         return true;
     }
 
@@ -529,26 +709,14 @@ public class RemoteBagService {
      * @return 新创建的背包页码，失败返回 -1
      */
     public int createBagPage(UUID playerUuid) {
-        loadBagIfNeeded(playerUuid);
+        // Decided on what is stored now (UltiKits/UltiRemoteBag#54).
+        refreshBag(playerUuid);
         
         // One past the highest STORED page; page 1 when nothing is stored (UltiKits/UltiRemoteBag#26).
         List<Integer> existingPages = getPlayerBagPages(playerUuid);
         int nextPage = existingPages.isEmpty() ? 1 : Collections.max(existingPages) + 1;
         
-        // 创建空的背包页
-        ItemStack[] emptyContents = new ItemStack[PAGE_CAPACITY];
-        setBagPage(playerUuid, nextPage, emptyContents);
-
-        // 保存到数据库，失败时回滚缓存
-        try {
-            saveBag(playerUuid);
-        } catch (Exception e) {
-            Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
-            if (pages != null) pages.remove(nextPage);
-            throw e;
-        }
-
-        return nextPage;
+        return addEmptyPage(playerUuid, nextPage) ? nextPage : -1;
     }
     
     /**
@@ -559,7 +727,8 @@ public class RemoteBagService {
      * @return 是否成功
      */
     public boolean deleteBagPage(UUID playerUuid, int page) {
-        loadBagIfNeeded(playerUuid);
+        // Decided on what is stored now (UltiKits/UltiRemoteBag#54).
+        refreshBag(playerUuid);
         
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
         if (pages == null || !pages.containsKey(page)) {
@@ -590,28 +759,39 @@ public class RemoteBagService {
      * @return 是否成功
      */
     public boolean clearBagPage(UUID playerUuid, int page) {
-        loadBagIfNeeded(playerUuid);
+        // Decided on what is stored now (UltiKits/UltiRemoteBag#54).
+        refreshBag(playerUuid);
         
         Map<Integer, ItemStack[]> pages = bagCache.get(playerUuid);
         if (pages == null || !pages.containsKey(page)) {
             return false;
         }
         
-        // 创建空的内容
+        // Only this page is written, conditioned on the contents it holds at each attempt: a clear empties
+        // whatever is stored, but never writes over a row it did not read (UltiKits/UltiRemoteBag#54).
         ItemStack[] emptyContents = new ItemStack[PAGE_CAPACITY];
-        ItemStack[] oldContents = pages.get(page);
-        setBagPage(playerUuid, page, emptyContents);
-
-        // 保存到数据库，失败时回滚缓存
-        try {
-            saveBag(playerUuid);
-        } catch (Exception e) {
-            if (oldContents != null) {
-                setBagPage(playerUuid, page, oldContents);
+        String empty = serializeItems(emptyContents);
+        for (int attempt = 1; attempt <= MAX_CLEAR_ATTEMPTS; attempt++) {
+            List<RemoteBagData> rows = storedRows(playerUuid, page);
+            if (rows.isEmpty()) {
+                pages.remove(page);
+                return false;
             }
-            throw e;
+            RemoteBagData row = rows.get(0);
+            WhereCondition asRead = row.getContents() != null
+                    ? WhereCondition.builder().column("contents").value(row.getContents()).build()
+                    : WhereCondition.builder().column("last_updated").value(row.getLastUpdated()).build();
+            row.setContents(empty);
+            row.setLastUpdated(System.currentTimeMillis());
+            if (dataOperator.updateIf(row, asRead)) {
+                pages.put(page, emptyContents);
+                return true;
+            }
         }
-
-        return true;
+        plugin.getLogger().error(plugin.i18n("log_bag_update_failed"));
+        return false;
     }
+
+    /** At most this many read-and-write attempts for one {@code /bag clear} before it reports failure. */
+    private static final int MAX_CLEAR_ATTEMPTS = 3;
 }

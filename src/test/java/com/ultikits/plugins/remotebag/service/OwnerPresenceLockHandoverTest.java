@@ -307,8 +307,7 @@ class OwnerPresenceLockHandoverTest {
     private void seedOwnerPageWithOneDiamond() {
         ItemStack[] page = new ItemStack[45];
         page[OWNER_SLOT] = new ItemStack(Material.DIAMOND);
-        bagService.setBagPage(owner.getUniqueId(), PAGE, page);
-        bagService.saveBag(owner.getUniqueId());
+        bagService.savePage(owner.getUniqueId(), PAGE, page, bagService.readPage(owner.getUniqueId(), PAGE));
         bagService.clearCache(owner.getUniqueId());
     }
 

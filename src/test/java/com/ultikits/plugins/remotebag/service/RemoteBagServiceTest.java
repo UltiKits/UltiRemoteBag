@@ -5,6 +5,7 @@ import com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper;
 import com.ultikits.plugins.remotebag.config.RemoteBagConfig;
 import com.ultikits.plugins.remotebag.entity.RemoteBagData;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
+import com.ultikits.ultitools.entities.WhereCondition;
 import com.ultikits.ultitools.interfaces.DataOperator;
 import com.ultikits.ultitools.interfaces.Query;
 import com.ultikits.ultitools.interfaces.impl.logger.PluginLogger;
@@ -78,6 +79,32 @@ class RemoteBagServiceTest {
     void tearDown() throws Exception {
         UltiRemoteBagTestHelper.tearDown();
         MockBukkitSupport.safeUnmock();
+    }
+
+    /**
+     * Switches the service to an in-memory store that filters by page and stores the given pages (empty).
+     * Since UltiKits/UltiRemoteBag#54 (maintainer decision 2026-10-06 00:04) a purchase, a create, a clear
+     * and a delete decide on what is stored now, not on the cache, so cases about those seed the store; a
+     * mocked query that ignores its conditions cannot answer "which pages are stored".
+     */
+    private InMemoryRemoteBagStore storePages(int... pages) throws Exception {
+        InMemoryRemoteBagStore store = new InMemoryRemoteBagStore();
+        UltiRemoteBagTestHelper.setField(service, "dataOperator", store);
+        for (int page : pages) {
+            store.seed(playerUuid.toString(), page, "");
+        }
+        return store;
+    }
+
+    @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
+    private static PluginLogger loggerOf(RemoteBagService service) {
+        try {
+            java.lang.reflect.Field pluginField = RemoteBagService.class.getDeclaredField("plugin");
+            pluginField.setAccessible(true);
+            return ((UltiToolsPlugin) pluginField.get(service)).getLogger();
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     // ==================== getPlayerMaxPages ====================
@@ -207,33 +234,10 @@ class RemoteBagServiceTest {
         }
 
         @Test
-        @DisplayName("setBagPage should store in cache")
-        void setBagPageStoresInCache() {
-            ItemStack[] contents = new ItemStack[45];
-            service.setBagPage(playerUuid, 1, contents);
-
-            ItemStack[] result = service.getBagPage(playerUuid, 1);
-            assertThat(result).isSameAs(contents);
-        }
-
-        @Test
-        @DisplayName("setBagPage should handle multiple pages")
-        void setBagPageMultiplePages() {
-            ItemStack[] page1 = new ItemStack[45];
-            ItemStack[] page2 = new ItemStack[45];
-
-            service.setBagPage(playerUuid, 1, page1);
-            service.setBagPage(playerUuid, 2, page2);
-
-            assertThat(service.getBagPage(playerUuid, 1)).isSameAs(page1);
-            assertThat(service.getBagPage(playerUuid, 2)).isSameAs(page2);
-        }
-
-        @Test
         @DisplayName("clearCache should remove player data")
         void clearCacheRemoves() {
             ItemStack[] contents = new ItemStack[45];
-            service.setBagPage(playerUuid, 1, contents);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, contents);
 
             service.clearCache(playerUuid);
 
@@ -241,21 +245,9 @@ class RemoteBagServiceTest {
         }
 
         @Test
-        @DisplayName("setBagPage should overwrite existing page")
-        void setBagPageOverwrites() {
-            ItemStack[] original = new ItemStack[45];
-            ItemStack[] replacement = new ItemStack[45];
-
-            service.setBagPage(playerUuid, 1, original);
-            service.setBagPage(playerUuid, 1, replacement);
-
-            assertThat(service.getBagPage(playerUuid, 1)).isSameAs(replacement);
-        }
-
-        @Test
         @DisplayName("getBagPage should return null for non-existent page of cached player")
         void getBagPageNonExistentPage() {
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, new ItemStack[45]);
 
             ItemStack[] result = service.getBagPage(playerUuid, 99);
             assertThat(result).isNull();
@@ -265,8 +257,8 @@ class RemoteBagServiceTest {
         @DisplayName("clearCache should not affect other players")
         void clearCacheDoesNotAffectOthers() {
             UUID otherUuid = UUID.randomUUID();
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            service.setBagPage(otherUuid, 1, new ItemStack[45]);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, new ItemStack[45]);
+            UltiRemoteBagTestHelper.cachePage(service, otherUuid, 1, new ItemStack[45]);
 
             service.clearCache(playerUuid);
 
@@ -302,7 +294,7 @@ class RemoteBagServiceTest {
             contents[1] = new ItemStack(Material.DIRT, 32);
             contents[2] = null;
 
-            service.setBagPage(playerUuid, 1, contents);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, contents);
 
             assertThat(service.getItemCount(playerUuid, 1)).isEqualTo(96); // 64 + 32
         }
@@ -315,7 +307,7 @@ class RemoteBagServiceTest {
             contents[1] = new ItemStack(Material.AIR, 5);
             contents[2] = null;
 
-            service.setBagPage(playerUuid, 1, contents);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, contents);
 
             assertThat(service.getItemCount(playerUuid, 1)).isEqualTo(10);
         }
@@ -323,7 +315,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return 0 for empty page (all null)")
         void returnsZeroForEmptyPage() {
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, new ItemStack[45]);
 
             assertThat(service.getItemCount(playerUuid, 1)).isZero();
         }
@@ -335,7 +327,7 @@ class RemoteBagServiceTest {
             contents[0] = new ItemStack(Material.DIAMOND_SWORD, 1);
             contents[1] = new ItemStack(Material.DIAMOND_PICKAXE, 1);
 
-            service.setBagPage(playerUuid, 1, contents);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, contents);
 
             assertThat(service.getItemCount(playerUuid, 1)).isEqualTo(2);
         }
@@ -348,7 +340,7 @@ class RemoteBagServiceTest {
                 contents[i] = new ItemStack(Material.STONE, 1);
             }
 
-            service.setBagPage(playerUuid, 1, contents);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, contents);
 
             assertThat(service.getItemCount(playerUuid, 1)).isEqualTo(45);
         }
@@ -374,7 +366,7 @@ class RemoteBagServiceTest {
             contents[1] = new ItemStack(Material.DIRT, 1);
             contents[2] = null;
 
-            service.setBagPage(playerUuid, 1, contents);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, contents);
 
             assertThat(service.getStackCount(playerUuid, 1)).isEqualTo(2);
         }
@@ -387,7 +379,7 @@ class RemoteBagServiceTest {
             contents[1] = new ItemStack(Material.AIR, 5);
             contents[2] = null;
 
-            service.setBagPage(playerUuid, 1, contents);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, contents);
 
             assertThat(service.getStackCount(playerUuid, 1)).isEqualTo(1);
         }
@@ -395,7 +387,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should return 0 for empty page")
         void returnsZeroForEmptyPage() {
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, new ItemStack[45]);
 
             assertThat(service.getStackCount(playerUuid, 1)).isZero();
         }
@@ -408,7 +400,7 @@ class RemoteBagServiceTest {
                 contents[i] = new ItemStack(Material.STONE, 64);
             }
 
-            service.setBagPage(playerUuid, 1, contents);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, contents);
 
             assertThat(service.getStackCount(playerUuid, 1)).isEqualTo(45);
         }
@@ -611,7 +603,7 @@ class RemoteBagServiceTest {
         @Test
         @DisplayName("Should not load when already in cache")
         void skipWhenInCache() {
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, new ItemStack[45]);
 
             service.loadBagIfNeeded(playerUuid);
 
@@ -684,183 +676,116 @@ class RemoteBagServiceTest {
         }
     }
 
-    // ==================== saveBag ====================
+    // ==================== savePage (UltiKits/UltiRemoteBag#54) ====================
 
+    /**
+     * A page is saved from its window only, conditioned on what the window read (maintainer decision
+     * 2026-10-06 00:04). These replace the {@code saveBag}/{@code saveAllBags} tests, which tested writing
+     * every cached page -- the stale write-back UltiRemoteBag#54 removes -- and keep the failure behaviours
+     * they pinned (UltiRemoteBag#50, the field-access failure, other failures propagating, the catalogue line).
+     */
     @Nested
-    @DisplayName("saveBag")
-    class SaveBag {
+    @DisplayName("savePage")
+    class SavePage {
+
+        @BeforeEach
+        @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
+        void echoCatalogueKeys() throws Exception {
+            java.lang.reflect.Field pluginField = RemoteBagService.class.getDeclaredField("plugin");
+            pluginField.setAccessible(true);
+            UltiToolsPlugin plugin = (UltiToolsPlugin) pluginField.get(service);
+            lenient().when(plugin.i18n(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        }
+
+        private RemoteBagService.PageRead readOf(RemoteBagData row) {
+            when(mockQuery.list()).thenReturn(row == null
+                    ? Collections.<RemoteBagData>emptyList() : Collections.singletonList(row));
+            return service.readPage(playerUuid, 1);
+        }
 
         @Test
-        @DisplayName("Should do nothing when not in cache")
-        void skipWhenNotInCache() throws Exception {
-            service.saveBag(playerUuid);
+        @DisplayName("A page that had no row is inserted, and only that page")
+        void insertsANewPage() {
+            RemoteBagService.PageRead read = readOf(null);
 
-            verify(dataOperator, never()).insert(any());
+            RemoteBagService.PageRead written = service.savePage(playerUuid, 1, new ItemStack[45], read);
+
+            assertThat(written).isNotNull();
+            verify(dataOperator, times(1)).insert(any(RemoteBagData.class));
+            verify(dataOperator, never()).updateIf(any(), any(WhereCondition[].class));
+        }
+
+        @Test
+        @DisplayName("An existing page is written with updateIf on the contents the window read")
+        void updatesConditionally() {
+            RemoteBagService.PageRead read = readOf(RemoteBagData.create(playerUuid, 1, "old-content"));
+            when(dataOperator.updateIf(any(RemoteBagData.class), any(WhereCondition[].class))).thenReturn(true);
+
+            RemoteBagService.PageRead written = service.savePage(playerUuid, 1, new ItemStack[45], read);
+
+            assertThat(written).isNotNull();
+            org.mockito.ArgumentCaptor<WhereCondition> condition = org.mockito.ArgumentCaptor.forClass(WhereCondition.class);
+            verify(dataOperator).updateIf(any(RemoteBagData.class), condition.capture());
+            assertThat(condition.getValue().getColumn()).isEqualTo("contents");
+            assertThat(condition.getValue().getValue()).isEqualTo("old-content");
             verify(dataOperator, never()).updateCounted(any());
         }
 
         @Test
-        @DisplayName("Should insert new bag data")
-        void insertsNewData() {
-            when(mockQuery.list()).thenReturn(Collections.emptyList());
+        @DisplayName("A conditional write that misses is not reported as saved and logs the update-failed line")
+        void aMissIsNotSaved() {
+            RemoteBagService.PageRead read = readOf(RemoteBagData.create(playerUuid, 1, "old-content"));
+            when(dataOperator.updateIf(any(RemoteBagData.class), any(WhereCondition[].class))).thenReturn(false);
 
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            service.saveBag(playerUuid);
-
-            verify(dataOperator).insert(any(RemoteBagData.class));
-        }
-
-        @Test
-        @DisplayName("Should update existing bag data")
-        void updatesExistingData() throws Exception {
-            RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
-            when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
-            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenReturn(1);
-
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            boolean saved = service.saveBag(playerUuid);
-
-            assertThat(saved).isTrue();
-            verify(dataOperator).updateCounted(any(RemoteBagData.class));
+            assertThat(service.savePage(playerUuid, 1, new ItemStack[45], read)).isNull();
+            verify(loggerOf(service)).error("log_bag_update_failed");
         }
 
         /**
          * UltiKits/UltiRemoteBag#50 (UltiTools-Reborn#558): a stored row that is gone by the time of the
-         * write -- another server on a shared database deleted the page between this server's read and its
-         * write -- is not a completed save. Before, {@code update} returned normally for it.
+         * write is not a completed save, and is not re-created.
          */
         @Test
-        @DisplayName("A write that matches no stored row is reported as not saved, and the other pages are still saved (UltiKits/UltiRemoteBag#50)")
+        @DisplayName("A row deleted since the window read it is reported as not saved and not re-created (UltiKits/UltiRemoteBag#50)")
         void aVanishedRowIsNotReportedAsSaved() {
-            RemoteBagData gone = RemoteBagData.create(playerUuid, 1, "old-content");
-            // page 1 has a stored row (read), page 2 has none (insert)
-            when(mockQuery.list()).thenReturn(Collections.singletonList(gone), Collections.emptyList());
-            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenReturn(0);
+            RemoteBagService.PageRead read = readOf(RemoteBagData.create(playerUuid, 1, "old-content"));
+            when(mockQuery.list()).thenReturn(Collections.<RemoteBagData>emptyList());
 
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            service.setBagPage(playerUuid, 2, new ItemStack[45]);
-            boolean saved = service.saveBag(playerUuid);
-
-            assertThat(saved).as("one page was not written").isFalse();
-            verify(dataOperator).updateCounted(any(RemoteBagData.class));
-            verify(dataOperator).insert(any(RemoteBagData.class));
-        }
-
-        @Test
-        @DisplayName("A write that matches no stored row logs the same line a thrown write logs (UltiKits/UltiRemoteBag#50)")
-        @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
-        void aVanishedRowLogsTheUpdateFailedLine() throws Exception {
-            java.lang.reflect.Field pluginField = RemoteBagService.class.getDeclaredField("plugin");
-            pluginField.setAccessible(true);
-            UltiToolsPlugin plugin = (UltiToolsPlugin) pluginField.get(service);
-            when(plugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("en"));
-            RemoteBagData gone = RemoteBagData.create(playerUuid, 1, "old-content");
-            when(mockQuery.list()).thenReturn(Collections.singletonList(gone));
-            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenReturn(0);
-
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            service.saveBag(playerUuid);
-
-            verify(plugin.getLogger()).error(eq("Failed to update bag data"));
+            assertThat(service.savePage(playerUuid, 1, new ItemStack[45], read)).isNull();
+            verify(dataOperator, never()).insert(any());
+            verify(loggerOf(service)).error("log_bag_update_failed");
         }
 
         @Test
         @DisplayName("A storage failure that is not a field-access failure still propagates, as before")
         void otherStorageFailuresStillPropagate() {
-            RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
-            when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
-            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenThrow(
+            RemoteBagService.PageRead read = readOf(RemoteBagData.create(playerUuid, 1, "old-content"));
+            when(dataOperator.updateIf(any(RemoteBagData.class), any(WhereCondition[].class))).thenThrow(
                     new com.ultikits.ultitools.exceptions.DataAccessException(
                             com.ultikits.ultitools.exceptions.ErrorCode.DATA_ENTITY_INVALID, "database is down"));
 
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-
-            assertThatThrownBy(() -> service.saveBag(playerUuid))
+            assertThatThrownBy(() -> service.savePage(playerUuid, 1, new ItemStack[45], read))
                     .isInstanceOf(com.ultikits.ultitools.exceptions.DataAccessException.class);
         }
 
         @Test
-        @DisplayName("Should save multiple pages")
-        void savesMultiplePages() {
-            when(mockQuery.list()).thenReturn(Collections.emptyList());
-
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            service.setBagPage(playerUuid, 2, new ItemStack[45]);
-            service.saveBag(playerUuid);
-
-            verify(dataOperator, times(2)).insert(any(RemoteBagData.class));
-        }
-
-        /** What {@code DataOperator#updateCounted} throws when the entity's fields cannot be read. */
-        private com.ultikits.ultitools.exceptions.DataAccessException accessFailure() {
-            return new com.ultikits.ultitools.exceptions.DataAccessException(
-                    com.ultikits.ultitools.exceptions.ErrorCode.DATA_ENTITY_INVALID, "Failed to access entity fields",
-                    new IllegalAccessException("Test error"));
-        }
-
-        @Test
-        @DisplayName("Should handle update exception gracefully")
-        void handlesUpdateException() throws Exception {
-            RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
-            when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
-            // updateCounted wraps a field-access failure of the write in a DataAccessException
-            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenThrow(accessFailure());
-
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-
-            // Should not throw, should log error instead
-            assertThatCode(() -> service.saveBag(playerUuid)).doesNotThrowAnyException();
-        }
-
-        @Test
-        @DisplayName("Under language: zh a failed bag write is logged with the Chinese catalogue text")
+        @DisplayName("Under language: zh a field-access failure is logged with the Chinese catalogue text and not reported as saved")
         @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
         void updateFailureFollowsTheLanguageSetting() throws Exception {
             java.lang.reflect.Field pluginField = RemoteBagService.class.getDeclaredField("plugin");
             pluginField.setAccessible(true);
             UltiToolsPlugin plugin = (UltiToolsPlugin) pluginField.get(service);
             when(plugin.i18n(anyString())).thenAnswer(com.ultikits.plugins.remotebag.i18n.CatalogueText.answer("zh"));
-            RemoteBagData existing = RemoteBagData.create(playerUuid, 1, "old-content");
-            when(mockQuery.list()).thenReturn(Collections.singletonList(existing));
-            when(dataOperator.updateCounted(any(RemoteBagData.class))).thenThrow(accessFailure());
+            RemoteBagService.PageRead read = readOf(RemoteBagData.create(playerUuid, 1, "old-content"));
+            when(dataOperator.updateIf(any(RemoteBagData.class), any(WhereCondition[].class))).thenThrow(
+                    new com.ultikits.ultitools.exceptions.DataAccessException(
+                            com.ultikits.ultitools.exceptions.ErrorCode.DATA_ENTITY_INVALID, "Failed to access entity fields",
+                            new IllegalAccessException("Test error")));
             String expected = com.ultikits.plugins.remotebag.i18n.CatalogueText.text("zh", "log_bag_update_failed");
 
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            service.saveBag(playerUuid);
+            assertThat(service.savePage(playerUuid, 1, new ItemStack[45], read)).isNull();
 
             verify(plugin.getLogger()).error(eq(expected), any(IllegalAccessException.class));
-        }
-    }
-
-    // ==================== saveAllBags ====================
-
-    @Nested
-    @DisplayName("saveAllBags")
-    class SaveAllBags {
-
-        @Test
-        @DisplayName("Should save all cached bags")
-        void savesAllCached() {
-            UUID uuid1 = UUID.randomUUID();
-            UUID uuid2 = UUID.randomUUID();
-
-            when(mockQuery.list()).thenReturn(Collections.emptyList());
-
-            service.setBagPage(uuid1, 1, new ItemStack[45]);
-            service.setBagPage(uuid2, 1, new ItemStack[45]);
-
-            service.saveAllBags();
-
-            verify(dataOperator, atLeast(2)).insert(any(RemoteBagData.class));
-        }
-
-        @Test
-        @DisplayName("Should do nothing when cache is empty")
-        void doesNothingWhenCacheEmpty() throws Exception {
-            service.saveAllBags();
-
-            verify(dataOperator, never()).insert(any());
-            verify(dataOperator, never()).updateCounted(any(RemoteBagData.class));
         }
     }
 
@@ -1008,20 +933,19 @@ class RemoteBagServiceTest {
         }
 
         @Test
-        @DisplayName("Should clear page contents")
-        void clearsPageContents() {
-            // First list() for loadBagIfNeeded, second for saveBag inside clearBagPage
-            when(mockQuery.list())
-                    .thenReturn(Collections.singletonList(
-                            RemoteBagData.create(playerUuid, 1, "old-content")
-                    ))
-                    .thenReturn(Collections.emptyList());
+        @DisplayName("Should clear page contents -- only that page's row, conditionally on what it held (UltiRemoteBag#54)")
+        void clearsPageContents() throws Exception {
+            InMemoryRemoteBagStore store = storePages();
+            store.seed(playerUuid.toString(), 1, "old-content");
+            store.seed(playerUuid.toString(), 2, "other-page");
 
             service.loadBagIfNeeded(playerUuid);
             boolean result = service.clearBagPage(playerUuid, 1);
 
             assertThat(result).isTrue();
-            verify(dataOperator).insert(any(RemoteBagData.class));
+            assertThat(store.storedContents(playerUuid.toString(), 1)).doesNotContain("old-content");
+            assertThat(store.storedContents(playerUuid.toString(), 2)).as("no other page is written").isEqualTo("other-page");
+            assertThat(store.updateCount()).as("one write").isEqualTo(1);
         }
 
         @Test
@@ -1036,13 +960,8 @@ class RemoteBagServiceTest {
 
         @Test
         @DisplayName("Should replace contents with empty array after clearing")
-        void replacesContentsWithEmpty() {
-            // First list() for loadBagIfNeeded, second for saveBag inside clearBagPage
-            when(mockQuery.list())
-                    .thenReturn(Collections.singletonList(
-                            RemoteBagData.create(playerUuid, 1, "")
-                    ))
-                    .thenReturn(Collections.emptyList());
+        void replacesContentsWithEmpty() throws Exception {
+            storePages(1);
 
             service.loadBagIfNeeded(playerUuid);
             service.clearBagPage(playerUuid, 1);
@@ -1129,14 +1048,13 @@ class RemoteBagServiceTest {
 
         @Test
         @DisplayName("Should return false when max pages exceeded")
-        void returnsFalseWhenMaxPagesExceeded() {
+        void returnsFalseWhenMaxPagesExceeded() throws Exception {
             when(config.isEconomyEnabled()).thenReturn(false);
             when(config.isPermissionBasedPages()).thenReturn(false);
             when(config.getMaxPages()).thenReturn(2);
 
-            // Pre-populate cache with 2 pages so nextBagNum = 3 > maxPages=2
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            service.setBagPage(playerUuid, 2, new ItemStack[45]);
+            // Two stored pages, so nextBagNum = 3 > maxPages=2
+            storePages(1, 2);
 
             boolean result = service.purchaseBag(player);
 
@@ -1224,8 +1142,8 @@ class RemoteBagServiceTest {
                 when(config.getMaxPages()).thenReturn(2);
 
                 // Pre-populate cache with 2 pages
-                service.setBagPage(playerUuid, 1, new ItemStack[45]);
-                service.setBagPage(playerUuid, 2, new ItemStack[45]);
+                UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, new ItemStack[45]);
+                UltiRemoteBagTestHelper.cachePage(service, playerUuid, 2, new ItemStack[45]);
 
                 boolean result = service.purchaseBag(player);
 
@@ -1240,9 +1158,8 @@ class RemoteBagServiceTest {
         // ---- UltiKits/UltiRemoteBag#46: one page number for the limit check, the price and the created page ----
 
         /** Pages {1, 3}: an administrator deleted page 2. The page a purchase creates is page 4 (max + 1). */
-        private void storePagesOneAndThree() {
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            service.setBagPage(playerUuid, 3, new ItemStack[45]);
+        private void storePagesOneAndThree() throws Exception {
+            storePages(1, 3);
         }
 
         @Test
@@ -1320,8 +1237,7 @@ class RemoteBagServiceTest {
                 when(config.getBasePrice()).thenReturn(10000);
                 when(config.isPriceIncreaseEnabled()).thenReturn(true);
                 when(config.getPriceIncreaseRate()).thenReturn(0.5);
-                service.setBagPage(playerUuid, 1, new ItemStack[45]);
-                service.setBagPage(playerUuid, 2, new ItemStack[45]);
+                storePages(1, 2);
 
                 assertThat(service.purchaseBag(player)).isTrue();
 
@@ -1501,27 +1417,12 @@ class RemoteBagServiceTest {
         }
 
         @Test
-        @DisplayName("saveBag with items should serialize items")
-        void saveBagWithItems() {
-            ItemStack[] contents = new ItemStack[45];
-            // Use mock ItemStack to avoid Bukkit.server requirement
-            contents[0] = mock(ItemStack.class);
-
-            service.setBagPage(playerUuid, 1, contents);
-            when(mockQuery.list()).thenReturn(Collections.emptyList());
-
-            service.saveBag(playerUuid);
-
-            verify(dataOperator).insert(any(RemoteBagData.class));
-        }
-
-        @Test
         @DisplayName("getPlayerBagPages should return sorted pages from cache")
         void getPlayerBagPagesSortedFromCache() {
             // Manually set pages in non-sorted order
-            service.setBagPage(playerUuid, 5, new ItemStack[45]);
-            service.setBagPage(playerUuid, 1, new ItemStack[45]);
-            service.setBagPage(playerUuid, 3, new ItemStack[45]);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 5, new ItemStack[45]);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 1, new ItemStack[45]);
+            UltiRemoteBagTestHelper.cachePage(service, playerUuid, 3, new ItemStack[45]);
 
             List<Integer> pages = service.getPlayerBagPages(playerUuid);
 
@@ -1530,20 +1431,16 @@ class RemoteBagServiceTest {
 
         @Test
         @DisplayName("deleteBagPage should not affect other pages")
-        void deleteBagPageDoesNotAffectOthers() {
-            // Load pages 1 and 2
-            when(mockQuery.list())
-                    .thenReturn(Arrays.asList(
-                            RemoteBagData.create(playerUuid, 1, ""),
-                            RemoteBagData.create(playerUuid, 2, "")
-                    ))
-                    .thenReturn(Collections.emptyList()); // For deleteBagPage's internal query
+        void deleteBagPageDoesNotAffectOthers() throws Exception {
+            InMemoryRemoteBagStore store = storePages(1, 2);
 
             service.loadBagIfNeeded(playerUuid);
             service.deleteBagPage(playerUuid, 1);
 
-            // Page 2 should still exist
+            // Page 2 should still exist, in the cache and in the store
             assertThat(service.getBagPage(playerUuid, 2)).isNotNull();
+            assertThat(store.storedContents(playerUuid.toString(), 2)).isNotNull();
+            assertThat(store.storedContents(playerUuid.toString(), 1)).isNull();
         }
     }
 }

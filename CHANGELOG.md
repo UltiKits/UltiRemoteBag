@@ -7,16 +7,87 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **One bag page is edited on one server at a time** when several servers share one database. Opening a page
+  for editing claims it in a new database table, `remote_bag_claims`; while another server holds the page it opens
+  read-only on this server, for the owner and for administrators alike, with the line "This bag page is being
+  edited on another server; it is open in read-only mode", and an administrator's `/bag clear` and `/bag delete`
+  of that page are refused as for a page in use. The claim is released when the window closes, when its player
+  quits and when the module stops. While the window is open, the server renews the claim on a background task, so a
+  stalled main thread does not lose it; another server may take a claim over only after seeing it unrenewed for a
+  full `lock.timeout_seconds` on its own clock, so a crashed server's claim lets go by itself and disagreeing clocks
+  change nothing. If a claim is ever lost, the window turns read-only at once and gives back the items put in
+  since its last save. On one server nothing changes: the owner still outranks an administrator. The table is
+  created on the first start; no existing table changes and nothing is migrated. Known limitation: a writer that
+  does not use the claim -- an older version of this module during a rolling upgrade, another plugin, a hand edit of
+  the table -- can still change a page under an open window; an item taken out during that session can then exist
+  twice (README, "Known limitations") (UltiKits/UltiRemoteBag#54).
+- **多台服务器共享一个数据库时，同一背包页同一时间只能在一台服务器上编辑。** 打开编辑时会在新的数据库表 `remote_bag_claims` 中占用该页；
+  另一台服务器占用期间，本服务器对所有者和管理员都以只读方式打开，并提示“该背包页正在另一台服务器上编辑，当前为只读模式”，管理员对该页的
+  `/bag clear` 与 `/bag delete` 也会被拒绝。窗口关闭、玩家退出、模块停止时释放占用。窗口打开期间，服务器在后台任务中续期占用，主线程卡顿
+  不会丢失占用；另一台服务器只有在自己的时钟上连续 `lock.timeout_seconds` 看到占用未续期后才能接手，因此崩溃服务器的占用会自行释放，
+  各服务器时钟不一致也没有影响。若占用丢失，窗口立即变为只读，并归还自上次保存以来放入的物品。单台服务器上的规则不变。该表在首次启动时创建；
+  现有表不变，也没有任何迁移。已知限制：不使用占用的写入者（滚动升级期间的旧版本模块、其他插件、手动编辑数据表）仍可能在窗口打开时改动该页，
+  该会话中取出的物品可能出现两份（见 README“已知限制”）（UltiKits/UltiRemoteBag#54）。
+- **A bag page survives a database that does not answer.** Every database call of the edit claim and of a page
+  save is given up on after a sixth of `lock.timeout_seconds` (at most two seconds while the main thread waits),
+  and one call that hangs no longer holds up the claims of other pages. If the claim's renewal fails or does not
+  answer, the window turns read-only at once and what it shows is saved as soon as the database answers. If a save
+  fails or does not answer -- at close, on the Save button, at quit or by `/bag save` -- the claim is kept, the
+  changes stay in memory and the same save is retried in the background until it lands; meanwhile the page is
+  read-only everywhere and a reopen on this server shows the kept changes. Nothing is given back while such a save
+  can still land. Only a save the database refuses gives back the items put in (at the next join if the player has
+  left). Module stop now saves the pages still open for editing, keeps trying kept saves for five seconds and logs,
+  with their items, those it could not write. Every page save is fenced on the claim: one database transaction
+  checks that the claim is still this server's and writes the page, so a save held up past another server's
+  takeover writes nothing, and a save that reported an error is given back only when its receipt shows it was not
+  written; at module stop that receipt is read behind any save still running on the database, and a save that
+  cannot be decided in time is logged, not given back. `/bag clear` and `/bag delete` claim the page for their own action.
+  Known limitation: a kept save is held in memory and a server crash loses it, as it loses an unsaved window
+  (README, "Known limitations") (UltiKits/UltiRemoteBag#54).
+- **数据库未响应时，背包页不再丢失改动。** 占用和保存的每次数据库调用最多等待 `lock.timeout_seconds` 的六分之一（主线程等待时最多两秒），
+  一次挂起的调用不再耽误其他页面的占用续期。续期失败或未响应时，窗口立即变为只读，窗口中显示的内容在数据库恢复响应后立即保存。保存失败或未响应时——
+  关闭窗口、点击保存按钮、退出或 `/bag save`——保留占用，改动保留在内存中，并在后台重试同一保存直到成功；期间该页在所有服务器上只读，
+  在本服务器重新打开会显示保留的改动。只要这次保存仍可能完成，就不归还任何物品。
+  只有被数据库拒绝的保存才归还放入的物品（玩家已离开时在其下次加入时归还）。模块停止时会保存仍在编辑中打开的背包页，对保留的保存再尝试五秒，
+  无法写入的连同物品记录在日志中。每次保存都以占用为栅栏：同一个数据库事务确认占用仍属于本服务器并写入页面，因此在另一台服务器接手之后被耽搁的保存不会写入任何内容，
+  报告了错误的保存只有在其记录表明未写入时才会被归还；模块停止时，该记录会在仍在数据库上运行的保存之后读取，无法及时判定的保存只记录日志、不归还。`/bag clear` 与 `/bag delete` 会为自身操作占用该页。已知限制：保留的保存在内存中，服务器崩溃会丢失它，
+  与未保存的窗口相同（见 README“已知限制”）（UltiKits/UltiRemoteBag#54）。
+
 ### Fixed
 
+- **Bag pages on servers that share one database.** A bag page changed on another server sharing the database is
+  no longer overwritten by an old copy held on this server, so an item taken out there no longer comes back here
+  (duplicated), and an item put in there is no longer lost. Each server kept every page of a player's bag in memory
+  from the first read -- also after an administrator only looked at another player's bag with `/bag see` or
+  `/bag list` -- and wrote the whole copy back: every cached page of that player on any save, and every cached page
+  of every player when the module stopped. Now nothing is written from that copy. A page is saved only from its own
+  window, only that page, and only if the stored page is still what the window read when it opened (or last saved);
+  otherwise nothing is written, the console logs `Failed to update bag data`, the player sees the existing
+  "The save did not reach the database" line, and the items put into the window since it read the page are given
+  back to the player (what does not fit drops at their feet; one console line lists them). Creating, clearing and deleting a page are decided on what is stored
+  at that moment, and write only that page. Stopping or unloading the module, quitting, and `/bag save` with no page
+  open write nothing (every change is written when it is made; `/bag save` still answers `Bag saved manually!` when
+  this server holds any of your pages). A copy of another player's bag is dropped when the administrator's window
+  closes or the command is done, unless that player is on this server (UltiKits/UltiRemoteBag#54).
+- **共享同一数据库的多台服务器上的背包页。** 另一台共享该数据库的服务器修改过的背包页，不会再被本服务器持有的旧副本覆盖：在那里取出的物品
+  不会在这里重新出现（复制），在那里放入的物品也不会丢失。此前每台服务器从首次读取起就把玩家背包的每一页保存在内存里——包括管理员只是用
+  `/bag see` 或 `/bag list` 查看了别人的背包之后——并整份写回：任意一次保存都会写回该玩家所有缓存页，模块停止时还会写回所有玩家的所有缓存页。
+  现在不再从这份副本写入任何内容。背包页只能由它自己的窗口保存，只写这一页，并且仅当存储的内容仍是窗口打开时（或上次保存时）读到的内容时
+  才写入；否则不写入，控制台记录 `Failed to update bag data`，玩家看到既有的“保存未写入数据库”提示，自窗口读取该页以来放入的物品
+  归还给玩家（放不下的掉落在脚下；控制台记录一行列出这些物品）。创建、清空、删除背包页都以当时存储的内容
+  为准，且只写这一页。停止或卸载模块、玩家退出、以及没有打开页面时的 `/bag save` 都不写入任何内容（每次改动在发生时就已写入；本服务器持有你的
+  背包页时，`/bag save` 仍回复“背包已手动保存！”）。管理员查看他人背包的窗口关闭或命令结束后，该玩家背包的副本即被丢弃，除非该玩家就在本服务器上
+  （UltiKits/UltiRemoteBag#54）。
 - A bag save whose stored row has been deleted in the meantime is now reported as not saved. On a MySQL
   database shared by several servers, an administrator on another server who deletes a bag page at the moment
   this server saves it made that save write nothing while `/bag save` still answered that the bag was saved;
-  now the save logs `Failed to update bag data`, the other pages are still saved, and the save is reported as
-  failed (UltiKits/UltiRemoteBag#50).
+  now the save logs `Failed to update bag data` and the save is reported as failed (UltiKits/UltiRemoteBag#50;
+  since UltiKits/UltiRemoteBag#54 a save writes only its own page).
 - 已存储的背包行在保存时已被删除，现在会报告为未保存。多个服务器共用同一个 MySQL 数据库时，若另一台服务器上的管理员恰好在本服务器保存时
-  删除了某一页背包，该次保存什么也没写入，`/bag save` 却仍回复背包已保存；现在会记录 `Failed to update bag data`，其余页面照常保存，
-  并且报告保存失败（UltiKits/UltiRemoteBag#50）。
+  删除了某一页背包，该次保存什么也没写入，`/bag save` 却仍回复背包已保存；现在会记录 `Failed to update bag data`，
+  并且报告保存失败（UltiKits/UltiRemoteBag#50；自 UltiKits/UltiRemoteBag#54 起一次保存只写它自己的那一页）。
 
 - `config/remotebag.yml` now writes its comments in the server's language. Thirteen comments (the `economy.*`,
   `sound.*` and `lock.*` settings) used to be Chinese-only, so a fresh install under `language: en` got a file
@@ -283,6 +354,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- `RemoteBagService#setBagPage`, `#saveBag` and `#saveAllBags` are removed. They wrote a cached copy of a player's pages
+  over the stored ones, which on a shared database overwrote another server's changes. A plugin that changes a page
+  reads it with `readPage` and saves it with `savePage`, which writes only if the stored page is still what was read
+  (UltiKits/UltiRemoteBag#54).
+- 移除 `RemoteBagService#setBagPage`、`#saveBag` 与 `#saveAllBags`。它们会把玩家背包页的缓存副本写回覆盖已存储的内容，在共享数据库上
+  会覆盖其他服务器的修改。需要修改背包页的插件请用 `readPage` 读取、`savePage` 保存；仅当存储的内容仍是读取时的内容时才会写入
+  （UltiKits/UltiRemoteBag#54）。
 - The language-file entry `opening_bag` ("Opening bag #{0}...") from `lang/en.yml` and
   `lang/zh.yml`: no code ever displayed it.
 - 从 `lang/en.yml` 与 `lang/zh.yml` 中移除语言文件条目 `opening_bag`（「正在打开背包 #{0}...」）：从未有任何代码显示它。
