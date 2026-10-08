@@ -1,6 +1,6 @@
 # UltiRemoteBag
 
-[![UltiTools Module](https://img.shields.io/badge/UltiTools-Module-blue)](https://github.com/UltiKits/UltiTools-Reborn)
+[![UltiTools-API](https://img.shields.io/badge/UltiTools--API-6.3.0%2B-blue)](https://github.com/UltiKits/UltiTools-Reborn)
 [![Minecraft Version](https://img.shields.io/badge/Minecraft-1.13--1.21-green)](https://www.spigotmc.org/)
 [![Java](https://img.shields.io/badge/Java-8+-orange)](https://www.oracle.com/java/)
 
@@ -43,14 +43,14 @@
 ## 📦 安装
 
 ### 依赖项
-- **UltiTools-API 6.2.1+** - 核心框架
+- **UltiTools-API 6.3.0+** - 核心框架（本模块声明 `api-version: 630`，更早的框架会拒绝加载它）
 - **Vault** (可选) - 经济功能支持
 
 ### 安装步骤
 
 1. 确保已安装 UltiTools-API
 2. 将 `UltiRemoteBag.jar` 放入 `plugins/UltiTools/plugins/` 目录
-3. 重启服务器或执行 `/ultitools reload`
+3. 重启服务器（新增或替换模块 JAR 后必须重启；`/ul reload` 只重载配置，不会加载新的模块 JAR）
 4. 编辑配置文件 `plugins/UltiTools/UltiRemoteBag/config.yml`
 
 ## ⚙️ 配置说明
