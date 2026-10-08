@@ -1,8 +1,8 @@
 # UltiRemoteBag
 
 [![UltiTools-API](https://img.shields.io/badge/UltiTools--API-6.3.0%2B-blue)](https://github.com/UltiKits/UltiTools-Reborn)
-[![Minecraft Version](https://img.shields.io/badge/Minecraft-1.13--1.21-green)](https://www.spigotmc.org/)
-[![Java](https://img.shields.io/badge/Java-8+-orange)](https://www.oracle.com/java/)
+[![Paper](https://img.shields.io/badge/Paper-1.21%2B-green)](https://papermc.io/)
+[![Java](https://img.shields.io/badge/Java-21%2B-orange)](https://adoptium.net/)
 
 **UltiRemoteBag** 是 UltiTools-API 框架的一个插件模块，为 Minecraft 服务器提供虚拟云存储（远程背包）功能。玩家可以随时随地访问自己的远程背包，安全存储物品。
 
