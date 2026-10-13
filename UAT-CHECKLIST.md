@@ -62,6 +62,12 @@ for real-machine verification, not user-facing documentation.
 - `plugin.i18n(...)` in this framework is a raw dictionary lookup with **no** `MessageFormat`
   processing — every Expected line below that quotes an i18n-templated message reproduces
   `lang/en.yml`'s literal placeholder substitution (`{0}`, `{1}`) rather than a re-derived phrase.
+- **Console lines carry the module-logger prefix.** Every line this module logs reaches the console as
+  `[UltiTools] [UltiRemoteBag] <text>`: Paper adds `[UltiTools] `, and the framework's module logger (`PluginLogger`)
+  adds `[UltiRemoteBag] ` (this module's `plugin.yml` `name`). A console line quoted below is the `<text>` after both
+  prefixes, character for character, unless the row quotes a prefix itself; a row that counts or excludes this
+  module's console lines means lines carrying `[UltiRemoteBag]`. A line the framework logs is quoted after Paper's
+  prefix, with its own `[UltiTools-API] ` where the row shows it.
 
 ## Bag (player)
 
