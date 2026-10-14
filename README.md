@@ -49,11 +49,11 @@
 1. 确保已安装 UltiTools-API
 2. 将 `UltiRemoteBag.jar` 放入 `plugins/UltiTools/plugins/` 目录
 3. 重启服务器（新增或替换模块 JAR 后必须重启；`/ul reload` 只重载配置，不会加载新的模块 JAR）
-4. 编辑配置文件 `plugins/UltiTools/UltiRemoteBag/config.yml`
+4. 编辑配置文件 `plugins/UltiTools/pluginConfig/UltiRemoteBag/config/remotebag.yml`
 
 ## ⚙️ 配置说明
 
-### config.yml
+### remotebag.yml
 
 ```yaml
 # 基础配置
@@ -422,33 +422,24 @@ CREATE TABLE ulti_remote_bag (
 
 ## 📝 更新日志
 
-### v2.0.0（未发布 / unreleased） (2026-01-12)
+### 未发布 / Unreleased
 
-**重大更新 - 完全重构**
+- 需要 UltiTools-API 6.3.0 或更高版本（`api-version: 630`）
 
-#### 新增功能
+### v1.0.0 (2026-02-15)
+
+- 🎉 初始版本发布
+
+#### 功能
 
 - ✨ 背包锁定机制 - 所有者优先，管理员只读模式
 - ✨ 管理员命令 - see, create, delete, clear, list
 - ✨ 音效系统 - 可配置的操作音效
 - ✨ 经济集成 - Vault 支持，价格递增公式
-- ✨ 现代化 GUI - 使用 BasePaginationPage 框架
+- ✨ GUI - 使用 BasePaginationPage 框架
 - ✨ 物品统计 - 显示物品数量和槽位占用
-
-#### 改进
-- 🔧 使用 UltiTools-API 6.x GUI 框架重构
-- 🔧 服务层分离，更清晰的架构
-- 🔧 完善的错误处理和用户反馈
-- 🔧 优化的数据缓存机制
-
-#### 修复
-
-- 🐛 修复并发访问可能导致的数据丢失
-- 🐛 修复玩家退出时锁未释放的问题
-
-### v1.0.0
-
-- 🎉 初始版本发布
+- 🔧 服务层分离，数据缓存
+- 🐛 并发访问保护；玩家退出时释放其持有的锁
 
 ## ❓ FAQ
 
@@ -465,13 +456,13 @@ CREATE TABLE ulti_remote_bag (
 > 当背包所有者正在使用时，管理员会自动进入只读模式。等所有者关闭后，点击刷新按钮即可切换为编辑模式。
 
 **Q: 数据存储在哪里？**
-> 取决于 UltiTools-API 的配置。默认使用 SQLite，数据库文件在 `plugins/UltiTools/data/` 目录。
+> 取决于 UltiTools-API 的配置。默认使用 SQLite，数据库文件是 `plugins/UltiTools/sqliteDB/UltiRemoteBag.db`。
 
 **Q: 如何备份玩家背包数据？**
 
-> - SQLite: 备份 `ultitools.db` 文件
+> - SQLite: 备份 `sqliteDB/UltiRemoteBag.db` 文件
 > - MySQL: 备份 `ulti_remote_bag` 表
-> - JSON: 备份 `data/` 目录下的 JSON 文件
+> - JSON: 备份 `data/UltiRemoteBag/` 目录下的 JSON 文件
 
 ## 🤝 贡献
 
