@@ -57,38 +57,34 @@
 
 ```yaml
 # 基础配置
-max-pages: 5                    # 最大背包页数
-default-pages: 1                # 默认背包页数
-rows-per-page: 5                # 每页行数 (1-6)
-auto-save-interval: 300         # 自动保存间隔（秒），0 为禁用
-save-on-close: true             # 关闭时保存
+default_pages: 1                # 新玩家默认背包页数 (1-100)
+max_pages: 10                   # 最大背包页数 (1-100)
 
 # 权限配置
-permission-based-pages: false   # 是否基于权限决定页数
-permission-prefix: "ultibag.pages."  # 权限前缀
+permission_based_pages: true    # 是否基于权限决定页数
+permission_prefix: "ultibag.pages."  # 权限前缀
 
-# 经济配置
+# 经济配置（需要 Vault）
 economy:
-  enabled: true                 # 是否启用经济系统
-  base-price: 1000              # 基础价格
-  price-increase:
-    enabled: true               # 是否启用价格递增
-    rate: 0.5                   # 递增比率 (50%)
+  enabled: true                 # 是否启用购买背包
+  base_price: 10000             # 基础价格 (0-1000000000)
+  price_increase_enabled: true  # 是否启用价格递增
+  price_increase_rate: 0.1      # 递增比率 (0-10)
 
 # 音效配置
-sounds:
+sound:
   enabled: true                 # 是否启用音效
   open: "BLOCK_CHEST_OPEN"      # 打开音效
   close: "BLOCK_CHEST_CLOSE"    # 关闭音效
   purchase: "ENTITY_PLAYER_LEVELUP"  # 购买音效
   error: "ENTITY_VILLAGER_NO"   # 错误音效
-  volume: 1.0                   # 音量
-  pitch: 1.0                    # 音调
+  volume: 1.0                   # 音量 (0-1)
+  pitch: 1.0                    # 音调 (0.5-2)
 
 # 锁定配置
 lock:
-  timeout: 300                  # 锁超时时间（秒）
-  notify-readonly-viewers: true # 通知只读查看者
+  timeout_seconds: 300          # 锁超时时间（秒，10-3600）
+  notify_readonly_viewers: true # 通知只读查看者
 ```
 
 ## 📜 命令
@@ -445,8 +441,8 @@ CREATE TABLE ulti_remote_bag (
 
 **Q: 如何增加玩家可用的背包页数？**
 > 有两种方式：
-> 1. 修改 `max-pages` 配置增加全局上限
-> 2. 启用 `permission-based-pages` 并给玩家相应权限
+> 1. 修改 `max_pages` 配置增加全局上限
+> 2. 启用 `permission_based_pages` 并给玩家相应权限
 
 **Q: Why does a player's own bag window still offer page 1 after an administrator deletes only page 1? / 管理员只删除了第 1 页后，玩家自己的背包窗口为什么仍然显示第 1 页？**
 > By design (UltiKits/UltiRemoteBag#47). A player's own window always offers page 1, whether or not anything is stored on it, because page 1 is every player's default page; deleting a page removes its stored row and items, not the player's right to open page 1. The next page a player adds is always numbered one past their highest page, so after pages 1 and 3 the next one is page 4 (UltiKits/UltiRemoteBag#46).
