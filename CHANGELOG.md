@@ -372,6 +372,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
+- **For plugin authors:** the public `RemoteBagService#setBagPage`, `#saveBag` and `#saveAllBags`
+  methods from released 1.0.0 have been removed. Update and recompile third-party callers: read each
+  page with `readPage(UUID, int)`, keep its `PageRead`, and pass it with the edited items to
+  `savePage(UUID, int, ItemStack[], PageRead)`. A non-null result is the baseline for the next save;
+  `null` means nothing was written and must be handled as an unsuccessful save. This is a
+  conditional, single-page write, not a direct equivalent of the old cache setter or bulk saves;
+  the display cache is never flushed to the database (UltiKits/UltiRemoteBag#54).
 - Removed the module's own 'configuration reloaded' console line; UltiTools 6.3.0 logs one reload
   line per module.
 - `auto_save_interval` never controlled the save period and has been removed; it can be deleted
@@ -418,6 +425,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Changed` entry above. Nothing an operator has stored is affected, because what a page holds does
   not change. Making capacity genuinely configurable is wanted and is recorded as
   UltiKits/UltiRemoteBag#38 (UltiKits/UltiRemoteBag#24).
+- **给插件作者：** 已发布的 1.0.0 中的 public 方法 `RemoteBagService#setBagPage`、`#saveBag` 与 `#saveAllBags`
+  已移除。第三方调用者需要修改代码并重新编译：逐页调用 `readPage(UUID, int)`，保留返回的 `PageRead`，
+  再将其与编辑后的物品一起传给 `savePage(UUID, int, ItemStack[], PageRead)`。非空返回值是下次保存的基准；
+  返回 `null` 表示未写入任何内容，必须按保存未成功处理。这是有条件的单页写入，并非旧缓存赋值方法或批量保存的直接等价替代；
+  显示缓存从不整份写回数据库（UltiKits/UltiRemoteBag#54）。
 - 移除了本模块自身的"配置已重载"控制台日志行；UltiTools 6.3.0 会为每个模块输出一行重载日志。
 - `auto_save_interval` 从未控制保存周期，现已移除，可从现有配置文件中删除。固定每 300 秒重写缓存的任务也已移除：
   背包页由其自身窗口保存，失败或未响应的保存会按上文所述保留并在后台重试。数据库故障期间停机或崩溃仍可能丢失保留的改动，
