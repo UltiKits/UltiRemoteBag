@@ -5,7 +5,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 本文件记录本项目的所有重要更改，格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)。
 
-## [Unreleased]
+## [2.0.0] - 2026-10-21
 
 ### Added
 
@@ -199,9 +199,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `/ul reload UltiRemoteBag` now reloads this module's configuration and refreshes its language
   catalogue; previously this module replaced the framework's reload step, so neither happened and
   an edited `config/remotebag.yml` took effect only after a restart (UltiKits/UltiRemoteBag#12).
-- Unloading this module with `/upm uninstall UltiRemoteBag` still saves every cached bag first;
-  afterwards the module's commands are now really removed and its listeners stop firing, where
-  previously both stayed active until the server restarted (UltiKits/UltiRemoteBag#12).
+- Unloading this module with `/upm uninstall UltiRemoteBag` now really removes its commands and
+  stops its listeners firing, where previously both stayed active until the server restarted.
+  Open edit windows are saved through the bounded shutdown described above, not from cached bags
+  (UltiKits/UltiRemoteBag#12, UltiKits/UltiRemoteBag#54).
 - Viewing another player's bag read-only (`/bag see <player>` while that player is holding the page
   open) no longer lets the viewer move items. A normal click, a shift-click in either direction, a
   number-key swap and a drag are all refused now, and the greyed-out Save icon can no longer be
@@ -278,14 +279,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   said, so `lock.notify_readonly_viewers: false` did nothing; now it is honoured. The declared
   default is unchanged at `true`, which is what every server has been doing, so no server's
   behaviour changes until its operator turns it off. The setting is read each time rather than at
-  startup, so `/ul reload UltiRemoteBag` applies a change without a restart. Its neighbour
-  `lock.timeout_seconds` is NOT like that — it is still copied once when the module loads and needs
-  a full restart, which is unchanged behaviour and is tracked as UltiKits/UltiRemoteBag#39
+  startup, so `/ul reload UltiRemoteBag` applies a change without a restart. The neighbouring
+  `lock.timeout_seconds` now also follows reload, as described above (UltiKits/UltiRemoteBag#39)
   (UltiKits/UltiRemoteBag#19).
 - `/ul reload UltiRemoteBag` 现在会重载本模块的配置并刷新其语言文件；此前本模块替换了框架的重载步骤，两者都不会发生，
   修改 `config/remotebag.yml` 后只有重启才会生效（UltiKits/UltiRemoteBag#12）。
-- 通过 `/upm uninstall UltiRemoteBag` 卸载本模块时仍会先保存所有已缓存的背包；之后本模块的命令现在会被真正移除，
-  其监听器也不再触发，此前两者都会保持生效，直到服务器重启（UltiKits/UltiRemoteBag#12）。
+- 通过 `/upm uninstall UltiRemoteBag` 卸载本模块时，其命令现在会被真正移除，监听器也不再触发；此前两者都会保持生效，直到服务器重启。
+  打开的编辑窗口通过上文所述的有时限停机流程保存，而非从背包缓存写回（UltiKits/UltiRemoteBag#12、UltiKits/UltiRemoteBag#54）。
 - 以只读方式查看他人背包（该玩家正打开该页时执行 `/bag see <player>`）现在真的无法移动物品：普通点击、
   两个方向的 Shift 点击、数字键交换与拖拽全部被取消，置灰的保存图标也不再能被拿走。此前这些操作都会生效，
   而"只读模式，无法移动物品"的拒绝提示仍会照常显示，因此可以把他人背包中的物品取走并复制
@@ -337,23 +337,20 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   此前无论该设置为何都会发送该提示，`lock.notify_readonly_viewers: false` 毫无作用；现在它会被遵守。声明的默认值
   仍为 `true`，也就是所有服务器一直在做的事，因此在运维主动关掉它之前，没有任何服务器的行为会变化。
   该设置每次通知时实时读取而非在启动时缓存，因此 `/ul reload UltiRemoteBag` 无需重启即可生效。同一区块的
-  `lock.timeout_seconds` 并非如此——它仍在模块加载时被拷贝一次，需要完整重启；这是未变的行为，
-  已作为 UltiKits/UltiRemoteBag#39 跟踪（UltiKits/UltiRemoteBag#19）。
+  `lock.timeout_seconds` 现在也随重载生效，见上文（UltiKits/UltiRemoteBag#39）（UltiKits/UltiRemoteBag#19）。
 
 ### Changed
 
-- This version requires UltiTools 6.3.0 or later and declares `api-version: 630` in `plugin.yml`
-  (it was `621`; the last release, 1.0.0, declared `620`). An older framework refuses the module
+- This version requires UltiTools 6.3.0 or later and declares `api-version: 630` in `plugin.yml`,
+  up from `620` in the last release, 1.0.0. An older framework refuses the module
   before its start-up runs, with a warning that the UltiTools version is outdated; the refusal names
   the module by its `plugin.yml` `name:`, `UltiRemoteBag`. The README's framework minimum and its
-  UltiTools-API badge now say UltiTools 6.3.0+, and its server and Java badges say Paper 1.21+ and
-  Java 21+ (they said Minecraft 1.13–1.21 and Java 8+). Adding or replacing a module JAR needs a server restart; `/ul reload` does not load it
-  (UltiKits/UltiTools-Reborn#544).
-- 本版本需要 UltiTools 6.3.0 或更高版本，并在 `plugin.yml` 中声明 `api-version: 630`（原为 `621`；上一个发布版本 1.0.0 声明的是 `620`）。更早的框架会在模块的启动逻辑
+  UltiTools-API badge say UltiTools 6.3.0+. Adding or replacing a module JAR needs a server restart;
+  `/ul reload` does not load it (UltiKits/UltiTools-Reborn#544).
+- 本版本需要 UltiTools 6.3.0 或更高版本，并在 `plugin.yml` 中声明 `api-version: 630`，由上一个发布版本 1.0.0 的 `620` 提升。更早的框架会在模块的启动逻辑
   运行之前拒绝加载它，并给出 UltiTools 版本过旧的警告；拒绝信息以 `plugin.yml` 的 `name:` 即 `UltiRemoteBag` 指代本模块。
-  README 中的框架最低版本和 UltiTools-API 徽章已改为 UltiTools 6.3.0+，服务端与 Java 徽章改为 Paper 1.21+、Java 21+
-  （原为 Minecraft 1.13–1.21、Java 8+）。新增或替换模块 JAR 后需要重启服务器，`/ul reload` 不会加载它
-  （UltiKits/UltiTools-Reborn#544）。
+  README 中的框架最低版本和 UltiTools-API 徽章均为 UltiTools 6.3.0+。新增或替换模块 JAR 后需要重启服务器，
+  `/ul reload` 不会加载它（UltiKits/UltiTools-Reborn#544）。
 
 - `plugin.yml` now declares `identify-string: ultiremotebag`, the key of this module's entry in the
   UltiCloud catalogue. The framework's update check and `/upm update` skip a module that does not
@@ -375,34 +372,22 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
-- `RemoteBagService#setBagPage`, `#saveBag` and `#saveAllBags` are removed. They wrote a cached copy of a player's pages
-  over the stored ones, which on a shared database overwrote another server's changes. A plugin that changes a page
-  reads it with `readPage` and saves it with `savePage`, which writes only if the stored page is still what was read
-  (UltiKits/UltiRemoteBag#54).
-- 移除 `RemoteBagService#setBagPage`、`#saveBag` 与 `#saveAllBags`。它们会把玩家背包页的缓存副本写回覆盖已存储的内容，在共享数据库上
-  会覆盖其他服务器的修改。需要修改背包页的插件请用 `readPage` 读取、`savePage` 保存；仅当存储的内容仍是读取时的内容时才会写入
-  （UltiKits/UltiRemoteBag#54）。
-- The language-file entry `opening_bag` ("Opening bag #{0}...") from `lang/en.yml` and
-  `lang/zh.yml`: no code ever displayed it.
-- 从 `lang/en.yml` 与 `lang/zh.yml` 中移除语言文件条目 `opening_bag`（「正在打开背包 #{0}...」）：从未有任何代码显示它。
-
+- **For plugin authors:** the public `RemoteBagService#setBagPage`, `#saveBag` and `#saveAllBags`
+  methods from released 1.0.0 have been removed. Update and recompile third-party callers: read each
+  page with `readPage(UUID, int)`, keep its `PageRead`, and pass it with the edited items to
+  `savePage(UUID, int, ItemStack[], PageRead)`. A non-null result is the baseline for the next save;
+  `null` means nothing was written and must be handled as an unsuccessful save. This is a
+  conditional, single-page write, not a direct equivalent of the old cache setter or bulk saves;
+  the display cache is never flushed to the database (UltiKits/UltiRemoteBag#54).
 - Removed the module's own 'configuration reloaded' console line; UltiTools 6.3.0 logs one reload
   line per module.
-- `auto_save_interval` never took effect and has been removed; it can be deleted from existing
-  files. It named the period of a scheduled auto-save while the task ran on a fixed 300 seconds
-  whatever the setting said, and that task is removed with it: every write to a bag page already
-  persists it in the same action, so the task had nothing to catch. One real effect goes with it --
-  when a database write failed, the task's next run retried it. Quitting and unloading the module
-  still retry it, so on any clean stop the edit is still written — later than before, at the next
-  quit or unload rather than within five minutes. It is not a retry in every case: if the server is
-  killed, loses power, or is otherwise stopped without running those paths while a failed write is
-  still only in memory, that edit is now lost where the five-minute retry would probably have
-  caught it. One more observable effect goes with the task, for anyone watching the database from
-  outside: it used to rewrite `last_updated` on every cached page every 300 seconds whether or not
-  the page had changed, so an idle player's row kept ticking. It now only moves when the page is
-  actually written. Nothing in this module reads the column, so there is no functional consequence,
-  but a tool using it as a liveness signal will see it stop advancing
-  (UltiKits/UltiRemoteBag#13, UltiKits/UltiRemoteBag#23).
+- `auto_save_interval` never controlled the save period and has been removed; it can be deleted
+  from existing files. The fixed 300-second cache rewrite is also removed: a page is saved by its
+  own window, and a failed or unanswered save is kept and retried in the background as described
+  above. A stop or crash during a database outage can still lose kept changes; see README,
+  "Known limitations". `last_updated` now advances only when the page is actually written, not
+  every 300 seconds on an idle cached page; external tools must not use it as a liveness signal
+  (UltiKits/UltiRemoteBag#13, UltiKits/UltiRemoteBag#23, UltiKits/UltiRemoteBag#54).
 - `gui_title` never took effect and has been removed; it can be deleted from existing files. A bag
   page's title comes from this module's language files, key `bag_name` -- which is why an English
   server already shows an English title and editing this setting changed nothing
@@ -413,11 +398,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `messages.page_locked` never took effect and has been removed; it can be deleted from existing
   files. Asking for a page you may not open is answered from this module's language files, key
   `page_out_of_range`; the page limit that refusal reports is the permission-derived one, so it is
-  the same situation this setting described, and it is already translated. If what you were trying
-  to change is the line shown when somebody **else** is holding the page, that is a different
-  message: it is a hardcoded Chinese literal in the code, follows no language setting, and is
-  tracked as UltiKits/UltiRemoteBag#20 — still open, and not fixed by this removal
-  (UltiKits/UltiRemoteBag#16).
+  the same situation this setting described, and it is already translated. The separate lines shown
+  when somebody **else** holds the page now also come from the module's language files, keys
+  `bag_read_only_in_use`, `bag_blocked_in_use` and `bag_blocked_by_admin`, as described above
+  (UltiKits/UltiRemoteBag#16, UltiKits/UltiRemoteBag#20).
 - `messages.bag_saved` never took effect and has been removed; it can be deleted from existing
   files. `/bag save` confirms with this module's language files, key `bag_saved_manually`
   (UltiKits/UltiRemoteBag#17).
@@ -441,26 +425,25 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Changed` entry above. Nothing an operator has stored is affected, because what a page holds does
   not change. Making capacity genuinely configurable is wanted and is recorded as
   UltiKits/UltiRemoteBag#38 (UltiKits/UltiRemoteBag#24).
+- **给插件作者：** 已发布的 1.0.0 中的 public 方法 `RemoteBagService#setBagPage`、`#saveBag` 与 `#saveAllBags`
+  已移除。第三方调用者需要修改代码并重新编译：逐页调用 `readPage(UUID, int)`，保留返回的 `PageRead`，
+  再将其与编辑后的物品一起传给 `savePage(UUID, int, ItemStack[], PageRead)`。非空返回值是下次保存的基准；
+  返回 `null` 表示未写入任何内容，必须按保存未成功处理。这是有条件的单页写入，并非旧缓存赋值方法或批量保存的直接等价替代；
+  显示缓存从不整份写回数据库（UltiKits/UltiRemoteBag#54）。
 - 移除了本模块自身的"配置已重载"控制台日志行；UltiTools 6.3.0 会为每个模块输出一行重载日志。
-- `auto_save_interval` 从来没有生效，现已移除；可从现有配置文件中删除。它声称设定定时自动保存的周期，
-  而该任务无论该值为何都固定为 300 秒；该任务一并移除：对背包页的每一次写入都已在同一动作中持久化，
-  它无事可做。随之消失的一个真实效果：数据库写入失败时，该任务的下一次运行会重试。玩家退出与模块卸载
-  仍会重试，因此在任何一次正常停机下该修改仍会被写入，只是时机延后到下一次退出或卸载，而不再是五分钟之内。
-  这并非在所有情形下都会重试：若服务器被强行终止、断电，或以其他方式在未走那两条路径的情况下停止，
-  而一次失败的写入当时只存在内存中，那次修改就会丢失——而五分钟的重试很可能会赶上它。
-  还有一个可观察效果一并消失，对从外部监看数据库的人而言：该任务原本每 300 秒就会把每个缓存页的
-  `last_updated` 重写一遍，无论内容是否变化，因此空闲玩家的行也一直在跳。现在它只在页面真的被写入时才变。
-  本模块没有任何地方读取该列，因此没有功能影响，但把它当作活跃信号的外部工具会发现它不再前进
-  （UltiKits/UltiRemoteBag#13、UltiKits/UltiRemoteBag#23）。
+- `auto_save_interval` 从未控制保存周期，现已移除，可从现有配置文件中删除。固定每 300 秒重写缓存的任务也已移除：
+  背包页由其自身窗口保存，失败或未响应的保存会按上文所述保留并在后台重试。数据库故障期间停机或崩溃仍可能丢失保留的改动，
+  见 README“已知限制”。`last_updated` 现在仅在页面真正写入时推进，不再每 300 秒重写空闲缓存页；外部工具不要将其作为活跃信号
+  （UltiKits/UltiRemoteBag#13、UltiKits/UltiRemoteBag#23、UltiKits/UltiRemoteBag#54）。
 - `gui_title` 从来没有生效，现已移除；可从现有配置文件中删除。背包页的标题来自本模块的语言文件（键 `bag_name`）——
   这也是英文服务器本来就显示英文标题、修改该设置毫无效果的原因（UltiKits/UltiRemoteBag#14）。
 - `messages.no_permission` 从来没有生效，现已移除；可从现有配置文件中删除。权限拒绝由 UltiTools 自身的已翻译消息给出，
   本来就会跟随服务器的 `language` 设置（UltiKits/UltiRemoteBag#15）。
 - `messages.page_locked` 从来没有生效，现已移除；可从现有配置文件中删除。请求一个无权打开的页面由本模块的语言文件
   回答（键 `page_out_of_range`）；该拒绝所报的页数上限就是按权限推导出来的那个，因此与该设置所描述的是同一情形，
-  且已经是翻译过的。若你想改的是**别人**正持有该页时显示的那一行，那是另一条消息：它是代码里写死的
-  中文字面量，不跟随任何语言设置，已作为 UltiKits/UltiRemoteBag#20 单独跟踪——仍未关闭，也不会因本次移除而修复
-  （UltiKits/UltiRemoteBag#16）。
+  且已经是翻译过的。**别人**正持有该页时显示的另外几条消息，现在也来自本模块的语言文件，键为
+  `bag_read_only_in_use`、`bag_blocked_in_use`、`bag_blocked_by_admin`，见上文
+  （UltiKits/UltiRemoteBag#16、UltiKits/UltiRemoteBag#20）。
 - `messages.bag_saved` 从来没有生效，现已移除；可从现有配置文件中删除。`/bag save` 的确认消息来自本模块的
   语言文件（键 `bag_saved_manually`）（UltiKits/UltiRemoteBag#17）。
 - `save_on_close` 从来没有生效，现已移除；可从现有配置文件中删除。编辑模式下关闭背包页总是会保存，
