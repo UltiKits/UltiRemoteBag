@@ -715,6 +715,91 @@ class RemoteBagContentGUIInteractionMatrixTest {
         }
     }
 
+    @Test
+    void openingTimeoutRefusesAndReleasesItsClaimWithoutMovingItems() throws Exception {
+        com.ultikits.plugins.remotebag.service.BagEditClaimService claims =
+                mock(com.ultikits.plugins.remotebag.service.BagEditClaimService.class);
+        ownerUuid = viewer.getUniqueId();
+        BagLockService realLocks = new BagLockService();
+        UltiRemoteBagTestHelper.setField(realLocks, "plugin", mockPlugin);
+        UltiRemoteBagTestHelper.setField(realLocks, "config", config);
+        UltiRemoteBagTestHelper.setField(realLocks, "claimService", claims);
+        lockService = org.mockito.Mockito.spy(realLocks);
+        lenient().when(claims.claim(ownerUuid, PAGE, viewer.getUniqueId())).thenReturn(
+                com.ultikits.plugins.remotebag.service.BagEditClaimService.Outcome.CLAIMED);
+        lenient().when(claims.tokenOf(ownerUuid, PAGE)).thenReturn("opening-token");
+        assertThat(lockService.ownerOpen(ownerUuid, PAGE, viewer).isEditMode()).isTrue();
+        assertThat(lockService.getLockInfo(ownerUuid, PAGE)).isPresent();
+        lenient().when(bagService.readPage(ownerUuid, PAGE)).thenThrow(
+                new java.util.concurrent.CompletionException(new java.util.concurrent.TimeoutException("read")));
+        viewer.getInventory().setItem(0, new ItemStack(Material.EMERALD, 3));
+        RemoteBagContentGUI gui = new RemoteBagContentGUI(viewer, mockPlugin, ownerUuid, PAGE,
+                bagService, lockService, config, AccessMode.EDIT);
+        InventoryOpenEvent event = new InventoryOpenEvent(viewer.getOpenInventory());
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> gui.setupContent(event)).doesNotThrowAnyException();
+
+        assertThat(event.isCancelled()).as("an unread page must never open editable and empty").isTrue();
+        org.mockito.Mockito.verify(lockService).release(ownerUuid, PAGE, viewer.getUniqueId(), "opening-token");
+        org.mockito.Mockito.verify(claims).release(ownerUuid, PAGE, "opening-token");
+        assertThat(lockService.getLockInfo(ownerUuid, PAGE)).isEmpty();
+        assertThat(viewer.getInventory().getItem(0)).isEqualTo(new ItemStack(Material.EMERALD, 3));
+        assertViewerHoldsNoDiamond();
+        gui.onClose(mock(org.bukkit.event.inventory.InventoryCloseEvent.class));
+        org.mockito.Mockito.verify(bagService, org.mockito.Mockito.never()).savePage(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        assertThat(viewer.nextMessage()).contains("msg_bag_load_failed");
+    }
+
+    @Test
+    void refreshTimeoutKeepsContentsReadOnlyAndNeverWritesThemBack() throws Exception {
+        RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+        lenient().when(bagService.readPage(ownerUuid, PAGE)).thenThrow(
+                new java.util.concurrent.CompletionException(new java.util.concurrent.TimeoutException("read")));
+        java.lang.reflect.Method refresh = RemoteBagContentGUI.class.getDeclaredMethod("loadBagContents");
+        refresh.setAccessible(true);
+
+        org.assertj.core.api.Assertions.assertThatCode(() -> refresh.invoke(gui)).doesNotThrowAnyException();
+
+        assertBagStillHoldsTheDiamond(gui);
+        assertThat(click(gui, CONTENT_SLOT, ClickType.LEFT, InventoryAction.PICKUP_ALL).isCancelled()).isTrue();
+        assertThat(click(gui, CONTENT_SLOT, ClickType.SHIFT_LEFT,
+                InventoryAction.MOVE_TO_OTHER_INVENTORY).isCancelled()).isTrue();
+        assertThat(dragEmeraldOver(gui, CONTENT_SLOT, CONTENT_SLOT_2).isCancelled()).isTrue();
+        assertBagStillHoldsTheDiamond(gui);
+        assertViewerHoldsNoDiamond();
+        assertThat(RemoteBagContentGUI.flushOpenEditPage(viewer))
+                .isEqualTo(RemoteBagContentGUI.FlushOutcome.NO_OPEN_PAGE);
+        RemoteBagContentGUI.saveOpenEditPageOnQuit(viewer);
+        RemoteBagContentGUI.keepOpenEditWindowsForDisable();
+        viewer.closeInventory();
+        org.mockito.Mockito.verify(bagService, org.mockito.Mockito.never()).savePage(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+        assertThat(viewer.nextMessage()).contains("msg_bag_refresh_failed");
+    }
+
+    @Test
+    void refreshButtonTimeoutDoesNotCloseOrUpgradeTheCurrentView() {
+        RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.READ_ONLY);
+        lenient().when(lockService.canUpgradeToEdit(ownerUuid, PAGE)).thenReturn(true);
+        lenient().when(bagService.readPage(ownerUuid, PAGE)).thenThrow(
+                new java.util.concurrent.CompletionException(new java.util.concurrent.TimeoutException("read")));
+
+        click(gui, REFRESH_SLOT, ClickType.LEFT, InventoryAction.PICKUP_ALL);
+
+        assertThat(viewer.getOpenInventory().getTopInventory()).isEqualTo(gui.getInventory());
+        assertBagStillHoldsTheDiamond(gui);
+        assertThat(click(gui, CONTENT_SLOT, ClickType.LEFT, InventoryAction.PICKUP_ALL).isCancelled()).isTrue();
+        assertViewerHoldsNoDiamond();
+        org.mockito.Mockito.verify(lockService, org.mockito.Mockito.never()).ownerOpen(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verify(lockService, org.mockito.Mockito.never()).adminOpen(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.any());
+        assertThat(viewer.nextMessage()).contains("msg_bag_refresh_failed");
+    }
+
     // ==================== Harness ====================
 
     /** A stand-in for an anti-cheat or region plugin that cancels the click before the library sees it. */

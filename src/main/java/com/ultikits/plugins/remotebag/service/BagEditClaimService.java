@@ -570,6 +570,25 @@ public class BagEditClaimService {
         return storage().submit(call);
     }
 
+    /** Read-only storage work shares the existing pool and caller deadline. Late results have no side effects. */
+    <T> T readWithinDeadline(Callable<T> read) {
+        Future<T> future = submit(read);
+        try {
+            return future.get(mainThreadDeadlineMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new java.util.concurrent.CompletionException(e);
+        } catch (ExecutionException e) {
+            throw new java.util.concurrent.CompletionException(e.getCause());
+        } catch (TimeoutException e) {
+            throw new java.util.concurrent.CompletionException(e);
+        } finally {
+            // A driver may ignore interruption. Only the waiting caller consumes this result; it can never
+            // redraw a later window or publish an old result into the display cache.
+            future.cancel(true);
+        }
+    }
+
     /** Main-thread work: queued for the main thread, or run at once while the module disables. */
     private void onMainThread(Runnable work) {
         if (stopping) {

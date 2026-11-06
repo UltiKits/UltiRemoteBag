@@ -184,8 +184,13 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             claimToken = claims.tokenOf(ownerUuid, pageNum);
         }
         // 加载背包内容到内容区域
-        loadBagContents();
-        
+        if (!loadBagContents(true)) {
+            event.setCancelled(true);
+            releaseLock();
+            bagService.forgetUnlessOnline(ownerUuid);
+            return;
+        }
+
         // 设置工具栏
         setupToolbar();
     }
@@ -197,7 +202,9 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     @Override
     protected void afterSetup(InventoryOpenEvent event) {
-        SoundUtil.playOpenSound(player, config);
+        if (!event.isCancelled()) {
+            SoundUtil.playOpenSound(player, config);
+        }
     }
     
     /**
@@ -211,6 +218,10 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * administrator can still act on the wrong picture.
      */
     private void loadBagContents() {
+        loadBagContents(false);
+    }
+
+    private boolean loadBagContents(boolean opening) {
         BagEditClaimService claims = lockService.getClaimService();
         ItemStack[] keptContent = claims == null || isEditable() ? null : claims.keptItems(ownerUuid, pageNum);
         ItemStack[] contents;
@@ -222,8 +233,19 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         } else {
             // Read from the database, not from the cache: this is what the window's save is conditioned on
             // (UltiKits/UltiRemoteBag#54).
-            pageRead = bagService.readPage(ownerUuid, pageNum);
-            contents = pageRead == null ? null : pageRead.getItems();
+            try {
+                RemoteBagService.PageRead read = bagService.readPage(ownerUuid, pageNum);
+                pageRead = read;
+                contents = read == null ? null : read.getItems();
+            } catch (java.util.concurrent.CompletionException e) {
+                // Do not turn an unknown page into an empty editable page, or erase a previous display.
+                // Unlike a failed save/renewal this read has no write to keep or items to return.
+                editRightsLost = true;
+                SoundUtil.playErrorSound(player, config);
+                player.sendMessage(ChatColor.RED + (opening ? plugin.i18n("msg_bag_load_failed")
+                        : plugin.i18n("msg_bag_refresh_failed")));
+                return false;
+            }
         }
         for (int i = 0; i < CONTENT_SIZE; i++) {
             // 物品直接放入，不设置 Icon 点击事件
@@ -231,6 +253,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             boolean stored = contents != null && i < contents.length && contents[i] != null;
             getInventory().setItem(i, stored ? contents[i] : null);
         }
+        return true;
     }
     
     /**
@@ -321,12 +344,16 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         
         Icon icon = new Icon(item);
         icon.onClick(e -> {
+            // Read before replacing this window or trying to upgrade it. A timeout must keep the
+            // current screen, even when local arbitration would otherwise permit an upgrade.
+            if (!loadBagContents(false)) {
+                return;
+            }
             if (lockService.isClaimedElsewhere(ownerUuid, pageNum)) {
                 // Still being edited on another server (UltiKits/UltiRemoteBag#54): stay read-only, say why,
                 // and show the page as stored now.
                 SoundUtil.playErrorSound(player, config);
                 player.sendMessage(BagOpenResult.readOnlyElsewhere().renderMessage(plugin));
-                loadBagContents();
                 return;
             }
             // 检查是否可以升级为编辑模式
@@ -353,8 +380,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             } else {
                 SoundUtil.playErrorSound(player, config);
                 player.sendMessage(ChatColor.YELLOW + plugin.i18n("msg_owner_still_using"));
-                // 刷新内容显示
-                loadBagContents();
+                // Contents were refreshed before arbitration above.
             }
         });
         

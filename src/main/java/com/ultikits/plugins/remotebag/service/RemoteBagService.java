@@ -33,6 +33,9 @@ public class RemoteBagService {
 
     private DataOperator<RemoteBagData> dataOperator;
 
+    @com.ultikits.ultitools.annotations.Autowired
+    private BagEditClaimService claimService;
+
     /**
      * Read cache of players' bag pages, {@code Map<PlayerUUID, Map<PageNumber, ItemStack[]>>}, for the
      * views that only display them (the main window's counts, {@code /bag list}). Both map levels are concurrent:
@@ -166,9 +169,14 @@ public class RemoteBagService {
      * @param playerUuid the bag's owner
      * @param page       the page number
      * @return the page as stored now; an empty page, not stored, when no row exists
+     * @throws java.util.concurrent.CompletionException if the storage read fails or exceeds the claim service's
+     *         caller deadline; this is never represented as an empty page
      */
     public PageRead readPage(UUID playerUuid, int page) {
-        List<RemoteBagData> rows = storedRows(playerUuid, page);
+        // Only raw storage access runs off-thread. Bukkit item decoding and cache publication stay with
+        // the caller, so a timed-out read cannot later replace a view or its cached baseline.
+        List<RemoteBagData> rows = claimService == null ? storedRows(playerUuid, page)
+                : claimService.readWithinDeadline(() -> storedRows(playerUuid, page));
         PageRead read;
         if (rows.isEmpty()) {
             read = new PageRead(new ItemStack[PAGE_CAPACITY], false, null, 0L);

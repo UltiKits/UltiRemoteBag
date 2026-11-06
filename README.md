@@ -224,6 +224,13 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
   If a save is refused, the items put into the window since it last read or saved the page are given back to the
   player (what does not fit drops at their feet). If the claim is ever lost, the window turns read-only at once
   and gives those items back.
+- **Page-read timeouts.** Reading a content page on open or Refresh uses the storage pool and waits at most a sixth
+  of `lock.timeout_seconds`, capped at two seconds. An opening that times out is refused with "The bag could not be
+  loaded. Please try again later." and releases the lock/claim acquired by that opening. A Refresh that times out
+  leaves every displayed item unchanged, keeps the same window read-only and says "The bag could not be refreshed.
+  The current contents are unchanged and this view is read-only." Clicks and drags cannot move items into or out of
+  that page, and Save, close, quit and module stop do not write that display back. A late read result is discarded;
+  an unknown result is never treated as an empty page. These messages are translated in both shipped languages.
 - **When the database does not answer.** Every database call of the claim and of a page save is given up on after a
   sixth of `lock.timeout_seconds` (at most two seconds while the main thread waits); a call given up on may still
   land later, and its answer is still used.
@@ -276,8 +283,9 @@ the bag tables by hand while servers are running.
   version of this module during a rolling upgrade, another plugin writing `remote_bags`, or a hand edit of the
   table. The window's save is refused and the items put in go back to the player, but an item taken out in that
   session can exist twice.
-- **The database is very slow at the moment a page is opened.** If opening a page waits more than about two
-  seconds for the database, it opens read-only. If that slow call then completes after the player has quickly
+- **The database is very slow while acquiring an edit claim.** If acquiring that claim waits more than about two
+  seconds, the page opens read-only provided its subsequent content read succeeds (a content-read timeout refuses
+  the opening instead). If that slow call then completes after the player has quickly
   reopened the same page, the reopened window can lose its claim. In rare cases an item the player takes out of
   it can then exist twice. If an exceptional same-server claim reaches the defensive refusal for another local
   session, its read-only notice also says "being edited on another server"; that notice alone does not prove a second
@@ -302,10 +310,23 @@ the bag tables by hand while servers are running.
   the call returns, even if the module is loaded again. Configure driver-level timeouts such as MySQL's `socketTimeout`;
   if stuck calls accumulate across unloads, restore database connectivity and restart the server rather than repeatedly
   unload and load the module.
-- **Blocking reads remain a limitation.** The two-second bound above applies to claim and save calls, not to reading
-  a page or refreshing the bag list. Opening a page, Refresh, and `/bag` can still block the main thread on a slow
-  database; Refresh has no cooldown. Keep the database responsive and configure driver timeouts. A failed read is not
-  evidence that the stored page is empty; do not delete or replace its stored data to work around an outage.
+- **Bag-list reads remain synchronous.** The content page's read is bounded, but listing a player's pages (including
+  the existence check before `/bag <page>` or `/bag see`) still reads synchronously; a slow list query can block the
+  main thread before the content window is opened. Refresh has no cooldown and each attempt may wait up to the
+  content-read deadline. Keep the database responsive and configure driver timeouts. A failed read is not evidence
+  that the stored page is empty; do not delete or replace its stored data to work around an outage.
+- **Another server's stale edit claim is not cleared at startup.** After a crash, a page may say "This bag page is
+  being edited on another server; it is open in read-only mode" even though that server has stopped. Startup does
+  not delete that claim: normal takeover still requires observing its unchanged counter for a full
+  `lock.timeout_seconds`. Prefer waiting for that normal takeover. There is no in-game claim-cleanup command:
+  `/bag clear` clears items and `/bag delete` deletes a bag page, not a stale claim. If manual clearing is necessary,
+  first confirm the server that held this claim is stopped and will not resume the old editing session (`holder_run`
+  is a generated run UUID, not a hostname; if you cannot identify the holder, stop every database-sharing server). Pause all
+  servers sharing the database and back it up. Inspect `remote_bag_claims` for the exact page id `<owner UUID>:<page>`
+  (`RemoteBagEditClaim#idOf`), verify its `holder_run` and `holder_token`, then delete only that matching row:
+  `DELETE FROM remote_bag_claims WHERE id='<owner UUID>:<page>' AND holder_run='<confirmed stopped run>' AND holder_token='<verified token>';`.
+  Do not delete `remote_bags` or sweep the claims table. Save receipts use session-token ids in that same table,
+  not page ids; they are a separate class of record and are not covered by this manual edit-claim procedure.
 - **Crash-left save receipts are retained.** Receipt rows in `remote_bag_claims` can remain after a process crashes.
   Startup does not sweep them: a live server may still need a receipt to decide an uncertain save after another server
   took the page over. Do not delete these internal rows while any server sharing the database may still need them.
@@ -313,7 +334,7 @@ the bag tables by hand while servers are running.
   ignores letter case. On the JSON backend, which belongs to one server, the claim check and the page write are
   not one transaction; with one server that changes nothing.
 
-补充限制：页面读取和背包列表刷新仍会同步等待数据库，不受占用调用的两秒期限保护，刷新按钮没有冷却时间。请保持数据库低延迟并设置驱动超时；不要因读取失败而删除或替换背包数据。模块卸载不能强制结束永不返回的 JDBC 调用，其后台线程可能继续持有旧模块的类加载器；如果反复卸载后出现此类堆积，修复数据库连接后重启服务器，不要反复卸载再加载。崩溃遗留的保存回执不会在启动时清理，因为其他仍在运行的服务器可能需要它来判定保存是否成功，不能仅因页面已被其他服务器接手就删除回执。停用时已经发出的后台释放与其他释放共享最后的等待期限；仍不响应的数据库调用可能让占用保留到正常超时。
+页面读取超时：打开内容页时最多等待 `lock.timeout_seconds` 的六分之一（上限两秒）；超时拒绝打开，提示「背包加载失败，请稍后重试。」，释放本次取得的锁与占用。刷新超时则提示「背包刷新失败，当前显示的物品保持不变，此视图现为只读。」，当前窗口与物品不变，不接受物品移动，保存、关闭、退出和停用均不写回该显示；迟到的读取结果被丢弃。补充限制：背包列表及打开前的页面存在性检查仍会同步等待数据库，刷新按钮没有冷却时间。请保持数据库低延迟并设置驱动超时；不要因读取失败而删除或替换背包数据。另一台服务器崩溃遗留的编辑占用不在启动时自动删除，页面可能仍提示另一服务器正在编辑并以只读方式打开；通常应等待观察到计数器不变满一个 `lock.timeout_seconds` 后正常接手。没有游戏内清理占用命令，`/bag clear` 和 `/bag delete` 操作的是物品或背包页。确需手动清理时，先确认占用来源服务器已停止且不会恢复旧会话，暂停共享该库的所有服务器并备份，核对 `remote_bag_claims` 中 id 为 `<所有者 UUID>:<页码>` 的行及其 `holder_run`、`holder_token`，只按上方带三项条件的 DELETE 删除这一行。不要删除 `remote_bags`，不要清空占用表，也不要把会话 token 作 id 的保存回执当成页面编辑占用。模块卸载不能强制结束永不返回的 JDBC 调用，其后台线程可能继续持有旧模块的类加载器；如果反复卸载后出现此类堆积，修复数据库连接后重启服务器，不要反复卸载再加载。崩溃遗留的保存回执不会在启动时清理，因为其他仍在运行的服务器可能需要它来判定保存是否成功，不能仅因页面已被其他服务器接手就删除回执。停用时已经发出的后台释放与其他释放共享最后的等待期限；仍不响应的数据库调用可能让占用保留到正常超时。
 
 多台服务器共享 MySQL 时（UltiKits/UltiRemoteBag#54）：同一背包页同一时间只能在一台服务器上编辑——打开编辑时在数据库表
 `remote_bag_claims` 中占用该页；另一台服务器占用期间，本服务器对所有者和管理员都以只读方式打开。单台服务器上的规则不变（所有者优先于
@@ -329,7 +350,7 @@ the bag tables by hand while servers are running.
 本服务器的会话且计数器仍是其最后确认的值时推进计数器，再在页面仍是窗口读取时的内容时写入页面，并记录这次保存已写入；因此在 SQLite 和 MySQL 上，
 保存只会在本服务器持有该页占用时生效，无论它多晚执行——另一台服务器接手之后，被耽搁的保存不会写入任何内容；报告了数据库错误的保存是否实际已写入，
 从这条记录中读取而不是猜测：重试和占用丢失后的放弃都只在该保存的事务结束后读取（占用行的锁保证这一顺序）；模块停止时，在先锁定占用行的事务中读取，因此会等待仍在数据库上运行的保存（MySQL 的 `socketTimeout` 可能放弃一个随后被数据库提交的保存）。在停止期限内无法判定的保存不会被归还，而是连同物品作为未判定记录在日志中。如果服务器网络可能留下半开连接，请为 MySQL 连接设置套接字或语句超时（例如 JDBC URL 中的
-`socketTimeout`），框架本身不设置；保存进行中断开的连接还会让该页的占用行在数据库上保持锁定，直到数据库丢弃该会话，期间任何服务器都无法接手该页——结束这种失效会话并释放其锁的是 MySQL 的 `wait_timeout`（默认 28800 秒，即八小时），请将其设为适中的值；`innodb_lock_wait_timeout` 只限制其他服务器每次等待该锁的时长。升级无需迁移。已知限制（均为罕见情况，均会记录日志）。运维建议：让共享数据库保持响应迅速、与每台服务器之间低延迟；为 MySQL 设置 `socketTimeout` 和适中的 `wait_timeout`；共享数据库的所有服务器一起升级；服务器运行时不要手动编辑背包数据表。一、本模块以外的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags` 的其他插件、手动编辑数据表）在窗口打开时改动该页：保存被拒绝、放入的物品归还，但该会话中取出的物品可能出现两份。二、打开页面时数据库非常慢：等待超过约两秒的打开会以只读方式打开；如果这次缓慢的调用在玩家迅速重新打开同一页之后才完成，重新打开的窗口可能失去占用，在罕见情况下玩家从中取出的物品可能出现两份。三、某台服务器与其他服务器仍可访问的数据库断开整整一个 `lock.timeout_seconds`（或整个服务器进程冻结这么久）：另一台服务器接手该页；断开的服务器在第一次续期失败时窗口变为只读，数据库恢复后归还放入的物品，自上次保存到变为只读之间（断开后最多约半个超时）取出的物品可能出现两份。四、在数据库故障期间停止或崩溃，而某个保存仍在等待写入（维护者已接受）：到停止时五秒冲刷结束仍未写入的保存、或崩溃时待写入的保存，放入的物品丢失、取出的物品可能出现两份，均连同物品记录在日志中；例外：停止时仍能判定其未写入且玩家在线，则归还放入的物品；实际上每名玩家最多一页；数据库完全不响应时，停止最多约 11 秒。五、欠离线玩家的物品保存在内存中直到其再次加入本服务器，重启会丢失，欠下时和模块停止时都会连同玩家、页码与物品记录在日志中。六、两条技术说明：MySQL 上页面内容的比较遵循列的排序规则（不区分大小写）；JSON 存储只属于一台服务器，其占用检查与页面写入不在同一个事务中，单台服务器上没有影响。
+`socketTimeout`），框架本身不设置；保存进行中断开的连接还会让该页的占用行在数据库上保持锁定，直到数据库丢弃该会话，期间任何服务器都无法接手该页——结束这种失效会话并释放其锁的是 MySQL 的 `wait_timeout`（默认 28800 秒，即八小时），请将其设为适中的值；`innodb_lock_wait_timeout` 只限制其他服务器每次等待该锁的时长。升级无需迁移。已知限制（均为罕见情况，均会记录日志）。运维建议：让共享数据库保持响应迅速、与每台服务器之间低延迟；为 MySQL 设置 `socketTimeout` 和适中的 `wait_timeout`；共享数据库的所有服务器一起升级；服务器运行时不要手动编辑背包数据表。一、本模块以外的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags` 的其他插件、手动编辑数据表）在窗口打开时改动该页：保存被拒绝、放入的物品归还，但该会话中取出的物品可能出现两份。二、取得编辑占用时数据库非常慢：占用调用等待超过约两秒后，只有随后的页面内容读取成功才会只读打开（内容读取超时则拒绝打开）；如果这次缓慢的占用调用在玩家迅速重新打开同一页之后才完成，重新打开的窗口可能失去占用，在罕见情况下玩家从中取出的物品可能出现两份。三、某台服务器与其他服务器仍可访问的数据库断开整整一个 `lock.timeout_seconds`（或整个服务器进程冻结这么久）：另一台服务器接手该页；断开的服务器在第一次续期失败时窗口变为只读，数据库恢复后归还放入的物品，自上次保存到变为只读之间（断开后最多约半个超时）取出的物品可能出现两份。四、在数据库故障期间停止或崩溃，而某个保存仍在等待写入（维护者已接受）：到停止时五秒冲刷结束仍未写入的保存、或崩溃时待写入的保存，放入的物品丢失、取出的物品可能出现两份，均连同物品记录在日志中；例外：停止时仍能判定其未写入且玩家在线，则归还放入的物品；实际上每名玩家最多一页；数据库完全不响应时，停止最多约 11 秒。五、欠离线玩家的物品保存在内存中直到其再次加入本服务器，重启会丢失，欠下时和模块停止时都会连同玩家、页码与物品记录在日志中。六、两条技术说明：MySQL 上页面内容的比较遵循列的排序规则（不区分大小写）；JSON 存储只属于一台服务器，其占用检查与页面写入不在同一个事务中，单台服务器上没有影响。
 
 ## 🔧 开发者 API
 
