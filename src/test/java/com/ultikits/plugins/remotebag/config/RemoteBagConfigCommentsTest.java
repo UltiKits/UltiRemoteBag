@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RemoteBagConfigCommentsTest {
 
     /** The thirteen settings whose comments were Chinese, by path: the adoption's scope, counted at master 4cac234. */
-    private static final int TOKEN_COMMENTS = 13;
+    private static final int TOKEN_COMMENTS = 14;
 
     @TempDir
     Path tempDir;

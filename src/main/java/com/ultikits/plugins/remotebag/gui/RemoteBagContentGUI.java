@@ -84,15 +84,17 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     private String claimToken;
     
-    /**
-     * 内容区域槽位数（前 5 行 = 45 槽）
-     * <p>
-     * Read from {@link RemoteBagConfig#PAGE_CAPACITY} rather than written as {@code 45}, so the
-     * window's size, the array the service allocates for a page, and the denominator of the main
-     * GUI's "Slots Used" lore are one number. They were three derivations of two different things
-     * until UltiKits/UltiRemoteBag#24, and they disagreed on screen.
-     */
-    private static final int CONTENT_SIZE = RemoteBagConfig.PAGE_CAPACITY;
+    /** Layout is captured once: a reload must not move an open window's toolbar or trim its items. */
+    private final int configuredCapacity;
+    private final int screenSize;
+    private ItemStack[] bufferedContents;
+    private int screen;
+
+    /** Number of real item slots on the current screen, excluding protected unused cells. */
+    private int visibleSlots() {
+        return bufferedContents == null ? screenSize
+                : Math.min(screenSize, bufferedContents.length - screen * screenSize);
+    }
 
     /**
      * Return value of {@link #onClick}/{@link #onDrag} that REFUSES the interaction.
@@ -146,7 +148,10 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
                                BagLockService lockService,
                                RemoteBagConfig config,
                                AccessMode accessMode) {
-        super(viewer, "remotebag-content-" + pageNum, buildTitle(plugin, pageNum, accessMode), 6);
+        super(viewer, "remotebag-content-" + pageNum, buildTitle(plugin, pageNum, accessMode),
+                Math.min(config.getPageCapacity(), RemoteBagConfig.PAGE_CAPACITY) / RemoteBagConfig.SLOTS_PER_ROW + 1);
+        this.configuredCapacity = config.getPageCapacity();
+        this.screenSize = Math.min(configuredCapacity, RemoteBagConfig.PAGE_CAPACITY);
         this.plugin = plugin;
         this.ownerUuid = ownerUuid;
         this.pageNum = pageNum;
@@ -225,12 +230,61 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             pageRead = bagService.readPage(ownerUuid, pageNum);
             contents = pageRead == null ? null : pageRead.getItems();
         }
-        for (int i = 0; i < CONTENT_SIZE; i++) {
-            // 物品直接放入，不设置 Icon 点击事件
-            // 编辑模式下允许自由移动，只读模式在 onClick 中处理
-            boolean stored = contents != null && i < contents.length && contents[i] != null;
-            getInventory().setItem(i, stored ? contents[i] : null);
+        int capacity = RemoteBagConfig.effectiveCapacity(configuredCapacity, contents);
+        bufferedContents = contents == null ? new ItemStack[capacity]
+                : java.util.Arrays.copyOf(ItemReturns.deepCopy(contents), capacity);
+        screen = Math.min(screen, (capacity - 1) / screenSize);
+        renderScreen();
+        if (capacity > configuredCapacity) {
+            player.sendMessage(ChatColor.YELLOW + plugin.i18n("msg_capacity_retained")
+                    .replace("{0}", String.valueOf(capacity))
+                    .replace("{1}", String.valueOf(configuredCapacity)));
         }
+    }
+
+    /** Redraw in place; no close event, lock release, claim change or per-screen write. */
+    private void renderScreen() {
+        int visible = visibleSlots();
+        for (int slot = 0; slot < screenSize; slot++) {
+            getItems().remove(slot);
+            if (slot < visible) {
+                getInventory().setItem(slot, bufferedContents[screen * screenSize + slot]);
+            } else {
+                addItem(slot, createBackgroundIcon());
+            }
+        }
+        // Refresh may change the number of screens; remove stale arrow actions as well as pictures.
+        if (getItems().containsKey(getSize() - 1)) {
+            updateNavigation();
+        }
+    }
+
+    private void updateNavigation() {
+        addToBottomRow(1, screen > 0 ? screenButton(-1) : createBackgroundIcon());
+        addToBottomRow(7, (screen + 1) * screenSize < bufferedContents.length
+                ? screenButton(1) : createBackgroundIcon());
+    }
+
+    private Icon screenButton(int direction) {
+        Icon icon = new Icon(Material.ARROW);
+        icon.setName(ChatColor.YELLOW + (direction < 0
+                ? plugin.i18n("btn_content_previous") : plugin.i18n("btn_content_next")));
+        icon.setLore(plugin.i18n("lore_content_screen")
+                .replace("{0}", String.valueOf(screen + 1))
+                .replace("{1}", String.valueOf((bufferedContents.length + screenSize - 1) / screenSize)));
+        icon.onClick(event -> {
+            if (isEditable() && !confirmEditable(true)) {
+                return;
+            }
+            int next = screen + direction;
+            if (next < 0 || next * screenSize >= bufferedContents.length) {
+                return;
+            }
+            bufferedContents = currentContents();
+            screen = next;
+            renderScreen();
+        });
+        return icon;
     }
     
     /**
@@ -270,6 +324,9 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         
         // 关闭按钮 (槽位 8)
         addToBottomRow(8, createCloseButton());
+        if (bufferedContents != null) {
+            updateNavigation();
+        }
     }
     
     /**
@@ -499,7 +556,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         // stops the disabled Save icon being picked up onto the cursor. The library dispatches the
         // Icon's own click action after this method returns, regardless of the cancel decision, so
         // every toolbar button keeps working.
-        if (insideBagWindow && rawSlot >= CONTENT_SIZE) {
+        if (insideBagWindow && rawSlot >= visibleSlots()) {
             return CANCEL;
         }
 
@@ -513,7 +570,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
 
         // Two vanilla actions are not confined to the slot they were clicked on: COLLECT_TO_CURSOR
         // sweeps every slot of both inventories, and a shift-click from the player's side scans the
-        // whole top inventory for somewhere to put the stack. Both therefore reach raw slots 45-53,
+        // whole top inventory for somewhere to put the stack. Both therefore reach raw the toolbar and protected unused cells,
         // which the guard above cannot see because it only knows where the click STARTED.
         if (wouldReachAToolbarIcon(event)) {
             SoundUtil.playErrorSound(player, config);
@@ -536,7 +593,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * toolbar icon, so vanilla would reach into the toolbar row while applying it.
      * <p>
      * The library's contract is one boolean for the whole click, so a multi-slot action cannot be
-     * allowed "except for slots 45-53" — it is allowed entirely or refused entirely. Refusing it is
+     * allowed "except for protected cells" — it is allowed entirely or refused entirely. Refusing it is
      * the safe half, and it only bites when the player is holding something that matches a button.
      * <p>
      * The exposure is real rather than theoretical for this module in particular: before
@@ -544,7 +601,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * upgrading from that version may have players holding genuine copies of them. With a matching
      * item on the cursor, a double-click anywhere in the window collects the icon out of the toolbar;
      * the toolbar is rebuilt from scratch by {@code setupToolbar} on the next open and
-     * {@link #saveCurrentContents} only ever serialises slots 0-44, so the collected copy is pure
+     * {@link #saveCurrentContents} serialises only logical content, never protected cells, so the collected copy is pure
      * duplication. The shift-click direction loses instead: the stack merges into a toolbar slot and
      * is gone when the page closes.
      * <p>
@@ -577,7 +634,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return false;
         }
 
-        for (int slot = CONTENT_SIZE; slot < getSize(); slot++) {
+        for (int slot = visibleSlots(); slot < getSize(); slot++) {
             ItemStack icon = getInventory().getItem(slot);
             if (icon != null && icon.isSimilar(subject)) {
                 return true;
@@ -625,7 +682,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
                 return CANCEL;
             }
 
-            if (rawSlot >= CONTENT_SIZE) {
+            if (rawSlot >= visibleSlots()) {
                 announceDragRefusal(plugin.i18n("msg_cannot_drag_toolbar"));
                 return CANCEL;
             }
@@ -885,9 +942,10 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
 
     /** What the window's content area holds now. */
     private ItemStack[] currentContents() {
-        ItemStack[] contents = new ItemStack[CONTENT_SIZE];
-        for (int i = 0; i < CONTENT_SIZE; i++) {
-            contents[i] = getInventory().getItem(i);
+        ItemStack[] contents = bufferedContents == null ? new ItemStack[configuredCapacity]
+                : java.util.Arrays.copyOf(bufferedContents, bufferedContents.length);
+        for (int i = 0; i < visibleSlots(); i++) {
+            contents[screen * screenSize + i] = getInventory().getItem(i);
         }
         return contents;
     }

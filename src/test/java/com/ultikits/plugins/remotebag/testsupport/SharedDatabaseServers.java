@@ -691,7 +691,8 @@ public final class SharedDatabaseServers {
     }
 
     public static ItemStack[] deserialize(String contents) {
-        ItemStack[] items = new ItemStack[PAGE_SIZE];
+        // Independent storage instrument: read every persisted index, including the newly exposed sixth row.
+        ItemStack[] items = new ItemStack[RemoteBagConfig.MAX_ADDRESSABLE_SLOTS];
         if (contents == null || contents.isEmpty()) {
             return items;
         }
