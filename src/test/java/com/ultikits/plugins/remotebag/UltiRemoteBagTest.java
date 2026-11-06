@@ -18,8 +18,22 @@ import static org.mockito.Mockito.*;
 @DisplayName("UltiRemoteBag Main Class Tests")
 class UltiRemoteBagTest {
 
+    private org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit;
+
+    @BeforeEach
+    void compatibleRuntime() {
+        bukkit = mockStatic(org.bukkit.Bukkit.class);
+        bukkit.when(org.bukkit.Bukkit::getBukkitVersion).thenReturn("1.21.11-R0.1-SNAPSHOT");
+        org.bukkit.plugin.PluginManager manager = mock(org.bukkit.plugin.PluginManager.class);
+        org.bukkit.plugin.Plugin core = mock(org.bukkit.plugin.Plugin.class);
+        when(core.getDescription()).thenReturn(new org.bukkit.plugin.PluginDescriptionFile("UltiTools", "6.3.0", "core.Main"));
+        when(manager.getPlugin("UltiTools")).thenReturn(core);
+        bukkit.when(org.bukkit.Bukkit::getPluginManager).thenReturn(manager);
+    }
+
     @AfterEach
     void tearDown() throws Exception {
+        bukkit.close();
         UltiRemoteBagTestHelper.tearDown();
     }
 
