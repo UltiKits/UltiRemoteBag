@@ -1,6 +1,8 @@
 # UltiRemoteBag Language File
 bag_enabled: "UltiRemoteBag has been enabled!"
 bag_disabled: "UltiRemoteBag has been disabled!"
+framework_compatibility_refused: "UltiRemoteBag needs UltiTools 6.4.0 or later on Minecraft versions below 1.21 (server: {0}, UltiTools: {1}). Please update UltiTools."
+framework_compatibility_unknown: "UltiRemoteBag could not parse the server or UltiTools version (server: {0}, UltiTools: {1}); continuing without the compatibility check."
 
 # GUI Titles
 gui_main_title: "'s Remote Bags"

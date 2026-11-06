@@ -5,6 +5,9 @@ import com.ultikits.plugins.remotebag.config.RemovedConfigKeys;
 import com.ultikits.plugins.remotebag.gui.RemoteBagContentGUI;
 import com.ultikits.plugins.remotebag.service.BagEditClaimService;
 import com.ultikits.plugins.remotebag.service.RemoteBagService;
+import com.ultikits.plugins.remotebag.util.FrameworkCompatibility;
+import org.bukkit.Bukkit;
+import org.bukkit.plugin.Plugin;
 import com.ultikits.ultitools.abstracts.UltiToolsPlugin;
 import com.ultikits.ultitools.annotations.UltiToolsModule;
 
@@ -25,6 +28,19 @@ public class UltiRemoteBag extends UltiToolsPlugin {
 
     @Override
     public boolean registerSelf() {
+        String serverVersion = Bukkit.getBukkitVersion();
+        Plugin core = Bukkit.getPluginManager().getPlugin("UltiTools");
+        String frameworkVersion = core == null ? null : core.getDescription().getVersion();
+        FrameworkCompatibility.Decision compatibility = FrameworkCompatibility.evaluate(serverVersion, frameworkVersion);
+        if (compatibility == FrameworkCompatibility.Decision.REFUSE) {
+            getLogger().error(i18n("framework_compatibility_refused")
+                    .replace("{0}", String.valueOf(serverVersion)).replace("{1}", String.valueOf(frameworkVersion)));
+            return false;
+        }
+        if (compatibility == FrameworkCompatibility.Decision.UNKNOWN) {
+            getLogger().warn(i18n("framework_compatibility_unknown")
+                    .replace("{0}", String.valueOf(serverVersion)).replace("{1}", String.valueOf(frameworkVersion)));
+        }
         // 初始化服务
         RemoteBagService bagService = getContext().getBean(RemoteBagService.class);
         if (bagService != null) {

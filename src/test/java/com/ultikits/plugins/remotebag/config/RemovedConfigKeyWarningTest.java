@@ -268,7 +268,16 @@ class RemovedConfigKeyWarningTest {
             when(context.getBean(RemoteBagConfig.class)).thenReturn(config);
 
             when(plugin.registerSelf()).thenCallRealMethod();
-            plugin.registerSelf();
+            // These tests exercise residual-key warnings, on a known compatible runtime.
+            org.bukkit.plugin.PluginManager manager = mock(org.bukkit.plugin.PluginManager.class);
+            org.bukkit.plugin.Plugin core = mock(org.bukkit.plugin.Plugin.class);
+            when(core.getDescription()).thenReturn(new org.bukkit.plugin.PluginDescriptionFile("UltiTools", "6.3.0", "core.Main"));
+            when(manager.getPlugin("UltiTools")).thenReturn(core);
+            try (org.mockito.MockedStatic<org.bukkit.Bukkit> bukkit = org.mockito.Mockito.mockStatic(org.bukkit.Bukkit.class)) {
+                bukkit.when(org.bukkit.Bukkit::getBukkitVersion).thenReturn("1.21.11-R0.1-SNAPSHOT");
+                bukkit.when(org.bukkit.Bukkit::getPluginManager).thenReturn(manager);
+                plugin.registerSelf();
+            }
 
             ArgumentCaptor<String> warned = ArgumentCaptor.forClass(String.class);
             verify(logger, atLeast(0)).warn(warned.capture());
