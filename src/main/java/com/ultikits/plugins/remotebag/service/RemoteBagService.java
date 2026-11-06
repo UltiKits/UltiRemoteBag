@@ -35,7 +35,8 @@ public class RemoteBagService {
 
     /**
      * Read cache of players' bag pages, {@code Map<PlayerUUID, Map<PageNumber, ItemStack[]>>}, for the
-     * views that only display them (the main window's counts, {@code /bag list}).
+     * views that only display them (the main window's counts, {@code /bag list}). Both map levels are concurrent:
+     * committed saves update a page from the storage pool while the main thread reads or changes the cache (#57).
      * <p>
      * Nothing is ever written to the database from it (UltiKits/UltiRemoteBag#54; maintainer decision of
      * 2026-10-06 00:04). A page is written only by its own window, from what that window shows, and only if
@@ -99,7 +100,7 @@ public class RemoteBagService {
             return;
         }
 
-        Map<Integer, ItemStack[]> pages = new HashMap<>();
+        Map<Integer, ItemStack[]> pages = new ConcurrentHashMap<>();
 
         List<RemoteBagData> data = dataOperator.query()
                 .where("player_uuid").eq(playerUuid.toString())
@@ -696,7 +697,7 @@ public class RemoteBagService {
         if (!insertPage(playerUuid, page, serializeItems(emptyContents))) {
             return false;
         }
-        bagCache.computeIfAbsent(playerUuid, k -> new HashMap<>()).put(page, emptyContents);
+        bagCache.computeIfAbsent(playerUuid, k -> new ConcurrentHashMap<>()).put(page, emptyContents);
         return true;
     }
 

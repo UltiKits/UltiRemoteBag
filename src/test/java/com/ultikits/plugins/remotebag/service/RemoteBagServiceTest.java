@@ -107,6 +107,29 @@ class RemoteBagServiceTest {
         }
     }
 
+    @Test
+    @DisplayName("Loaded display-cache pages support storage-thread updates (#57)")
+    void loadedCachePagesAreConcurrent() throws Exception {
+        storePages(1);
+        service.loadBagIfNeeded(playerUuid);
+
+        Map<?, ?> cache = (Map<?, ?>) UltiRemoteBagTestHelper.getField(service, "bagCache");
+        assertThat(cache.get(playerUuid)).isInstanceOf(java.util.concurrent.ConcurrentMap.class);
+    }
+
+    @Test
+    @DisplayName("A newly allocated display-cache entry also supports storage-thread updates (#57)")
+    void newlyCreatedCachePagesAreConcurrent() throws Exception {
+        storePages();
+        // Exercise the fallback allocation as well as loadBagIfNeeded: both publish inner maps.
+        Method add = RemoteBagService.class.getDeclaredMethod("addEmptyPage", UUID.class, int.class);
+        add.setAccessible(true); // NOPMD - regression checks the second cache allocation site
+        assertThat(add.invoke(service, playerUuid, 1)).isEqualTo(true);
+
+        Map<?, ?> cache = (Map<?, ?>) UltiRemoteBagTestHelper.getField(service, "bagCache");
+        assertThat(cache.get(playerUuid)).isInstanceOf(java.util.concurrent.ConcurrentMap.class);
+    }
+
     // ==================== getPlayerMaxPages ====================
 
     @Nested

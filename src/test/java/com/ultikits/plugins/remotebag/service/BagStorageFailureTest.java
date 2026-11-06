@@ -61,9 +61,10 @@ import static org.mockito.Mockito.verify;
  * own monotonic clock moved by the test, and its own main-thread queue. {@link StorageFaults} breaks one server's
  * store only. {@link BagStorageFailureJsonTest} runs every case on the JSON backend as well.
  * <p>
- * <b>Timing (plan 17-86).</b> No case depends on how fast the runner is for a call that is meant to succeed: such
- * calls have a deadline no healthy call overruns ({@link SharedDatabaseServers#HEALTHY_CALL_DEADLINE_MILLIS}); the
- * short {@link SharedDatabaseServers#CALL_DEADLINE_MILLIS} applies only while a case holds a call in a hang. And a
+ * <b>Timing (plan 17-86).</b> Healthy calls the main thread waits on get
+ * {@link SharedDatabaseServers#HEALTHY_CALL_DEADLINE_MILLIS} (five seconds). A background pass still shares at most
+ * one renewal tick (one second by default) between its stages; an arbitrarily slow runner can exceed either bound.
+ * The short {@link SharedDatabaseServers#CALL_DEADLINE_MILLIS} applies only while a case holds a call in a hang. A
  * case waits for the calls the service leaves running by design (a release after a kept write lands, a receipt
  * deletion) before it reads the store ({@link #renewOffMainThread}); a case that times a pass does not.
  */
@@ -109,13 +110,14 @@ class BagStorageFailureTest {
         for (StorageFaults fault : faults) {
             fault.heal();
         }
-        // Every storage thread has ended before the temporary directory is deleted (plan 17-86).
-        for (Server server : new Server[] {serverA, serverB}) {
-            if (server != null) {
-                server.stopClaimService();
-            }
+        // Attempt both stops and assert their results; always release the shared Bukkit fixtures.
+        try {
+            org.junit.jupiter.api.Assertions.assertAll("storage pools end before temporary-directory deletion",
+                    () -> assertThat(serverA == null || serverA.stopClaimService()).as("server A pools ended").isTrue(),
+                    () -> assertThat(serverB == null || serverB.stopClaimService()).as("server B pools ended").isTrue());
+        } finally {
+            servers.stop();
         }
-        servers.stop();
     }
 
     private UUID ownerId() {
@@ -679,7 +681,7 @@ class BagStorageFailureTest {
         bagsA.heal();
         claimsA.heal();
         assertThat(waitUntil(() -> bagsA.hungCalls() == 0 && claimsA.hungCalls() == 0)).isTrue();
-        Thread.sleep(200L);
+        servers.awaitStorageCallsSettled();
 
         assertThat(count(servers.storedPage(ownerId(), PAGE), Material.EMERALD))
                 .as("A's late save did not land after B took over").isZero();
@@ -730,7 +732,7 @@ class BagStorageFailureTest {
         assertThat(count(owner.getInventory(), Material.EMERALD)).as("not given back: the save is still running").isZero();
         bagsA.heal();
         assertThat(waitUntil(() -> bagsA.hungCalls() == 0)).isTrue();
-        Thread.sleep(200L);
+        servers.awaitStorageCallsSettled();
 
         assertThat(servers.total(Material.EMERALD, ownerId(), owner, admin)).as("one emerald, never two").isLessThanOrEqualTo(1);
         verify(serverA.logger, atLeastOnce()).error(contains("log_bag_save_abandoned"));
@@ -1155,6 +1157,48 @@ class BagStorageFailureTest {
         claimsA.heal();
     }
 
+    @Test
+    @DisplayName("The settle instrument still counts storage calls after disable forgets their pool (#57)")
+    void settlingStillObservesADisabledPool() throws Exception {
+        java.util.concurrent.CountDownLatch entered = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch finish = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.ThreadPoolExecutor pool = new java.util.concurrent.ThreadPoolExecutor(1, 1,
+                0L, java.util.concurrent.TimeUnit.MILLISECONDS, new java.util.concurrent.LinkedBlockingQueue<>(), task -> {
+                    Thread thread = new Thread(task, "test-disabled-storage-pool");
+                    thread.setDaemon(true);
+                    return thread;
+                });
+        com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.setField(serverA.claimService, "storage", pool);
+        pool.submit(() -> {
+            entered.countDown();
+            boolean interrupted = false;
+            while (finish.getCount() != 0) {
+                try {
+                    finish.await();
+                } catch (InterruptedException ignored) {
+                    interrupted = true; // model a JDBC call that shutdownNow cannot stop
+                }
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        java.lang.reflect.Method running = SharedDatabaseServers.class.getDeclaredMethod("runningStorageCalls");
+        running.setAccessible(true); // NOPMD - verify the settle instrument without a timing-based negative assertion
+        try {
+            assertThat(entered.await(5L, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(running.invoke(servers)).as("positive control: the current pool's call is visible").isEqualTo(1);
+            serverA.shutdown();
+
+            assertThat(running.invoke(servers)).as("the same unfinished call is visible after storage becomes null")
+                    .isEqualTo(1);
+        } finally {
+            finish.countDown();
+            pool.shutdownNow();
+            assertThat(pool.awaitTermination(5L, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        }
+    }
+
     // ==================== Gate 2 top-up: session state is per session, not per page ====================
 
     private String claimToken() {
@@ -1202,7 +1246,10 @@ class BagStorageFailureTest {
         assertThat(second.isEdit()).as("precondition: T2 claimed the released page").isTrue();
         second.pickUp(SLOT);
         SharedDatabaseServers.returnCursorToInventory(owner);
-        claimsA.release();
+        claimsA.heal();
+        assertThat(com.ultikits.plugins.remotebag.UltiRemoteBagTestHelper.getField(serverA.claimService,
+                "callDeadlineMillis")).as("healthy T2 calls no longer use the hang deadline")
+                .isEqualTo(SharedDatabaseServers.HEALTHY_CALL_DEADLINE_MILLIS);
         renewer.get().join(10_000L);
         serverA.runMainThread();
 

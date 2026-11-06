@@ -265,6 +265,9 @@ public class BagEditClaimService {
     /** Releases settled during module disable, made together with the final releases (P3-1). */
     private final List<Held> stopReleases = new java.util.concurrent.CopyOnWriteArrayList<>();
 
+    /** Background releases still running: disable waits for them inside its final shared release deadline (#57). */
+    private final Map<Held, Future<Boolean>> pendingReleases = new ConcurrentHashMap<>();
+
     /** Kept writes: page writes the database did not answer, by claim id. */
     private final Map<String, Kept> kept = new ConcurrentHashMap<>();
 
@@ -507,6 +510,7 @@ public class BagEditClaimService {
         }
         owed.clear();
         releaseAllHeld();
+        pendingReleases.clear();
         ExecutorService pool;
         synchronized (this) {
             pool = storage;
@@ -1133,7 +1137,8 @@ public class BagEditClaimService {
             return;
         }
         claim.released = true;
-        submit(() -> {
+        pendingReleases.entrySet().removeIf(entry -> entry.getValue().isDone());
+        pendingReleases.put(claim, submit(() -> {
             try {
                 claims.updateIf(claimRow(claim.ownerUuid, claim.page, "", claim.renewals + 1),
                         WhereCondition.builder().column("holder_token").value(claim.token).build(),
@@ -1147,8 +1152,8 @@ public class BagEditClaimService {
                     // Best effort: a receipt nobody reads takes up one row.
                 }
             }
-            return null;
-        });
+            return Boolean.TRUE;
+        }));
     }
 
     /**
@@ -1166,10 +1171,11 @@ public class BagEditClaimService {
 
     /** Releases claims in parallel, waiting for all of them at most one main-thread deadline. */
     private void writeReleases(List<Held> releasing) {
-        if (releasing.isEmpty() || claims == null) {
+        if (claims == null) {
             return;
         }
-        Map<Held, Future<Boolean>> writes = new LinkedHashMap<>();
+        // Already-submitted background releases share this same deadline; they do not get a second stop budget.
+        Map<Held, Future<Boolean>> writes = stopping ? new LinkedHashMap<>(pendingReleases) : new LinkedHashMap<>();
         for (Held claim : releasing) {
             claim.released = true;
             writes.put(claim, submit(() -> {
@@ -1234,8 +1240,10 @@ public class BagEditClaimService {
     }
 
     private void pass(long waitMillis) {
+        // Renewal and saves spend one allowance, including the last pass of the five-second stop flush (#57).
+        long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMillis);
         renewClaims(waitMillis);
-        attemptKeptWrites(waitMillis);
+        attemptKeptWrites(Math.max(0L, TimeUnit.NANOSECONDS.toMillis(until - System.nanoTime())));
     }
 
     private void renewClaims(long waitMillis) {
@@ -1701,9 +1709,10 @@ public class BagEditClaimService {
                 return;
             }
             pass(Math.min(left, backgroundDeadlineMillis()));
-            if (!kept.isEmpty()) {
+            left = TimeUnit.NANOSECONDS.toMillis(until - System.nanoTime());
+            if (left > 0L && !kept.isEmpty()) {
                 try {
-                    Thread.sleep(Math.min(50L, Math.max(1L, left)));
+                    Thread.sleep(Math.min(50L, left));
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return;
