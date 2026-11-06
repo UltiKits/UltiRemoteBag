@@ -469,7 +469,7 @@ CREATE TABLE ulti_remote_bag (
 
 ## 📄 许可证
 
-本项目采用 [MIT License](LICENSE) 开源协议。
+本项目采用 [MIT License](https://opensource.org/license/mit) 开源协议。
 
 ---
 
