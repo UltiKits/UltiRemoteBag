@@ -7,6 +7,17 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [2.0.0] - 2026-10-21
 
+**Upgrade UltiTools to 6.3.0 or later before replacing this module's JAR.** This version declares
+`api-version: 630` in `plugin.yml`, up from `620` in the last release, 1.0.0. An older framework refuses
+`UltiRemoteBag` before its start-up runs, with a warning that the UltiTools version is outdated.
+Adding or replacing a module JAR needs a server restart; `/ul reload` does not load it
+(UltiKits/UltiTools-Reborn#544).
+
+**先将 UltiTools 升级到 6.3.0 或更高版本，再替换本模块的 JAR。** 本版本在 `plugin.yml` 中声明
+`api-version: 630`，由上一个发布版本 1.0.0 的 `620` 提升。更早的框架会在 `UltiRemoteBag` 的启动逻辑
+运行之前拒绝加载它，并给出 UltiTools 版本过旧的警告。新增或替换模块 JAR 后需要重启服务器，
+`/ul reload` 不会加载它（UltiKits/UltiTools-Reborn#544）。
+
 ### Added
 
 - **One bag page is edited on one server at a time** when several servers share one database. Opening a page
@@ -271,9 +282,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   bag read-only. Read-only guards the bag, not your own inventory, which is already how clicking
   behaves. And a drag that IS refused now says why, in both modes, instead of failing silently
   (UltiKits/UltiRemoteBag#34).
-- `/bag save` now reports only a save it actually performed. With nothing cached to save — a fresh
-  login that has not opened a page — it says so instead of confirming a write that did not happen, and
-  it no longer persists every cached page twice when it flushed an open page (UltiKits/UltiRemoteBag#34).
+- With the sender's own edit-mode page open, `/bag save` reports success only after that page is written.
+  With no page open and no save pending, it writes nothing: it still replies `Bag saved manually!` when
+  pages are cached because those pages are already stored, or `Nothing to save.` when none are cached.
+  It no longer persists every cached page twice after flushing an open page (UltiKits/UltiRemoteBag#34).
 - `lock.notify_readonly_viewers` now decides whether an administrator viewing a bag read-only is
   told when the owner starts using it again. Previously the line was sent whatever the setting
   said, so `lock.notify_readonly_viewers: false` did nothing; now it is honoured. The declared
@@ -330,8 +342,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 以只读方式查看他人背包时，完全在自己背包内进行的拖拽不再被拒绝：只读保护的是背包本身，而不是查看者自己的
   背包——点击操作原本就是如此。并且被拒绝的拖拽现在会在两种模式下都说明原因，而不再静默失败
   （UltiKits/UltiRemoteBag#34）。
-- `/bag save` 现在只在确实完成保存时才如此报告。当没有任何缓存内容可保存时（例如刚登录且尚未打开过背包页），
-  它会明确说明，而不再确认一次并未发生的写入；并且在刷新了打开的页面后，不再把每个缓存页重复保存两次
+- 当发送者自己的背包页以编辑模式打开时，`/bag save` 只在该页写入后报告保存成功。
+  没有打开页面且没有待完成的保存时，它不写入任何内容：有缓存页时仍回复“背包已手动保存！”，因为这些页已经存储；
+  没有缓存页时回复“没有需要保存的内容。”。刷新打开的页面后，不再把每个缓存页重复保存两次
   （UltiKits/UltiRemoteBag#34）。
 - `lock.notify_readonly_viewers` 现在真的决定以只读方式查看背包的管理员，是否会在所有者重新使用时收到提示。
   此前无论该设置为何都会发送该提示，`lock.notify_readonly_viewers: false` 毫无作用；现在它会被遵守。声明的默认值
@@ -340,17 +353,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `lock.timeout_seconds` 现在也随重载生效，见上文（UltiKits/UltiRemoteBag#39）（UltiKits/UltiRemoteBag#19）。
 
 ### Changed
-
-- This version requires UltiTools 6.3.0 or later and declares `api-version: 630` in `plugin.yml`,
-  up from `620` in the last release, 1.0.0. An older framework refuses the module
-  before its start-up runs, with a warning that the UltiTools version is outdated; the refusal names
-  the module by its `plugin.yml` `name:`, `UltiRemoteBag`. The README's framework minimum and its
-  UltiTools-API badge say UltiTools 6.3.0+. Adding or replacing a module JAR needs a server restart;
-  `/ul reload` does not load it (UltiKits/UltiTools-Reborn#544).
-- 本版本需要 UltiTools 6.3.0 或更高版本，并在 `plugin.yml` 中声明 `api-version: 630`，由上一个发布版本 1.0.0 的 `620` 提升。更早的框架会在模块的启动逻辑
-  运行之前拒绝加载它，并给出 UltiTools 版本过旧的警告；拒绝信息以 `plugin.yml` 的 `name:` 即 `UltiRemoteBag` 指代本模块。
-  README 中的框架最低版本和 UltiTools-API 徽章均为 UltiTools 6.3.0+。新增或替换模块 JAR 后需要重启服务器，
-  `/ul reload` 不会加载它（UltiKits/UltiTools-Reborn#544）。
 
 - `plugin.yml` now declares `identify-string: ultiremotebag`, the key of this module's entry in the
   UltiCloud catalogue. The framework's update check and `/upm update` skip a module that does not
@@ -372,12 +374,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Removed
 
-- **For plugin authors:** the public `RemoteBagService#setBagPage`, `#saveBag` and `#saveAllBags`
-  methods from released 1.0.0 have been removed. Update and recompile third-party callers: read each
-  page with `readPage(UUID, int)`, keep its `PageRead`, and pass it with the edited items to
+- **For plugin authors:** the public `RemoteBagService#setBagPage`, `#saveBag`, `#saveAllBags` and
+  `#autoSaveTask()` methods from released 1.0.0 have been removed. Update and recompile third-party callers:
+  read each page with `readPage(UUID, int)`, keep its `PageRead`, and pass it with the edited items to
   `savePage(UUID, int, ItemStack[], PageRead)`. A non-null result is the baseline for the next save;
-  `null` means nothing was written and must be handled as an unsuccessful save. This is a
-  conditional, single-page write, not a direct equivalent of the old cache setter or bulk saves;
+  `null` means nothing was written and must be handled as an unsuccessful save. A storage failure can
+  also throw a `RuntimeException` rather than return `null`; callers must handle that failure separately.
+  This is a conditional, single-page write, not a direct equivalent of the old cache setter or bulk saves;
   the display cache is never flushed to the database (UltiKits/UltiRemoteBag#54).
 - Removed the module's own 'configuration reloaded' console line; UltiTools 6.3.0 logs one reload
   line per module.
@@ -425,10 +428,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `Changed` entry above. Nothing an operator has stored is affected, because what a page holds does
   not change. Making capacity genuinely configurable is wanted and is recorded as
   UltiKits/UltiRemoteBag#38 (UltiKits/UltiRemoteBag#24).
-- **给插件作者：** 已发布的 1.0.0 中的 public 方法 `RemoteBagService#setBagPage`、`#saveBag` 与 `#saveAllBags`
-  已移除。第三方调用者需要修改代码并重新编译：逐页调用 `readPage(UUID, int)`，保留返回的 `PageRead`，
+- **给插件作者：** 已发布的 1.0.0 中的 public 方法 `RemoteBagService#setBagPage`、`#saveBag`、`#saveAllBags` 与
+  `#autoSaveTask()` 已移除。第三方调用者需要修改代码并重新编译：逐页调用 `readPage(UUID, int)`，保留返回的 `PageRead`，
   再将其与编辑后的物品一起传给 `savePage(UUID, int, ItemStack[], PageRead)`。非空返回值是下次保存的基准；
-  返回 `null` 表示未写入任何内容，必须按保存未成功处理。这是有条件的单页写入，并非旧缓存赋值方法或批量保存的直接等价替代；
+  返回 `null` 表示未写入任何内容，必须按保存未成功处理。存储失败也可能抛出 `RuntimeException`，而非返回 `null`；
+  调用者必须单独处理这种失败。这是有条件的单页写入，并非旧缓存赋值方法或批量保存的直接等价替代；
   显示缓存从不整份写回数据库（UltiKits/UltiRemoteBag#54）。
 - 移除了本模块自身的"配置已重载"控制台日志行；UltiTools 6.3.0 会为每个模块输出一行重载日志。
 - `auto_save_interval` 从未控制保存周期，现已移除，可从现有配置文件中删除。固定每 300 秒重写缓存的任务也已移除：
