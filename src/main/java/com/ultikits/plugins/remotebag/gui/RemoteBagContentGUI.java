@@ -186,6 +186,10 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         // 加载背包内容到内容区域
         if (!loadBagContents(true)) {
             event.setCancelled(true);
+            // Gui.open registers before Bukkit's open event. A refused window never gets a
+            // matching close event, so remove only this page before unrelated inventory events.
+            InventoryAPI.getInstance().getPlayers().remove(player.getUniqueId(), this);
+            setClosed(true);
             releaseLock();
             bagService.forgetUnlessOnline(ownerUuid);
             return;

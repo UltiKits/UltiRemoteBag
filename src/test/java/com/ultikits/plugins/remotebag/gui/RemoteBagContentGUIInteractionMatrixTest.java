@@ -30,6 +30,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockbukkit.mockbukkit.MockBukkit;
 import org.mockbukkit.mockbukkit.ServerMock;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
@@ -735,11 +737,14 @@ class RemoteBagContentGUIInteractionMatrixTest {
         viewer.getInventory().setItem(0, new ItemStack(Material.EMERALD, 3));
         RemoteBagContentGUI gui = new RemoteBagContentGUI(viewer, mockPlugin, ownerUuid, PAGE,
                 bagService, lockService, config, AccessMode.EDIT);
-        InventoryOpenEvent event = new InventoryOpenEvent(viewer.getOpenInventory());
+        Inventory previous = viewer.getOpenInventory().getTopInventory();
 
-        org.assertj.core.api.Assertions.assertThatCode(() -> gui.setupContent(event)).doesNotThrowAnyException();
+        org.assertj.core.api.Assertions.assertThatCode(gui::open).doesNotThrowAnyException();
 
-        assertThat(event.isCancelled()).as("an unread page must never open editable and empty").isTrue();
+        assertThat(inventoryApi.getPlayersCurrentGui(viewer))
+                .as("a refused page must not remain registered with the GUI library").isNull();
+        assertThat(viewer.getOpenInventory().getTopInventory())
+                .as("an unread page must never open editable and empty").isSameAs(previous);
         org.mockito.Mockito.verify(lockService).release(ownerUuid, PAGE, viewer.getUniqueId(), "opening-token");
         org.mockito.Mockito.verify(claims).release(ownerUuid, PAGE, "opening-token");
         assertThat(lockService.getLockInfo(ownerUuid, PAGE)).isEmpty();
@@ -750,6 +755,101 @@ class RemoteBagContentGUIInteractionMatrixTest {
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
         assertThat(viewer.nextMessage()).contains("msg_bag_load_failed");
+    }
+
+    @ParameterizedTest
+    @EnumSource(AccessMode.class)
+    void refusedLibraryOpenDoesNotLockCraftingOrMainInventory(AccessMode mode) {
+        RemoteBagContentGUI gui = refuseLibraryOpen(mode);
+
+        // These raw slots have getSlot() == getRawSlot() in the ordinary crafting view;
+        // the library's stale-GUI fallback would cancel both, as well as shift/double clicks.
+        // MockBukkit's personal view has a null top and an unimplemented convertSlot.
+        // Adapt only that event view; Gui.open, the player, map and library listener stay real.
+        // Bukkit.createInventory cannot create CRAFTING. Vanilla maps raw slots 1 and 9 to themselves.
+        Inventory crafting = mock(Inventory.class);
+        org.mockito.Mockito.when(crafting.getType()).thenReturn(InventoryType.CRAFTING);
+        InventoryView view = mock(InventoryView.class);
+        org.mockito.Mockito.when(view.getPlayer()).thenReturn(viewer);
+        org.mockito.Mockito.when(view.getTopInventory()).thenReturn(crafting);
+        org.mockito.Mockito.when(view.getType()).thenReturn(InventoryType.CRAFTING);
+        org.mockito.Mockito.when(view.convertSlot(1)).thenReturn(1);
+        org.mockito.Mockito.when(view.convertSlot(9)).thenReturn(9);
+        assertThat(view.getTopInventory().getType()).isEqualTo(InventoryType.CRAFTING);
+        assertThat(view.getType()).isEqualTo(InventoryType.CRAFTING);
+        assertThat(clickView(view, 1, ClickType.LEFT, InventoryAction.PICKUP_ALL).isCancelled())
+                .as("crafting slots stay usable after a refused bag open").isFalse();
+        assertThat(clickView(view, 9, ClickType.LEFT, InventoryAction.PICKUP_ALL).isCancelled())
+                .as("main inventory slots stay usable after a refused bag open").isFalse();
+        assertThat(clickView(view, 9, ClickType.SHIFT_LEFT, InventoryAction.MOVE_TO_OTHER_INVENTORY)
+                .isCancelled()).isFalse();
+        assertThat(clickView(view, 9, ClickType.DOUBLE_CLICK, InventoryAction.COLLECT_TO_CURSOR)
+                .isCancelled()).isFalse();
+        assertThat(inventoryApi.getPlayersCurrentGui(viewer)).isNotSameAs(gui);
+        org.mockito.Mockito.verify(bagService, org.mockito.Mockito.times(1)).readPage(ownerUuid, PAGE);
+    }
+
+    @ParameterizedTest
+    @EnumSource(AccessMode.class)
+    void refusedLibraryOpenDoesNotReadOrHandleALaterVanillaChest(AccessMode mode) {
+        RemoteBagContentGUI gui = refuseLibraryOpen(mode);
+        // Even when storage recovers, an unrelated inventory must not redraw the refused bag
+        // or install Back/Save/Close actions over the player's own slots in the chest view.
+        ItemStack[] contents = new ItemStack[45];
+        contents[0] = new ItemStack(Material.DIAMOND);
+        org.mockito.Mockito.doReturn(com.ultikits.plugins.remotebag.service.PageReads.of(contents))
+                .when(bagService).readPage(ownerUuid, PAGE);
+        Inventory chest = Bukkit.createInventory(null, 27, "Ordinary chest");
+        chest.setItem(0, new ItemStack(Material.GOLD_INGOT));
+
+        viewer.openInventory(chest);
+
+        org.mockito.Mockito.verify(bagService, org.mockito.Mockito.times(1)).readPage(ownerUuid, PAGE);
+        assertThat(viewer.getOpenInventory().getTopInventory()).isSameAs(chest);
+        for (int slot : new int[] {0, 45, 49, 53}) {
+            assertThat(clickCurrentView(slot, ClickType.LEFT, InventoryAction.PICKUP_ALL).isCancelled())
+                    .as("ordinary chest raw slot %s must not be handled by the refused page", slot).isFalse();
+            assertThat(viewer.getOpenInventory().getTopInventory()).isSameAs(chest);
+        }
+        assertThat(chest.getItem(0)).isEqualTo(new ItemStack(Material.GOLD_INGOT));
+        assertThat(inventoryApi.getPlayersCurrentGui(viewer)).isNotSameAs(gui);
+        org.mockito.Mockito.verify(bagService, org.mockito.Mockito.never()).savePage(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void successfulLibraryOpenRegistersAndRendersThePage() {
+        RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
+
+        assertThat(inventoryApi.getPlayersCurrentGui(viewer)).isSameAs(gui);
+        assertThat(viewer.getOpenInventory().getTopInventory()).isSameAs(gui.getInventory());
+        org.mockito.Mockito.verify(bagService, org.mockito.Mockito.times(1)).readPage(ownerUuid, PAGE);
+        assertThat(click(gui, CONTENT_SLOT, ClickType.LEFT, InventoryAction.PICKUP_ALL).isCancelled()).isFalse();
+        assertThat(viewer.getItemOnCursor()).isEqualTo(new ItemStack(Material.DIAMOND));
+    }
+
+    private RemoteBagContentGUI refuseLibraryOpen(AccessMode mode) {
+        org.mockito.Mockito.when(bagService.readPage(ownerUuid, PAGE)).thenThrow(
+                new java.util.concurrent.CompletionException(new java.util.concurrent.TimeoutException("read")));
+        RemoteBagContentGUI gui = new RemoteBagContentGUI(viewer, mockPlugin, ownerUuid, PAGE,
+                bagService, lockService, config, mode);
+        // Never stub Gui.open(), InventoryAPI's map, or the library listener. MockBukkit's
+        // HumanEntityMock.openInventory fires the real InventoryOpenEvent and honours refusal.
+        gui.open();
+        assertThat(viewer.nextMessage()).contains("msg_bag_load_failed");
+        return gui;
+    }
+
+    private InventoryClickEvent clickCurrentView(int rawSlot, ClickType type, InventoryAction action) {
+        return clickView(viewer.getOpenInventory(), rawSlot, type, action);
+    }
+
+    private InventoryClickEvent clickView(InventoryView view, int rawSlot, ClickType type, InventoryAction action) {
+        InventoryClickEvent event = new InventoryClickEvent(view,
+                InventoryType.SlotType.CONTAINER, rawSlot, type, action);
+        Bukkit.getPluginManager().callEvent(event);
+        return event;
     }
 
     @Test
@@ -840,7 +940,6 @@ class RemoteBagContentGUIInteractionMatrixTest {
         RemoteBagContentGUI gui = new RemoteBagContentGUI(viewer, mockPlugin, ownerUuid, PAGE,
                 bagService, lockService, config, mode);
         gui.open();
-        Bukkit.getPluginManager().callEvent(new InventoryOpenEvent(viewer.getOpenInventory()));
 
         assertThat(gui.getInventory().getItem(CONTENT_SLOT))
                 .as("precondition: the stored diamond is rendered into the open page")
