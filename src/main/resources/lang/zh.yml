@@ -49,6 +49,7 @@ lore_readonly_hint4: "点击刷新按钮切换为编辑模式"
 lore_edit_mode: "您可以自由编辑此背包"
 lore_readonly_mode1: "背包所有者正在使用"
 lore_readonly_mode2: "您只能查看，无法修改"
+lore_close_manual_save: "请先保存；关闭未保存的页面会自动重开"
 lore_close_save: "关闭并保存更改"
 lore_close_discard: "关闭（不保存更改）"
 
@@ -67,6 +68,8 @@ msg_save_failed: "保存未写入数据库，你的改动尚未存储。请查�
 msg_items_returned: "你放入此页的物品未能存储，已归还给你（放不下的掉落在你脚下）。"
 msg_save_pending: "数据库未响应，此页尚未保存。你的改动已保留，数据库恢复响应后立即保存；在此之前此页为只读。"
 msg_nothing_to_save: "没有需要保存的内容。"
+msg_manual_save_required: "请先保存此页，再关闭或离开。未保存的页面会自动重开；请点击保存（自己的背包也可使用 /bag save）。"
+msg_manual_reopen_failed: "未保存的页面无法重开，正在安全保存其改动；若保存失败，请查看服务器控制台。"
 
 # 命令相关
 page_out_of_range: "页码 {0} 超出范围，最大页码为 {1}"
@@ -143,10 +146,11 @@ removed_key_reason_gui_title: "背包页面的标题来自本模块的语言文�
 removed_key_reason_no_permission: "权限拒绝消息来自 UltiTools 自身已翻译的消息，因此已经跟随服务器的 'language' 设置（UltiKits/UltiRemoteBag#15）"
 removed_key_reason_page_locked: "请求一个你无权打开的页面时，回复来自本模块的语言文件中已翻译的 'page_out_of_range' 键。如果你想修改的是页面正被他人占用时显示的那一行，它同样来自本模块的语言文件，即 'bag_read_only_in_use'、'bag_blocked_in_use' 与 'bag_blocked_by_admin' 键；要自定义这些文本，请把该语言文件复制为以其语言代码加连字符开头的文件（例如 lang/zh-myserver.yml），修改副本，并在 plugins/UltiTools/config.yml 中设置 language: zh-myserver，因为直接修改官方文件的改动会在下次启动或模块重载时被恢复（UltiKits/UltiRemoteBag#16、UltiKits/UltiRemoteBag#20）"
 removed_key_reason_rows_per_page: "每个背包页面固定容纳 45 个槽位；该设置被移除而非写入文档，是因为它在两个方向上都不决定这一点——它只是主菜单「占用槽位」一行的分母，在其自身默认值下，满页显示为 45/54；让容量真正可配置记录在 UltiKits/UltiRemoteBag#38（UltiKits/UltiRemoteBag#24）"
-removed_key_reason_save_on_close: "在编辑模式下关闭背包页面总会保存，本模块一向如此；该开关被移除而非接线，是因为关闭它会销毁玩家拖入窗口的物品，UltiKits/UltiRemoteBag#37 记录了实现它需要怎么做（UltiKits/UltiRemoteBag#18）"
+removed_key_reason_save_on_close: "这个不安全的旧开关仍被忽略；请使用 require_manual_save，要求有改动的页面先手动保存再关闭，而不是丢弃物品（UltiKits/UltiRemoteBag#18、UltiKits/UltiRemoteBag#37）"
 removed_key_reason_bag_saved: "'/bag save' 的确认消息来自本模块的语言文件，即 'bag_saved_manually' 键（UltiKits/UltiRemoteBag#17）"
 
 # 写入 config/remotebag.yml 的注释，由框架按服务器语言解析
+config_comment_require_manual_save: "有改动的页面须手动保存后才可关闭（默认 false）；未保存会在下一 tick 重开。退出和模块停止仍作安全保存。"
 config_comment_economy_enabled: "是否启用购买背包功能（需要 Vault）"
 config_comment_economy_base_price: "购买背包的基础价格"
 config_comment_economy_price_increase_enabled: "是否启用价格递增（每购买一个背包价格增加）"

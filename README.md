@@ -51,6 +51,35 @@
 3. 重启服务器（新增或替换模块 JAR 后必须重启；`/ul reload` 只重载配置，不会加载新的模块 JAR）
 4. 编辑配置文件 `plugins/UltiTools/pluginConfig/UltiRemoteBag/config/remotebag.yml`
 
+## Optional manual saving / 可选手动保存
+
+Closing an edit page still saves it by default. To require an explicit save instead, set
+`require_manual_save: true` in `config/remotebag.yml` and reload the module (UltiRemoteBag#37).
+
+- A changed page **refuses to close**: Escape and Close reopen the **same inventory** on the next
+  server tick and tell the viewer to save first. Its items and edit claim are retained, not replaced
+  from an older database copy. Back and bag-navigation commands are also refused while it is unsaved.
+- Click **Save**, or use `/bag save` for your own open page, then close. An unchanged or explicitly saved
+  page can close without another write. An administrator editing someone else's bag must use that
+  page's Save button; `/bag save` still affects only the sender's own bag.
+- Quit, death, module disable and normal server stop cannot be refused, so they still save for safety.
+  If a refused page cannot reopen (for example another plugin cancels opening), it is also safety-saved.
+  Database failure and lost-claim handling retain the existing recovery behaviour described below.
+- This is **close refusal, not durable escrow**. The unsaved editing window has the existing crash and
+  database-outage limitations: save promptly. It never intentionally discards items merely because the
+  close-save option is disabled.
+- The removed `save_on_close` key stays ignored and warned, not an alias. An upgraded server retaining
+  that formerly ignored key does not silently opt into new behaviour. Operator configuration values
+  are not overwritten; reloading applies the new option to subsequent close/navigation attempts.
+
+默认关闭编辑页仍会保存。启用 `require_manual_save: true` 并重载后，有改动的页面会**拒绝关闭**：按 Escape
+或关闭按钮会在下一 tick 重开同一个物品栏并提示先保存，保留当前物品和编辑占用，不会从旧数据库内容重建。
+返回按钮和背包导航命令同样会被拒绝。请先点击保存（自己的页面也可使用 `/bag save`）再关闭；未改动或已保存的
+页面可以直接关闭，不会再写一次。管理员编辑他人背包时须使用该页保存按钮。退出、死亡、模块停用、正常停服及
+无法重开时仍作安全保存，数据库故障和占用失效仍按既有恢复规则处理。这是拒绝关闭，不是持久暂存；未保存窗口
+仍受既有崩溃/数据库故障限制，请及时保存。旧 `save_on_close` 仍被忽略并告警，不是别名；升级不会意外启用新模式，
+也不会覆盖服主配置值。
+
 ## ⚙️ 配置说明
 
 ### remotebag.yml
@@ -59,6 +88,7 @@
 # 基础配置
 default_pages: 1                # 新玩家默认背包页数 (1-100)
 max_pages: 10                   # 最大背包页数 (1-100)
+require_manual_save: false      # 未保存的页面拒绝关闭并自动重开；退出/停服安全保存
 
 # 权限配置
 permission_based_pages: true    # 是否基于权限决定页数
