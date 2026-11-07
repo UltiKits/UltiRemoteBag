@@ -17,6 +17,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockbukkit.mockbukkit.entity.PlayerMock;
 
 import java.nio.file.Path;
@@ -248,9 +250,14 @@ class BagEditClaimTest {
         assertThat(count(servers.storedPage(ownerId(), PAGE), Material.DIAMOND)).as("and its save is written").isZero();
     }
 
-    @Test
+    @ParameterizedTest(name = "renewal storage delay: {0} ms")
+    @ValueSource(longs = {0L, 1_000L})
     @DisplayName("Clock skew larger than the timeout, in either direction, does not let another server take a renewed claim")
-    void clockSkewDoesNotCauseAnEarlyTakeover() throws Exception {
+    void clockSkewDoesNotCauseAnEarlyTakeover(long renewalDelayMillis) throws Exception {
+        // This case tests clock skew, not storage scheduling. Complete each renewal on the pass's own
+        // non-main thread before advancing simulated time again; joining the pass alone otherwise leaves
+        // its pooled storage calls in flight (#59). The main-thread-stall case above tests the real pool.
+        serverA.runStorageCallsInline();
         servers.seedPage(ownerId(), 2, pageWith(SLOT, new ItemStack(Material.EMERALD)));
         assertThat(serverA.openAsOwner(owner, PAGE).isEdit()).isTrue();
         assertThat(serverA.openAsAdmin(otherAdmin, ownerId(), 2).isEdit()).isTrue();
@@ -268,7 +275,25 @@ class BagEditClaimTest {
                 server.advance(TIMEOUT_MS / 3);
                 server.wallClock.addAndGet(TIMEOUT_MS / 3);
             }
+            long pageOneCounter = claim().getRenewals();
+            long pageTwoCounter = servers.claimRow(ownerId(), 2).getRenewals();
+            if (third == 0 && renewalDelayMillis > 0) {
+                // Reproduce a healthy call that outlasts one renewal pass's 300 ms wait (#59).
+                // This delay injects the schedule; it is not a readiness wait.
+                servers.claimHooks().beforeNextUpdateIf(() -> {
+                    try {
+                        Thread.sleep(renewalDelayMillis);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("Interrupted delayed renewal", e);
+                    }
+                });
+            }
             serverA.renewOffMainThread();
+            assertThat(claim().getRenewals()).as("page 1 renewed before advancing simulated time again")
+                    .isGreaterThan(pageOneCounter);
+            assertThat(servers.claimRow(ownerId(), 2).getRenewals())
+                    .as("page 2 renewed before advancing simulated time again").isGreaterThan(pageTwoCounter);
         }
     }
 
