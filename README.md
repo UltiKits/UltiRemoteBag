@@ -8,7 +8,7 @@
 
 ### 核心功能
 
-- 🎒 **多页背包系统** - 每个玩家可拥有多个背包页，每页 45 个槽位
+- 🎒 **多页背包系统** - 每个玩家可拥有多个背包页，每页默认 45 个槽位，可配置为 9–54 个槽位
 - 💾 **Save on close / 关闭时保存** - Save contents when closing a page in edit mode. 编辑模式下关闭页面时保存内容。
 - 🔐 **背包锁定机制** - 防止并发访问冲突，支持编辑/只读模式
 - 📊 **物品统计** - 在 GUI 中显示物品数量和槽位占用
@@ -88,6 +88,7 @@ Closing an edit page still saves it by default. To require an explicit save inst
 # 基础配置
 default_pages: 1                # 新玩家默认背包页数 (1-100)
 max_pages: 10                   # 最大背包页数 (1-100)
+content_rows: 5                 # 每页储物行数 (1-6，每行9格，默认45格)
 require_manual_save: false      # 未保存的页面拒绝关闭并自动重开；退出/停服安全保存
 
 # 权限配置
@@ -116,6 +117,44 @@ lock:
   timeout_seconds: 300          # 锁超时时间（秒，10-3600）
   notify_readonly_viewers: true # 通知只读查看者
 ```
+
+### Page capacity / 每页容量
+
+`content_rows` controls real storage capacity, from 1 to 6 rows (9–54 slots), default 5 (45 slots).
+Edit `plugins/UltiTools/pluginConfig/UltiRemoteBag/config/remotebag.yml`, then run
+`ul reload UltiRemoteBag` from the console. Newly opened windows use the new size; windows already
+open keep their captured layout until closed. Invalid file values refuse module loading with a validation error; the operator's
+file is not repaired or overwritten. The removed `rows_per_page` key remains ignored and warned about:
+old values do not activate the new feature.
+
+The last window row is always buttons, never storage. Up to five content rows fit above it. At six
+content rows, use **Next content screen** and **Previous content screen** (toolbar columns 7 and 1)
+to move between slots 0–44 and 45–53 of the SAME bag page. Navigation keeps unsaved edits and the same
+edit reservation; Save, close, `/bag save`, quit and module disable all save the whole page, not just
+its current screen. Unused cells on a final screen are protected fillers, not storage.
+
+**Shrinking never drops stored items.** Each page retains enough whole rows to expose its highest
+occupied slot. A yellow message explains its retained and configured capacity, and the main menu's
+`Slots Used` denominator reports that actual retained capacity. Remove items from the extra rows and
+close/reopen to shrink that page. For example, changing 5 rows to 2 keeps an item at slot 44 accessible
+on a later content screen; once it is removed, the next open uses 18 slots. The loader still reads
+all existing slots 0–53, including the formerly invisible legacy 45–53 band; those slots now appear on
+later screens and survive saving. No schema migration or automatic item transfer is performed.
+
+**Do not downgrade to 2.0.0 once any page has used a sixth row.** 2.0.0 shows and saves only slots 0–44,
+so items in slots 45–53 would not be shown there and its next save of that page drops them. Before rolling
+back, empty the sixth row of every page on this version.
+
+With `require_manual_save: true`, the unsaved-change check covers every content screen of the page: a
+change on a screen you are not looking at still refuses the close. Switching content screens is not
+leaving the page and is never refused.
+
+`content_rows` 设置真实容量（1–6 行，每行 9 格，默认 5 行）。重载后只影响新打开的窗口，已打开的窗口不会被截断。
+底行始终是工具栏，超过单屏的内容用工具栏第 2、8 格的箭头切换，仍是同一个背包页，不另收费。
+缩容时保留已有物品所在的额外行，聊天会说明原因，主页分母显示实际保留容量；取出额外行的物品后关闭再打开才缩容。
+旧的 `rows_per_page` 仍无效，不会覆盖或迁移你写的配置。
+**使用过第 6 行后不要降级到 2.0.0**：2.0.0 只显示并保存 0–44 号槽位，45–53 号槽位的物品在 2.0.0 中不会显示，并会在其下一次保存该页时丢失；回退前请先在本版本中清空每页的第 6 行。
+启用 `require_manual_save: true` 时，未保存改动的检查覆盖整页所有内容屏，未显示的屏上有改动同样拒绝关闭；页内切换内容屏不算离开，不会被拒绝。
 
 ## 📜 命令
 

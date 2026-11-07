@@ -353,6 +353,54 @@ class BagStorageFailureTest {
         assertThat(servers.total(Material.DIAMOND, ownerId(), owner, admin)).isEqualTo(2);
     }
 
+    @Test
+    @DisplayName("Capacity #38: a pending write retains and retries hidden and visible screen contents")
+    void pendingWriteIncludesAllContentScreens() throws Exception {
+        Window editing = editBothScreens();
+        StorageFaults fault = bagsOf(serverA);
+        fault.set(StorageFaults.Mode.THROW);
+        editing.close();
+        assertThat(serverA.claimService.keptItems(ownerId(), PAGE)[44].getAmount()).isEqualTo(3);
+        assertThat(serverA.claimService.keptItems(ownerId(), PAGE)[53].getAmount()).isEqualTo(2);
+        fault.heal();
+        backgroundPass(serverA);
+        assertThat(servers.storedPage(ownerId(), PAGE)[44]).isEqualTo(new ItemStack(Material.EMERALD, 3));
+        assertThat(servers.storedPage(ownerId(), PAGE)[53]).isEqualTo(new ItemStack(Material.GOLD_INGOT, 2));
+    }
+
+    @Test
+    @DisplayName("Capacity #38: refused writes return put-ins from both content screens exactly once")
+    void refusedWriteReturnsAllContentScreens() throws Exception {
+        Window editing = editBothScreens();
+        servers.writePageElsewhere(ownerId(), PAGE, pageWith(0, new ItemStack(Material.DIRT)));
+        editing.close();
+        assertThat(count(owner.getInventory(), Material.EMERALD)).isEqualTo(3);
+        assertThat(count(owner.getInventory(), Material.GOLD_INGOT)).isEqualTo(2);
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.EMERALD)).isZero();
+        assertThat(count(servers.storedPage(ownerId(), PAGE), Material.GOLD_INGOT)).isZero();
+    }
+
+    @Test
+    @DisplayName("Capacity #38: module disable saves every content screen of an open window")
+    void disableSavesAllContentScreens() throws Exception {
+        editBothScreens();
+        serverA.shutdown();
+        assertThat(servers.storedPage(ownerId(), PAGE)[44]).isEqualTo(new ItemStack(Material.EMERALD, 3));
+        assertThat(servers.storedPage(ownerId(), PAGE)[53]).isEqualTo(new ItemStack(Material.GOLD_INGOT, 2));
+    }
+
+    private Window editBothScreens() {
+        org.mockito.Mockito.when(servers.config().getPageCapacity()).thenReturn(54);
+        Window editing = serverA.openAsOwner(owner, PAGE);
+        assertThat(editing.isEdit()).isTrue();
+        owner.setItemOnCursor(new ItemStack(Material.EMERALD, 3));
+        editing.place(44);
+        editing.click(52);
+        owner.setItemOnCursor(new ItemStack(Material.GOLD_INGOT, 2));
+        editing.place(8);
+        return editing;
+    }
+
     // ==================== F2: a save that throws or never returns ====================
 
     @Test

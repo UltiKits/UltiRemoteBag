@@ -147,7 +147,7 @@ removed_key_reason_auto_save_interval: "the periodic auto-save it named was remo
 removed_key_reason_gui_title: "a bag page's title comes from this module's language files, key 'bag_name' in lang/en.yml and lang/zh.yml (UltiKits/UltiRemoteBag#14)"
 removed_key_reason_no_permission: "a permission refusal comes from UltiTools' own translated message, so it already follows the server's 'language' setting (UltiKits/UltiRemoteBag#15)"
 removed_key_reason_page_locked: "asking for a page you may not open answers with this module's language files, key 'page_out_of_range', which is already translated. If what you were trying to change is the line shown when somebody ELSE is holding the page, that one also comes from this module's language files, keys 'bag_read_only_in_use', 'bag_blocked_in_use' and 'bag_blocked_by_admin'; to customise these texts, copy the language file to one whose name starts with its language code and a hyphen (for example lang/en-myserver.yml), edit the copy and set language: en-myserver in plugins/UltiTools/config.yml, because an edit made in the official file itself is undone at the next start or module reload (the previous file is kept as .bak) (UltiKits/UltiRemoteBag#16, UltiKits/UltiRemoteBag#20)"
-removed_key_reason_rows_per_page: "a bag page holds a fixed 45 slots; the setting was removed rather than documented because it did not decide that in either direction -- it was the denominator of the main menu's 'Slots Used' line, which at its own default read 45/54 for a full page, and UltiKits/UltiRemoteBag#38 records making capacity genuinely configurable (UltiKits/UltiRemoteBag#24)"
+removed_key_reason_rows_per_page: "the old setting did not control capacity; use content_rows (default 5) instead. Existing rows_per_page values remain ignored (UltiKits/UltiRemoteBag#24, UltiKits/UltiRemoteBag#38)"
 removed_key_reason_save_on_close: "this unsafe legacy switch remains ignored; use require_manual_save to refuse closing changed pages until explicitly saved instead of discarding their items (UltiKits/UltiRemoteBag#18, UltiKits/UltiRemoteBag#37)"
 removed_key_reason_bag_saved: "the '/bag save' confirmation comes from this module's language files, key 'bag_saved_manually' (UltiKits/UltiRemoteBag#17)"
 
@@ -166,3 +166,10 @@ config_comment_sound_volume: "Volume (0.0-1.0)"
 config_comment_sound_pitch: "Pitch (0.5-2.0)"
 config_comment_lock_timeout_seconds: "Bag lock recovery timeout in seconds. Reclaims a lock whose holder's session ended without releasing it; a holder who is online with the page open keeps the lock however long they idle."
 config_comment_lock_notify_readonly_viewers: "Whether read-only viewers are notified when the owner starts using the bag"
+
+# Configurable capacity and overflow screens
+config_comment_content_rows: "Content rows per bag (1-6, default 5). Existing occupied rows are retained after shrinking."
+btn_content_previous: "Previous content screen"
+btn_content_next: "Next content screen"
+lore_content_screen: "Content screen {0}/{1}"
+msg_capacity_retained: "This bag retains {0} slots to keep stored items safe (configured: {1}). Empty the extra rows and reopen to shrink it."

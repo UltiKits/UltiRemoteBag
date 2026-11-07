@@ -32,8 +32,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("config/remotebag.yml comments follow the server language (UltiRemoteBag#48)")
 class RemoteBagConfigCommentsTest {
 
-    /** Thirteen translated comments adopted in #48, plus require_manual_save added in #37. */
-    private static final int TOKEN_COMMENTS = 14;
+    /** Thirteen translated comments adopted in #48, plus content_rows (#38) and require_manual_save (#37). */
+    private static final int TOKEN_COMMENTS = 15;
 
     @TempDir
     Path tempDir;
@@ -67,8 +67,8 @@ class RemoteBagConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("control: the entity declares fourteen token comments, and none of its comments is Chinese")
-    void fourteenTokensAndNoChineseComment() {
+    @DisplayName("control: the entity declares fifteen token comments, and none of its comments is Chinese")
+    void fifteenTokensAndNoChineseComment() {
         Map<String, String> comments = declaredComments();
         int tokens = 0;
         for (Map.Entry<String, String> e : comments.entrySet()) {
@@ -116,7 +116,7 @@ class RemoteBagConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("a fresh install under language: en writes every one of the fourteen comments in English")
+    @DisplayName("a fresh install under language: en writes every one of the fifteen comments in English")
     void freshInstallWritesEnglishComments() throws Exception {
         ConfigFileFixture.load(ConfigFileFixture.plugin(tempDir, "en"));
 
@@ -128,7 +128,7 @@ class RemoteBagConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("a fresh install under language: zh writes every one of the fourteen comments in Chinese")
+    @DisplayName("a fresh install under language: zh writes every one of the fifteen comments in Chinese")
     void freshInstallWritesChineseComments() throws Exception {
         ConfigFileFixture.load(ConfigFileFixture.plugin(tempDir, "zh"));
 

@@ -147,7 +147,7 @@ removed_key_reason_auto_save_interval: "它所指的定时自动保存已被移�
 removed_key_reason_gui_title: "背包页面的标题来自本模块的语言文件，即 lang/en.yml 与 lang/zh.yml 中的 'bag_name' 键（UltiKits/UltiRemoteBag#14）"
 removed_key_reason_no_permission: "权限拒绝消息来自 UltiTools 自身已翻译的消息，因此已经跟随服务器的 'language' 设置（UltiKits/UltiRemoteBag#15）"
 removed_key_reason_page_locked: "请求一个你无权打开的页面时，回复来自本模块的语言文件中已翻译的 'page_out_of_range' 键。如果你想修改的是页面正被他人占用时显示的那一行，它同样来自本模块的语言文件，即 'bag_read_only_in_use'、'bag_blocked_in_use' 与 'bag_blocked_by_admin' 键；要自定义这些文本，请把该语言文件复制为以其语言代码加连字符开头的文件（例如 lang/zh-myserver.yml），修改副本，并在 plugins/UltiTools/config.yml 中设置 language: zh-myserver，因为直接修改官方文件的改动会在下次启动或模块重载时被撤销（原文件保留为 .bak）（UltiKits/UltiRemoteBag#16、UltiKits/UltiRemoteBag#20）"
-removed_key_reason_rows_per_page: "每个背包页面固定容纳 45 个槽位；该设置被移除而非写入文档，是因为它在两个方向上都不决定这一点——它只是主菜单「占用槽位」一行的分母，在其自身默认值下，满页显示为 45/54；让容量真正可配置记录在 UltiKits/UltiRemoteBag#38（UltiKits/UltiRemoteBag#24）"
+removed_key_reason_rows_per_page: "旧设置并不控制容量；请改用 content_rows（默认5）。已有的 rows_per_page 值仍被忽略（UltiKits/UltiRemoteBag#24、UltiKits/UltiRemoteBag#38）"
 removed_key_reason_save_on_close: "这个不安全的旧开关仍被忽略；请使用 require_manual_save，要求有改动的页面先手动保存再关闭，而不是丢弃物品（UltiKits/UltiRemoteBag#18、UltiKits/UltiRemoteBag#37）"
 removed_key_reason_bag_saved: "'/bag save' 的确认消息来自本模块的语言文件，即 'bag_saved_manually' 键（UltiKits/UltiRemoteBag#17）"
 
@@ -166,3 +166,10 @@ config_comment_sound_volume: "音量 (0.0-1.0)"
 config_comment_sound_pitch: "音调 (0.5-2.0)"
 config_comment_lock_timeout_seconds: "背包锁的回收超时时间（秒）。仅用于回收持有者会话异常结束而未释放的锁；持有者在线且页面仍打开时，无论空闲多久都会保留该锁"
 config_comment_lock_notify_readonly_viewers: "所有者开始使用背包时是否通知只读查看者"
+
+# 可配置容量与内容分屏
+config_comment_content_rows: "每个背包的储物行数（1-6，默认5）。缩容后保留已有物品所在的行。"
+btn_content_previous: "上一内容屏"
+btn_content_next: "下一内容屏"
+lore_content_screen: "内容屏 {0}/{1}"
+msg_capacity_retained: "为保护已有物品，此背包暂时保留 {0} 个槽位（配置为 {1}）。取出额外行的物品后重新打开即可缩容。"

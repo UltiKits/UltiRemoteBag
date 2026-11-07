@@ -401,6 +401,7 @@ class RemoteBagContentGUITest {
             setInventory(gui, mockInventory);
 
             ItemStack mockItem = mock(ItemStack.class);
+            when(mockItem.clone()).thenReturn(mockItem);
             ItemStack[] contents = new ItemStack[45];
             contents[0] = mockItem;
             contents[10] = mockItem;
@@ -444,6 +445,7 @@ class RemoteBagContentGUITest {
             setInventory(gui, mockInventory);
 
             ItemStack mockItem = mock(ItemStack.class);
+            when(mockItem.clone()).thenReturn(mockItem);
             ItemStack[] contents = new ItemStack[45];
             contents[5] = mockItem; // Only slot 5 has an item
 
@@ -467,6 +469,7 @@ class RemoteBagContentGUITest {
             setInventory(gui, mockInventory);
 
             ItemStack mockItem = mock(ItemStack.class);
+            when(mockItem.clone()).thenReturn(mockItem);
             ItemStack[] contents = new ItemStack[10]; // Smaller than 45
             contents[0] = mockItem;
 

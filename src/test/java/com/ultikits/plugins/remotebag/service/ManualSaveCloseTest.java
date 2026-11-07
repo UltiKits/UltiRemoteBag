@@ -264,4 +264,96 @@ class ManualSaveCloseTest {
         changedPage().close();
         assertThat(count(servers.storedPage(owner.getUniqueId(), 1), Material.EMERALD)).isEqualTo(2);
     }
+
+    // ==================== #38 x #37: content_rows capacity meets the unsaved-change check ====================
+
+    /** Six content rows: one page, two screens (slots 0-44, then 45-53); toolbar next = 52, previous = 46. */
+    private Window sixRowPage() {
+        when(servers.config().getPageCapacity()).thenReturn(54);
+        Window page = a.openAsOwner(owner, 1);
+        assertThat(page.isEdit()).isTrue();
+        return page;
+    }
+
+    @Test
+    void unsavedChangeOnAHiddenSecondScreenRefusesCloseFromTheFirstScreen() {
+        Window page = sixRowPage();
+        page.click(52);
+        owner.setItemOnCursor(new ItemStack(Material.EMERALD, 2));
+        page.place(8); // logical slot 53, beyond the old fixed 45-slot page
+        page.click(46);
+        String before = servers.storedRow(owner.getUniqueId(), 1).getContents();
+        page.close();
+        reopenTick(owner);
+        assertThat(InventoryAPI.getInstance().getPlayersCurrentGui(owner)).isSameAs(page.gui);
+        assertThat(servers.storedRow(owner.getUniqueId(), 1).getContents()).isEqualTo(before);
+        assertThat(count(owner.getInventory(), Material.EMERALD)).isZero();
+    }
+
+    @Test
+    void unsavedChangeOnTheVisibleSecondScreenRefusesClose() {
+        Window page = sixRowPage();
+        page.click(52);
+        owner.setItemOnCursor(new ItemStack(Material.EMERALD));
+        page.place(3);
+        page.close();
+        reopenTick(owner);
+        assertThat(InventoryAPI.getInstance().getPlayersCurrentGui(owner)).isSameAs(page.gui);
+        assertThat(count(servers.storedPage(owner.getUniqueId(), 1), Material.EMERALD)).isZero();
+    }
+
+    @Test
+    void switchingContentScreensIsNotLeavingAndAnUnchangedPageClosesWithoutAWrite() throws Exception {
+        Window page = sixRowPage();
+        String before = servers.storedRow(owner.getUniqueId(), 1).getContents();
+        page.click(52);
+        assertThat(InventoryAPI.getInstance().getPlayersCurrentGui(owner)).isSameAs(page.gui);
+        page.click(46);
+        page.close();
+        servers.live().getScheduler().performTicks(2L);
+        servers.awaitStorageCallsSettled();
+        assertThat(InventoryAPI.getInstance().getPlayersCurrentGui(owner)).isNull();
+        assertThat(servers.storedRow(owner.getUniqueId(), 1).getContents()).isEqualTo(before);
+        assertThat(servers.claimRow(owner.getUniqueId(), 1).getHolderToken()).isEmpty();
+    }
+
+    @Test
+    void savingOnTheSecondScreenPersistsBothScreensAndThenCloses() throws Exception {
+        Window page = sixRowPage();
+        owner.setItemOnCursor(new ItemStack(Material.GOLD_INGOT, 3));
+        page.place(44);
+        page.click(52);
+        owner.setItemOnCursor(new ItemStack(Material.EMERALD, 2));
+        page.place(8);
+        page.save();
+        page.close();
+        servers.live().getScheduler().performTicks(2L);
+        servers.awaitStorageCallsSettled();
+        assertThat(InventoryAPI.getInstance().getPlayersCurrentGui(owner)).isNull();
+        ItemStack[] stored = servers.storedPage(owner.getUniqueId(), 1);
+        assertThat(stored[44]).isEqualTo(new ItemStack(Material.GOLD_INGOT, 3));
+        assertThat(stored[53]).isEqualTo(new ItemStack(Material.EMERALD, 2));
+    }
+
+    @Test
+    void removingARetainedItemBeyondTheConfiguredCapacityIsAnUnsavedChange() {
+        ItemStack[] retained = new ItemStack[54];
+        retained[53] = new ItemStack(Material.EMERALD, 7);
+        servers.writePageElsewhere(owner.getUniqueId(), 1, retained);
+        when(servers.config().getPageCapacity()).thenReturn(9); // one row: window 18, next = 16, previous = 10
+        Window page = a.openAsOwner(owner, 1);
+        assertThat(page.isEdit()).isTrue();
+        for (int screen = 0; screen < 5; screen++) {
+            page.click(16);
+        }
+        assertThat(page.shown(8)).isEqualTo(new ItemStack(Material.EMERALD, 7));
+        page.pickUp(8); // logical slot 53: outside both the configured 9 slots and the visible screen 1
+        for (int screen = 0; screen < 5; screen++) {
+            page.click(10);
+        }
+        page.close();
+        reopenTick(owner);
+        assertThat(InventoryAPI.getInstance().getPlayersCurrentGui(owner)).isSameAs(page.gui);
+        assertThat(count(servers.storedPage(owner.getUniqueId(), 1), Material.EMERALD)).isEqualTo(7);
+    }
 }

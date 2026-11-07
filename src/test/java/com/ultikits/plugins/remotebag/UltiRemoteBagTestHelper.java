@@ -80,6 +80,7 @@ public final class UltiRemoteBagTestHelper {
         RemoteBagConfig config = mock(RemoteBagConfig.class);
         lenient().when(config.getDefaultPages()).thenReturn(1);
         lenient().when(config.getMaxPages()).thenReturn(10);
+        lenient().when(config.getPageCapacity()).thenReturn(45);
         lenient().when(config.isPermissionBasedPages()).thenReturn(true);
         lenient().when(config.getPermissionPrefix()).thenReturn("ultibag.pages.");
         lenient().when(config.isEconomyEnabled()).thenReturn(true);
