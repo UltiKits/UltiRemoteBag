@@ -23,6 +23,7 @@ class CompatibilityInitializationTest {
     private static final String PREFIX = PACKAGE.replace('.', '/') + "/";
     private static final String VIEW = "org/bukkit/inventory/InventoryView";
     private static final String SITE = PREFIX + "gui/RemoteBagContentGUI#isPageOpenBy(Ljava/util/UUID;ILjava/util/UUID;)Z";
+    private static final String REOPEN_SITE = PREFIX + "gui/RemoteBagContentGUI#reopenRefusedClose()V";
 
     @Test
     @DisplayName("Released framework scan initializes every top-level module class with class-shaped InventoryView")
@@ -84,8 +85,8 @@ class CompatibilityInitializationTest {
                 }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
             }
         }
-        // Positive control: the bytecode reader must find the exact site in DESIGN-REWRITE section 1.2.
-        assertThat(affected).containsExactly(SITE);
+        // Positive control: require both InventoryView callers, including manual-save close recovery.
+        assertThat(affected).containsExactlyInAnyOrder(SITE, REOPEN_SITE);
         assertThat(roots).anyMatch(m -> m.contains("service/BagEditClaimService#<init>"));
         assertThat(roots).anyMatch(m -> m.contains("config/RemoteBagConfig#<init>"));
         Set<String> reachable = new HashSet<>();
