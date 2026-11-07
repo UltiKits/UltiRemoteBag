@@ -70,6 +70,8 @@ msg_save_pending: "数据库未响应，此页尚未保存。你的改动已保�
 msg_nothing_to_save: "没有需要保存的内容。"
 msg_manual_save_required: "请先保存此页，再关闭或离开。未保存的页面会自动重开；请点击保存（自己的背包也可使用 /bag save）。"
 msg_manual_reopen_failed: "未保存的页面无法重开，正在安全保存其改动；若保存失败，请查看服务器控制台。"
+msg_bag_load_failed: "背包加载失败，请稍后重试。"
+msg_bag_refresh_failed: "背包刷新失败，当前显示的物品保持不变，此视图现为只读。"
 
 # 命令相关
 page_out_of_range: "页码 {0} 超出范围，最大页码为 {1}"

@@ -70,6 +70,8 @@ msg_save_pending: "The database did not answer, so this page is not saved yet. Y
 msg_nothing_to_save: "Nothing to save."
 msg_manual_save_required: "Save this page before closing or leaving it. Unsaved pages reopen automatically; use Save (or /bag save for your own bag)."
 msg_manual_reopen_failed: "The unsaved page could not reopen; its changes are being saved for safety. Check the server console if saving fails."
+msg_bag_load_failed: "The bag could not be loaded. Please try again later."
+msg_bag_refresh_failed: "The bag could not be refreshed. The current contents are unchanged and this view is read-only."
 
 # Command Related
 page_out_of_range: "Page {0} out of range, max page is {1}"

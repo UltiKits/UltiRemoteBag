@@ -81,6 +81,39 @@ class RemoteBagServiceTest {
         MockBukkitSupport.safeUnmock();
     }
 
+    @Test
+    @SuppressWarnings("unchecked")
+    void pageReadDeadlineNeverPublishesALateResult() throws Exception {
+        BagEditClaimService claims = new BagEditClaimService();
+        java.util.concurrent.ExecutorService pool = mock(java.util.concurrent.ExecutorService.class);
+        java.util.concurrent.Future<List<RemoteBagData>> future = mock(java.util.concurrent.Future.class);
+        java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Callable<List<RemoteBagData>>> pending =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        when(pool.submit(any(java.util.concurrent.Callable.class))).thenAnswer(inv -> {
+            pending.set(inv.getArgument(0));
+            return future;
+        });
+        when(future.get(eq(75L), eq(java.util.concurrent.TimeUnit.MILLISECONDS)))
+                .thenThrow(new java.util.concurrent.TimeoutException("deterministic deadline"));
+        UltiRemoteBagTestHelper.setField(claims, "storage", pool);
+        UltiRemoteBagTestHelper.setField(claims, "callDeadlineMillis", 75L);
+        UltiRemoteBagTestHelper.setField(service, "claimService", claims);
+        service.loadBagIfNeeded(playerUuid);
+        RemoteBagData late = RemoteBagData.create(playerUuid, 1, "");
+        when(mockQuery.list()).thenReturn(Collections.singletonList(late));
+
+        assertThatThrownBy(() -> service.readPage(playerUuid, 1))
+                .isInstanceOf(java.util.concurrent.CompletionException.class)
+                .hasCauseInstanceOf(java.util.concurrent.TimeoutException.class);
+
+        assertThat(service.getBagPage(playerUuid, 1)).isNull();
+        verify(future).cancel(true);
+        assertThat(pending.get().call()).containsExactly(late);
+        assertThat(service.getBagPage(playerUuid, 1)).as("late database results cannot publish to cache").isNull();
+        verify(dataOperator, never()).insert(any());
+        verify(dataOperator, never()).updateIf(any(), any(WhereCondition[].class));
+    }
+
     /**
      * Switches the service to an in-memory store that filters by page and stores the given pages (empty).
      * Since UltiKits/UltiRemoteBag#54 (maintainer decision 2026-10-06 00:04) a purchase, a create, a clear
@@ -105,6 +138,29 @@ class RemoteBagServiceTest {
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    @Test
+    @DisplayName("Loaded display-cache pages support storage-thread updates (#57)")
+    void loadedCachePagesAreConcurrent() throws Exception {
+        storePages(1);
+        service.loadBagIfNeeded(playerUuid);
+
+        Map<?, ?> cache = (Map<?, ?>) UltiRemoteBagTestHelper.getField(service, "bagCache");
+        assertThat(cache.get(playerUuid)).isInstanceOf(java.util.concurrent.ConcurrentMap.class);
+    }
+
+    @Test
+    @DisplayName("A newly allocated display-cache entry also supports storage-thread updates (#57)")
+    void newlyCreatedCachePagesAreConcurrent() throws Exception {
+        storePages();
+        // Exercise the fallback allocation as well as loadBagIfNeeded: both publish inner maps.
+        Method add = RemoteBagService.class.getDeclaredMethod("addEmptyPage", UUID.class, int.class);
+        add.setAccessible(true); // NOPMD - regression checks the second cache allocation site
+        assertThat(add.invoke(service, playerUuid, 1)).isEqualTo(true);
+
+        Map<?, ?> cache = (Map<?, ?>) UltiRemoteBagTestHelper.getField(service, "bagCache");
+        assertThat(cache.get(playerUuid)).isInstanceOf(java.util.concurrent.ConcurrentMap.class);
     }
 
     // ==================== getPlayerMaxPages ====================
