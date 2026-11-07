@@ -79,6 +79,10 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     @ConfigEntry(path = "permission_prefix", comment = "Permission prefix for page limits (e.g., ultibag.pages.3)")
     private String permissionPrefix = "ultibag.pages.";
 
+    /** Opt-in manual close mode; legacy save_on_close remains an ignored removed key. */
+    @ConfigEntry(path = "require_manual_save", comment = "{config_comment_require_manual_save}")
+    private boolean requireManualSave = false;
+
     // ==================== 经济设置 ====================
 
     @ConfigEntry(path = "economy.enabled", comment = "{config_comment_economy_enabled}")

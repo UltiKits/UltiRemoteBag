@@ -83,6 +83,14 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * notice queued for an earlier session of the same page leaves this one alone (gate 2 Codex run 2).
      */
     private String claimToken;
+
+    /** One-tick close refusals, not a holding store: every entry is consumed by reopen, quit or disable. */
+    private static final Map<UUID, RemoteBagContentGUI> PENDING_REOPENS = new java.util.HashMap<>();
+    private org.bukkit.scheduler.BukkitTask reopenTask;
+    private boolean reopening;
+    private boolean preserveNextOpen;
+    private boolean closingForLifecycle;
+    private boolean ended;
     
     /** Layout is captured once: a reload must not move an open window's toolbar or trim its items. */
     private final int configuredCapacity;
@@ -184,13 +192,28 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     @Override
     protected void setupContent(InventoryOpenEvent event) {
+        if (preserveNextOpen) {
+            // Reusing the SAME inventory after a refused close. Never rebuild it from the older stored page.
+            preserveNextOpen = false;
+            setupToolbar();
+            return;
+        }
         BagEditClaimService claims = lockService.getClaimService();
         if (accessMode == AccessMode.EDIT && claims != null) {
             claimToken = claims.tokenOf(ownerUuid, pageNum);
         }
         // 加载背包内容到内容区域
-        loadBagContents();
-        
+        if (!loadBagContents(true)) {
+            event.setCancelled(true);
+            // Gui.open registers before Bukkit's open event. A refused window never gets a
+            // matching close event, so remove only this page before unrelated inventory events.
+            InventoryAPI.getInstance().getPlayers().remove(player.getUniqueId(), this);
+            setClosed(true);
+            releaseLock();
+            bagService.forgetUnlessOnline(ownerUuid);
+            return;
+        }
+
         // 设置工具栏
         setupToolbar();
     }
@@ -202,7 +225,9 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     @Override
     protected void afterSetup(InventoryOpenEvent event) {
-        SoundUtil.playOpenSound(player, config);
+        if (!event.isCancelled()) {
+            SoundUtil.playOpenSound(player, config);
+        }
     }
     
     /**
@@ -216,6 +241,10 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * administrator can still act on the wrong picture.
      */
     private void loadBagContents() {
+        loadBagContents(false);
+    }
+
+    private boolean loadBagContents(boolean opening) {
         BagEditClaimService claims = lockService.getClaimService();
         ItemStack[] keptContent = claims == null || isEditable() ? null : claims.keptItems(ownerUuid, pageNum);
         ItemStack[] contents;
@@ -227,8 +256,19 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         } else {
             // Read from the database, not from the cache: this is what the window's save is conditioned on
             // (UltiKits/UltiRemoteBag#54).
-            pageRead = bagService.readPage(ownerUuid, pageNum);
-            contents = pageRead == null ? null : pageRead.getItems();
+            try {
+                RemoteBagService.PageRead read = bagService.readPage(ownerUuid, pageNum);
+                pageRead = read;
+                contents = read == null ? null : read.getItems();
+            } catch (java.util.concurrent.CompletionException e) {
+                // Do not turn an unknown page into an empty editable page, or erase a previous display.
+                // Unlike a failed save/renewal this read has no write to keep or items to return.
+                editRightsLost = true;
+                SoundUtil.playErrorSound(player, config);
+                player.sendMessage(ChatColor.RED + (opening ? plugin.i18n("msg_bag_load_failed")
+                        : plugin.i18n("msg_bag_refresh_failed")));
+                return false;
+            }
         }
         int capacity = RemoteBagConfig.effectiveCapacity(configuredCapacity, contents);
         bufferedContents = contents == null ? new ItemStack[capacity]
@@ -240,6 +280,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
                     .replace("{0}", String.valueOf(capacity))
                     .replace("{1}", String.valueOf(configuredCapacity)));
         }
+        return true;
     }
 
     /** Redraw in place; no close event, lock release, claim change or per-screen write. */
@@ -336,6 +377,9 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     private Icon createBackButton() {
         Icon icon = createActionButton(Colors.YELLOW, ChatColor.YELLOW + plugin.i18n("btn_back"), e -> {
+            if (refuseUnsavedNavigation(player)) {
+                return;
+            }
             SoundUtil.playPageSound(player, config);
             // 先关闭当前 GUI（会触发 onClose 保存）
             player.closeInventory();
@@ -378,12 +422,16 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         
         Icon icon = new Icon(item);
         icon.onClick(e -> {
+            // Read before replacing this window or trying to upgrade it. A timeout must keep the
+            // current screen, even when local arbitration would otherwise permit an upgrade.
+            if (!loadBagContents(false)) {
+                return;
+            }
             if (lockService.isClaimedElsewhere(ownerUuid, pageNum)) {
                 // Still being edited on another server (UltiKits/UltiRemoteBag#54): stay read-only, say why,
                 // and show the page as stored now.
                 SoundUtil.playErrorSound(player, config);
                 player.sendMessage(BagOpenResult.readOnlyElsewhere().renderMessage(plugin));
-                loadBagContents();
                 return;
             }
             // 检查是否可以升级为编辑模式
@@ -410,8 +458,7 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             } else {
                 SoundUtil.playErrorSound(player, config);
                 player.sendMessage(ChatColor.YELLOW + plugin.i18n("msg_owner_still_using"));
-                // 刷新内容显示
-                loadBagContents();
+                // Contents were refreshed before arbitration above.
             }
         });
         
@@ -528,7 +575,8 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             List<String> lore = new ArrayList<>();
             lore.add("");
             if (accessMode == AccessMode.EDIT) {
-                lore.add(ChatColor.GRAY + plugin.i18n("lore_close_save"));
+                lore.add(ChatColor.GRAY + (config.isRequireManualSave()
+                        ? plugin.i18n("lore_close_manual_save") : plugin.i18n("lore_close_save")));
             } else {
                 lore.add(ChatColor.GRAY + plugin.i18n("lore_close_discard"));
             }
@@ -769,23 +817,157 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      */
     @Override
     public void onClose(InventoryCloseEvent event) {
+        if (reopening || ended) {
+            return;
+        }
+        boolean lifecycle = closingForLifecycle || event.getReason() == InventoryCloseEvent.Reason.DISCONNECT
+                || event.getReason() == InventoryCloseEvent.Reason.DEATH
+                || event.getReason() == InventoryCloseEvent.Reason.UNLOADED;
+        if (!lifecycle && config.isRequireManualSave() && confirmEditable(false) && hasUnsavedChanges()
+                && scheduleReopen()) {
+            announceManualSaveRequired();
+            return;
+        }
+        finishClose();
+    }
+
+    /**
+     * A window may close only after its live content matches what was read or explicitly saved.
+     * <p>
+     * Compares the whole logical page, not the screen on view: {@link #currentContents()} carries every content
+     * screen (configured {@code content_rows} or the retained capacity after shrinking), and the baseline may be
+     * longer or shorter than it (a stored page written at another capacity). A slot past either array's end
+     * counts as empty (UltiKits/UltiRemoteBag#38 with #37).
+     */
+    private boolean hasUnsavedChanges() {
+        if (pageRead == null) {
+            return true;
+        }
+        ItemStack[] baseline = pageRead.getItems();
+        ItemStack[] current = currentContents();
+        int length = Math.max(current.length, baseline == null ? 0 : baseline.length);
+        for (int slot = 0; slot < length; slot++) {
+            ItemStack before = baseline != null && slot < baseline.length ? baseline[slot] : null;
+            ItemStack after = slot < current.length ? current[slot] : null;
+            if (!java.util.Objects.equals(isRealItem(before) ? before : null, isRealItem(after) ? after : null)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void announceManualSaveRequired() {
+        player.sendMessage(ChatColor.YELLOW + plugin.i18n("msg_manual_save_required"));
+    }
+
+    /**
+     * Bukkit close is not cancellable. Refuse it by reopening next tick, while retaining the exact live Inventory
+     * and claim. No stored page is read and no replacement inventory is allocated (Gui.open would allocate one).
+     */
+    private boolean scheduleReopen() {
+        if (PENDING_REOPENS.get(player.getUniqueId()) == this) {
+            return true;
+        }
+        org.bukkit.plugin.Plugin host = Bukkit.getPluginManager().getPlugin("UltiTools");
+        if (host == null || !host.isEnabled()) {
+            return false; // Lifecycle unavailable: the existing safety-save path must run instead.
+        }
+        PENDING_REOPENS.put(player.getUniqueId(), this);
         try {
-            if (confirmEditable(false)) {
-                // 编辑模式 - 保存并释放锁
-                // Unconditional, and it has to stay that way: edit-mode clicks are not cancelled, so an item
-                // the player has dragged in has already left their own inventory. That is why `save_on_close`
-                // was deleted rather than wired (UltiKits/UltiRemoteBag#18, #37). A save that is refused gives
-                // those items back instead (UltiKits/UltiRemoteBag#54).
+            reopenTask = Bukkit.getScheduler().runTask(host, this::reopenRefusedClose);
+            return true;
+        } catch (RuntimeException e) {
+            PENDING_REOPENS.remove(player.getUniqueId(), this);
+            plugin.getLogger().warn(e, plugin.i18n("msg_manual_reopen_failed"));
+            return false;
+        }
+    }
+
+    private void reopenRefusedClose() {
+        if (PENDING_REOPENS.get(player.getUniqueId()) != this) {
+            return;
+        }
+        // Successful explicit save, changed config, departed player, or invalid claim: complete using the existing
+        // safety save/kept-write/return protocol. No stale inventory may reopen after quit or disable.
+        if (!player.isOnline() || !config.isRequireManualSave() || !confirmEditable(false) || !hasUnsavedChanges()) {
+            finishClose();
+            return;
+        }
+        reopening = true;
+        try {
+            // Close any intervening view before registering this page, just as Gui.open's fake close does.
+            player.closeInventory();
+            InventoryAPI.getInstance().getPlayers().put(player.getUniqueId(), this);
+            setClosed(false);
+            preserveNextOpen = true;
+            InventoryView opened = player.openInventory(getInventory());
+            // Observe the actual view too: a cancelled/replaced open must never drop our live contents.
+            if (opened == null || !getInventory().equals(player.getOpenInventory().getTopInventory())) {
+                player.sendMessage(ChatColor.YELLOW + plugin.i18n("msg_manual_reopen_failed"));
+                finishClose();
+                InventoryAPI.getInstance().getPlayers().remove(player.getUniqueId(), this);
+            } else {
+                clearPendingReopen();
+            }
+        } catch (RuntimeException e) {
+            plugin.getLogger().warn(e, plugin.i18n("msg_manual_reopen_failed"));
+            finishClose();
+            InventoryAPI.getInstance().getPlayers().remove(player.getUniqueId(), this);
+        } finally {
+            reopening = false;
+        }
+    }
+
+    private void clearPendingReopen() {
+        PENDING_REOPENS.remove(player.getUniqueId(), this);
+        if (reopenTask != null) {
+            reopenTask.cancel();
+            reopenTask = null;
+        }
+    }
+
+    /** Completes an actual close; lifecycle and failed reopen always use the existing safety-save protocol. */
+    private void finishClose() {
+        clearPendingReopen();
+        try {
+            if (confirmEditable(false) && (!config.isRequireManualSave() || hasUnsavedChanges())) {
                 saveCurrentContents(false);
                 SoundUtil.playCloseSound(player, config);
             }
         } finally {
-            // Always, even if the save threw: the lock and the edit claim (and with it the claim's background
-            // renewal) never outlive the window (UltiKits/UltiRemoteBag#54).
+            ended = true;
             releaseLock();
-            // A view of another player's bag leaves no copy of it behind (UltiKits/UltiRemoteBag#54).
             bagService.forgetUnlessOnline(ownerUuid);
         }
+    }
+
+    /** Refuses bag navigation until the current edit was explicitly saved, including the one-tick close gap. */
+    public static boolean refuseUnsavedNavigation(Player viewer) {
+        RemoteBagContentGUI window = pendingOrCurrent(viewer);
+        if (window == null) {
+            return false;
+        }
+        if (window.config.isRequireManualSave() && window.confirmEditable(true) && window.hasUnsavedChanges()) {
+            window.announceManualSaveRequired();
+            return true;
+        }
+        if (PENDING_REOPENS.get(viewer.getUniqueId()) == window) {
+            window.finishClose();
+        }
+        return false;
+    }
+
+    private static RemoteBagContentGUI pendingOrCurrent(Player viewer) {
+        if (viewer == null) {
+            return null;
+        }
+        RemoteBagContentGUI pending = PENDING_REOPENS.get(viewer.getUniqueId());
+        if (pending != null) {
+            return pending;
+        }
+        Gui current = InventoryAPI.getInstance() == null ? null
+                : InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
+        return current instanceof RemoteBagContentGUI ? (RemoteBagContentGUI) current : null;
     }
 
     /** Whether this window may change its page: opened for editing, and not turned read-only since. */
@@ -871,18 +1053,23 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * write -- the module's final flush writes it, or logs it -- and closes. Main thread.
      */
     public static void keepOpenEditWindowsForDisable() {
-        if (InventoryAPI.getInstance() == null || Bukkit.getServer() == null) {
-            return;
-        }
-        for (Player viewer : new ArrayList<>(Bukkit.getOnlinePlayers())) {
-            Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
-            if (current instanceof RemoteBagContentGUI) {
-                ((RemoteBagContentGUI) current).keepForDisable();
+        java.util.Set<RemoteBagContentGUI> windows = new java.util.LinkedHashSet<>(PENDING_REOPENS.values());
+        if (InventoryAPI.getInstance() != null && Bukkit.getServer() != null) {
+            for (Player viewer : new ArrayList<>(Bukkit.getOnlinePlayers())) {
+                Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
+                if (current instanceof RemoteBagContentGUI) {
+                    windows.add((RemoteBagContentGUI) current);
+                }
             }
+        }
+        for (RemoteBagContentGUI window : windows) {
+            window.keepForDisable();
         }
     }
 
     private void keepForDisable() {
+        clearPendingReopen();
+        closingForLifecycle = true;
         try {
             if (isEditable()) {
                 BagEditClaimService claims = lockService.getClaimService();
@@ -904,6 +1091,10 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
 
     /** The open window of {@code holderUuid} on this page, or {@code null}. */
     private static RemoteBagContentGUI openWindowOf(UUID holderUuid, UUID ownerUuid, int page) {
+        RemoteBagContentGUI pending = PENDING_REOPENS.get(holderUuid);
+        if (pending != null && pending.pageNum == page && ownerUuid.equals(pending.ownerUuid)) {
+            return pending;
+        }
         if (holderUuid == null || InventoryAPI.getInstance() == null || Bukkit.getServer() == null) {
             return null;
         }
@@ -1037,12 +1228,10 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
             return FlushOutcome.NO_OPEN_PAGE;
         }
 
-        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
-        if (!(current instanceof RemoteBagContentGUI)) {
+        RemoteBagContentGUI page = pendingOrCurrent(viewer);
+        if (page == null) {
             return FlushOutcome.NO_OPEN_PAGE;
         }
-
-        RemoteBagContentGUI page = (RemoteBagContentGUI) current;
         if (!page.isEditable()
                 || !viewer.getUniqueId().equals(page.ownerUuid)) {
             return FlushOutcome.NO_OPEN_PAGE;
@@ -1066,9 +1255,14 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
         if (viewer == null || InventoryAPI.getInstance() == null) {
             return;
         }
-        Gui current = InventoryAPI.getInstance().getPlayersCurrentGui(viewer);
-        if (current instanceof RemoteBagContentGUI && ((RemoteBagContentGUI) current).confirmEditable(false)) {
-            ((RemoteBagContentGUI) current).saveCurrentContents(false);
+        RemoteBagContentGUI window = pendingOrCurrent(viewer);
+        if (window != null) {
+            window.closingForLifecycle = true;
+            if (PENDING_REOPENS.get(viewer.getUniqueId()) == window) {
+                window.finishClose();
+            } else if (window.confirmEditable(false)) {
+                window.saveCurrentContents(false);
+            }
         }
     }
 
@@ -1125,6 +1319,11 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * @return true if that player is online and has this very page open
      */
     public static boolean isPageOpenBy(UUID ownerUuid, int pageNum, UUID holderUuid) {
+        RemoteBagContentGUI pending = PENDING_REOPENS.get(holderUuid);
+        if (pending != null && !pending.ended && pending.isEditable()
+                && pending.pageNum == pageNum && pending.ownerUuid.equals(ownerUuid)) {
+            return true;
+        }
         if (ownerUuid == null || holderUuid == null || InventoryAPI.getInstance() == null) {
             return false;
         }

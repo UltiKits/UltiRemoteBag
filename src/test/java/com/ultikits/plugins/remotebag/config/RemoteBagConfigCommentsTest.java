@@ -32,8 +32,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("config/remotebag.yml comments follow the server language (UltiRemoteBag#48)")
 class RemoteBagConfigCommentsTest {
 
-    /** The thirteen settings whose comments were Chinese, by path: the adoption's scope, counted at master 4cac234. */
-    private static final int TOKEN_COMMENTS = 14;
+    /** Thirteen translated comments adopted in #48, plus content_rows (#38) and require_manual_save (#37). */
+    private static final int TOKEN_COMMENTS = 15;
 
     @TempDir
     Path tempDir;
@@ -67,8 +67,8 @@ class RemoteBagConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("control: the entity declares thirteen token comments, and none of its comments is Chinese")
-    void thirteenTokensAndNoChineseComment() {
+    @DisplayName("control: the entity declares fifteen token comments, and none of its comments is Chinese")
+    void fifteenTokensAndNoChineseComment() {
         Map<String, String> comments = declaredComments();
         int tokens = 0;
         for (Map.Entry<String, String> e : comments.entrySet()) {
@@ -78,6 +78,21 @@ class RemoteBagConfigCommentsTest {
             assertThat(containsHan(e.getValue())).as("the comment of " + e.getKey()).isFalse();
         }
         assertThat(tokens).isEqualTo(TOKEN_COMMENTS);
+    }
+
+    @Test
+    void manualSaveDefaultsOffAndNeverOverwritesAnOperatorsChoice() throws Exception {
+        UltiRemoteBag plugin = ConfigFileFixture.plugin(tempDir, "en");
+        RemoteBagConfig fresh = ConfigFileFixture.load(plugin);
+        assertThat(fresh.isRequireManualSave()).isFalse();
+        File file = new File(tempDir.toFile(), ConfigFileFixture.CONFIG_FILE);
+        String written = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+        String edited = written.replace("require_manual_save: false", "require_manual_save: true");
+        assertThat(edited).isNotEqualTo(written);
+        Files.write(file.toPath(), edited.getBytes(StandardCharsets.UTF_8));
+        RemoteBagConfig reloaded = ConfigFileFixture.load(plugin);
+        assertThat(reloaded.isRequireManualSave()).isTrue();
+        assertThat(Files.readAllBytes(file.toPath())).isEqualTo(edited.getBytes(StandardCharsets.UTF_8));
     }
 
     private static boolean containsHan(String text) {
@@ -101,7 +116,7 @@ class RemoteBagConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("a fresh install under language: en writes every one of the thirteen comments in English")
+    @DisplayName("a fresh install under language: en writes every one of the fifteen comments in English")
     void freshInstallWritesEnglishComments() throws Exception {
         ConfigFileFixture.load(ConfigFileFixture.plugin(tempDir, "en"));
 
@@ -113,7 +128,7 @@ class RemoteBagConfigCommentsTest {
     }
 
     @Test
-    @DisplayName("a fresh install under language: zh writes every one of the thirteen comments in Chinese")
+    @DisplayName("a fresh install under language: zh writes every one of the fifteen comments in Chinese")
     void freshInstallWritesChineseComments() throws Exception {
         ConfigFileFixture.load(ConfigFileFixture.plugin(tempDir, "zh"));
 
