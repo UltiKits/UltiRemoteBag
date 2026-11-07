@@ -141,6 +141,10 @@ on a later content screen; once it is removed, the next open uses 18 slots. The 
 all existing slots 0–53, including the formerly invisible legacy 45–53 band; those slots now appear on
 later screens and survive saving. No schema migration or automatic item transfer is performed.
 
+**Do not downgrade to 2.0.0 once any page has used a sixth row.** 2.0.0 shows and saves only slots 0–44,
+so items in slots 45–53 would not be shown there and its next save of that page drops them. Before rolling
+back, empty the sixth row of every page on this version.
+
 With `require_manual_save: true`, the unsaved-change check covers every content screen of the page: a
 change on a screen you are not looking at still refuses the close. Switching content screens is not
 leaving the page and is never refused.
@@ -149,6 +153,7 @@ leaving the page and is never refused.
 底行始终是工具栏，超过单屏的内容用工具栏第 2、8 格的箭头切换，仍是同一个背包页，不另收费。
 缩容时保留已有物品所在的额外行，聊天会说明原因，主页分母显示实际保留容量；取出额外行的物品后关闭再打开才缩容。
 旧的 `rows_per_page` 仍无效，不会覆盖或迁移你写的配置。
+**使用过第 6 行后不要降级到 2.0.0**：2.0.0 只显示并保存 0–44 号槽位，45–53 号槽位的物品在 2.0.0 中不会显示，并会在其下一次保存该页时丢失；回退前请先在本版本中清空每页的第 6 行。
 启用 `require_manual_save: true` 时，未保存改动的检查覆盖整页所有内容屏，未显示的屏上有改动同样拒绝关闭；页内切换内容屏不算离开，不会被拒绝。
 
 ## 📜 命令

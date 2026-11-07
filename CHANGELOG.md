@@ -5,6 +5,39 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 本文件记录本项目的所有重要更改，格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)。
 
+## [Unreleased]
+
+**Do not downgrade to 2.0.0 after any page has used a sixth content row.** 2.0.0 shows and saves only slots
+0–44 of a page, so items in slots 45–53 (the sixth row, `content_rows: 6`, or a page that retained six rows
+after shrinking) would not be shown there, and the next save from 2.0.0 drops them. Before rolling back, empty
+the sixth row of every page (or set `content_rows` to 5 or less and empty each page's extra rows) on this version.
+
+**使用过第 6 行储物后不要降级到 2.0.0。** 2.0.0 只显示并保存每页的 0–44 号槽位，第 6 行（`content_rows: 6`，或缩容后保留了
+6 行的页面）中 45–53 号槽位的物品在 2.0.0 中不会显示，并会在 2.0.0 的下一次保存时丢失。回退前，请先在本版本中清空每页的第 6 行
+（或把 `content_rows` 设为 5 及以下，并清空各页保留的额外行）。
+
+### Added
+
+- **Bag page capacity is configurable** with the new `content_rows` setting in `config/remotebag.yml`: 1–6 rows of
+  nine slots (9–54 slots), default 5 (45 slots, unchanged behaviour). Below five rows the window is smaller; at six
+  rows the page has two content screens inside the same window, switched with **Previous/Next content screen** on
+  toolbar columns 1 and 7. Switching keeps unsaved edits and the edit claim; Save, close, `/bag save`, quit and
+  module disable save the whole page. Shrinking never drops items: a page keeps every occupied whole row (a yellow
+  line says so) until those rows are emptied and the page is reopened, and the main menu's `Slots Used` shows the
+  real capacity. Slots 45–53 that older versions stored but never showed now appear on the second screen. A value
+  outside 1–6 refuses the module with a validation error; the operator's file is never rewritten. The removed
+  `rows_per_page` key stays ignored. Reload affects newly opened windows only (UltiKits/UltiRemoteBag#38).
+- With `require_manual_save: true` (UltiKits/UltiRemoteBag#37), the unsaved-change check covers every content
+  screen of the page, so a change on a screen not currently shown still refuses the close; switching screens is
+  not leaving the page and is never refused (UltiKits/UltiRemoteBag#38).
+- **背包页容量可配置**：`config/remotebag.yml` 新增 `content_rows`，1–6 行、每行 9 格（9–54 格），默认 5 行（45 格，行为不变）。
+  少于 5 行时窗口变小；6 行时同一窗口内有两个内容屏，用工具栏第 2、8 格的「上一屏/下一屏」切换，切换保留未保存的改动与编辑占用；
+  保存、关闭、`/bag save`、退出和模块停用都保存整页。缩容不会丢物品：页面保留所有有物品的整行（聊天中黄色提示说明），清空这些行并重新
+  打开后才缩容；主页「已用槽位」显示实际容量。旧版本存下却从未显示的 45–53 号槽位现在出现在第二屏。超出 1–6 的值会以校验错误拒绝加载
+  模块，不会改写服主的配置文件。已移除的 `rows_per_page` 仍被忽略。重载只影响之后新打开的窗口（UltiKits/UltiRemoteBag#38）。
+- 启用 `require_manual_save: true`（UltiKits/UltiRemoteBag#37）时，未保存改动的检查覆盖该页的所有内容屏：当前未显示的屏上有改动，
+  关闭同样会被拒绝；在页内切换内容屏不算离开页面，不会被拒绝（UltiKits/UltiRemoteBag#38）。
+
 ## [2.0.0] - 2026-10-21
 
 **Upgrade UltiTools to 6.3.0 or later before replacing this module's JAR.** This version declares
