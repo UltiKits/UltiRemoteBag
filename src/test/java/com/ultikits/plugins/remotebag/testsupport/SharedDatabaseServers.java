@@ -98,10 +98,10 @@ public final class SharedDatabaseServers {
     /** The real-time deadline of one storage call in these tests, in milliseconds. */
     public static final long CALL_DEADLINE_MILLIS = 300L;
     /**
-     * The deadline of a storage call that is meant to succeed, for a test that opts in
-     * ({@link Server#healthyCallsGetAGenerousDeadline}): no healthy call overruns it, however slow the runner
-     * (plan 17-86: on a busy CI runner a healthy call overran {@link #CALL_DEADLINE_MILLIS} and was taken for one
-     * that never returns).
+     * The deadline for a healthy call the main thread waits on, when a test opts in
+     * ({@link Server#healthyCallsGetAGenerousDeadline}). A background pass still waits at most one renewal tick
+     * (one second by default), shared between its stages. Five seconds gives ordinary calls more runner headroom
+     * than {@link #CALL_DEADLINE_MILLIS}, but cannot guarantee success on an arbitrarily slow runner.
      */
     public static final long HEALTHY_CALL_DEADLINE_MILLIS = 5_000L;
     /** How long {@link #awaitStorageCallsSettled} and {@link Server#stopClaimService} wait, at most. */
@@ -247,7 +247,8 @@ public final class SharedDatabaseServers {
      * <p>
      * A background pass and a kept write's settling leave calls running by design -- a release is submitted and
      * never waited for, a receipt is deleted best-effort -- so a test that reads the store right after them must
-     * first let them finish, or it races them (plan 17-86). The pools are only read, never replaced.
+     * first let them finish, or it races them (plan 17-86). Current and previously observed pools are counted,
+     * including a pool the claim service forgot at disable (#57). The pools are only read, never replaced.
      *
      * @throws IllegalStateException if calls are still running after twenty seconds
      */
@@ -267,10 +268,16 @@ public final class SharedDatabaseServers {
     private int runningStorageCalls() throws Exception {
         int running = 0;
         for (Server each : started) {
-            java.util.concurrent.ExecutorService pool = each.observeStoragePool();
-            if (pool instanceof java.util.concurrent.ThreadPoolExecutor) {
-                java.util.concurrent.ThreadPoolExecutor threads = (java.util.concurrent.ThreadPoolExecutor) pool;
-                running += threads.getActiveCount() + threads.getQueue().size();
+            List<java.util.concurrent.ExecutorService> pools;
+            synchronized (each) {
+                each.observeStoragePool();
+                pools = new ArrayList<>(each.pools);
+            }
+            for (java.util.concurrent.ExecutorService pool : pools) {
+                if (pool instanceof java.util.concurrent.ThreadPoolExecutor) {
+                    java.util.concurrent.ThreadPoolExecutor threads = (java.util.concurrent.ThreadPoolExecutor) pool;
+                    running += threads.getActiveCount() + threads.getQueue().size();
+                }
             }
         }
         return running;

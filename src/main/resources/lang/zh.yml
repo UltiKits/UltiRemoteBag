@@ -67,6 +67,8 @@ msg_save_failed: "保存未写入数据库，你的改动尚未存储。请查�
 msg_items_returned: "你放入此页的物品未能存储，已归还给你（放不下的掉落在你脚下）。"
 msg_save_pending: "数据库未响应，此页尚未保存。你的改动已保留，数据库恢复响应后立即保存；在此之前此页为只读。"
 msg_nothing_to_save: "没有需要保存的内容。"
+msg_bag_load_failed: "背包加载失败，请稍后重试。"
+msg_bag_refresh_failed: "背包刷新失败，当前显示的物品保持不变，此视图现为只读。"
 
 # 命令相关
 page_out_of_range: "页码 {0} 超出范围，最大页码为 {1}"
