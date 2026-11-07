@@ -136,10 +136,9 @@ public class RemoteBagMainGUI extends BasePaginationPage {
             // 获取物品统计
             int itemCount = bagService.getItemCount(player.getUniqueId(), pageNum);
             int stackCount = bagService.getStackCount(player.getUniqueId(), pageNum);
-            // The real capacity, not a setting. This line used to read config.getRowsPerPage() * 9,
-            // which at the shipped default rendered "Slots Used: 45/54" on a page that holds 45 --
-            // nine slots a player could never fill (UltiKits/UltiRemoteBag#24).
-            int maxSlots = RemoteBagConfig.PAGE_CAPACITY;
+            // Retained overflow is real capacity too: the editor exposes every occupied row.
+            int maxSlots = RemoteBagConfig.effectiveCapacity(config.getPageCapacity(),
+                    bagService.getBagPage(player.getUniqueId(), pageNum));
             
             meta.setDisplayName(ChatColor.YELLOW + plugin.i18n("bag_name").replace("{0}", String.valueOf(pageNum)));
 

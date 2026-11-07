@@ -139,6 +139,93 @@ class BagEditClaimServiceFailureTest {
         verify(logger, never()).error(anyString());
     }
 
+    @Test
+    @DisplayName("A background pass shares one wait budget between renewal and kept saves (#57)")
+    @SuppressWarnings("unchecked")
+    void aPassSharesItsWaitBudget() throws Exception {
+        claimPage(1);
+        nanos += 100_000_000_001L; // page 1 is due; page 2, claimed now, is still confirmed
+        claimPage(2);
+        RemoteBagService bags = mock(RemoteBagService.class);
+        UltiRemoteBagTestHelper.setField(service, "bagService", bags);
+        assertThat(service.keepWindow(HOLDER, OWNER, 2, new org.bukkit.inventory.ItemStack[0],
+                new RemoteBagService.PageRead(new org.bukkit.inventory.ItemStack[0], false, null, 0L))).isTrue();
+        UltiRemoteBagTestHelper.setField(service, "callDeadlineMillis", 300L);
+
+        java.util.concurrent.ExecutorService oldPool =
+                (java.util.concurrent.ExecutorService) UltiRemoteBagTestHelper.getField(service, "storage");
+        oldPool.shutdownNow();
+        java.util.concurrent.ExecutorService pool = mock(java.util.concurrent.ExecutorService.class);
+        java.util.concurrent.Future<Object> renewal = mock(java.util.concurrent.Future.class);
+        java.util.concurrent.Future<Object> save = mock(java.util.concurrent.Future.class);
+        when(pool.submit(org.mockito.ArgumentMatchers.<java.util.concurrent.Callable<Object>>any()))
+                .thenReturn(renewal, save);
+        when(renewal.get(org.mockito.ArgumentMatchers.anyLong(), any(java.util.concurrent.TimeUnit.class)))
+                .thenAnswer(call -> {
+                    // Deliberately spend part of the budget, not a delay used to guess whether a write settled.
+                    new java.util.concurrent.CountDownLatch(1).await(200L, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    throw new java.util.concurrent.TimeoutException("renewal still running");
+                });
+        java.util.concurrent.atomic.AtomicLong saveAllowance = new java.util.concurrent.atomic.AtomicLong(-1L);
+        when(save.get(org.mockito.ArgumentMatchers.anyLong(), any(java.util.concurrent.TimeUnit.class)))
+                .thenAnswer(call -> {
+                    saveAllowance.set(call.<java.util.concurrent.TimeUnit>getArgument(1)
+                            .toMillis(call.<Long>getArgument(0)));
+                    throw new java.util.concurrent.TimeoutException("save still running");
+                });
+        UltiRemoteBagTestHelper.setField(service, "storage", pool);
+
+        service.renewDue();
+
+        assertThat(saveAllowance.get()).as("save only gets the remainder of the 300 ms pass")
+                .isBetween(0L, 150L);
+    }
+
+    @Test
+    @DisplayName("Disable waits for a release already submitted by a background pass (#57)")
+    @SuppressWarnings("unchecked")
+    void disableWaitsForAnAlreadySubmittedRelease() throws Exception {
+        claimPage(1);
+        Object released = removeHeldClaim();
+        java.util.concurrent.ExecutorService oldPool =
+                (java.util.concurrent.ExecutorService) UltiRemoteBagTestHelper.getField(service, "storage");
+        oldPool.shutdownNow();
+        java.util.concurrent.ExecutorService pool = mock(java.util.concurrent.ExecutorService.class);
+        java.util.concurrent.Future<Boolean> release = mock(java.util.concurrent.Future.class);
+        when(pool.submit(org.mockito.ArgumentMatchers.<java.util.concurrent.Callable<Boolean>>any())).thenReturn(release);
+        UltiRemoteBagTestHelper.setField(service, "storage", pool);
+        java.lang.reflect.Method submitRelease = BagEditClaimService.class
+                .getDeclaredMethod("releaseWithoutWaiting", released.getClass());
+        submitRelease.setAccessible(true); // NOPMD - reproduces the background's asynchronous release handoff
+        submitRelease.invoke(service, released);
+
+        service.shutdown();
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(release, pool);
+        order.verify(release).get(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.eq(java.util.concurrent.TimeUnit.NANOSECONDS));
+        order.verify(pool).shutdownNow();
+    }
+
+    private void claimPage(int page) {
+        java.util.concurrent.atomic.AtomicReference<RemoteBagEditClaim> row = new java.util.concurrent.atomic.AtomicReference<>();
+        when(claims.getById(RemoteBagEditClaim.idOf(OWNER, page))).thenAnswer(call -> row.get());
+        org.mockito.Mockito.doAnswer(call -> {
+            RemoteBagEditClaim inserted = call.getArgument(0);
+            row.set(inserted);
+            return null;
+        }).when(claims).insert(any());
+        assertThat(service.claim(OWNER, page, HOLDER)).isEqualTo(BagEditClaimService.Outcome.CLAIMED);
+    }
+
+    /** Keeps the private claim type out of the test's source-level dependencies. */
+    private Object removeHeldClaim() throws Exception {
+        java.util.Map<?, ?> held = (java.util.Map<?, ?>) UltiRemoteBagTestHelper.getField(service, "held");
+        Object claim = held.values().iterator().next();
+        held.clear(); // finishKept removes an ended session before submitting its release
+        return claim;
+    }
+
     /** Records every call of the service's listener field {@code field}, if the service has it. */
     private void installListener(String field, List<Object[]> calls) throws Exception {
         java.lang.reflect.Field target;

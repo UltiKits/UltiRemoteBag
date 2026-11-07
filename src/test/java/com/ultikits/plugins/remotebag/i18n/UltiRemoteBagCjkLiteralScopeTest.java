@@ -46,9 +46,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * comment is a Chinese literal like any other and fails this guard; the token's own key and both of its
  * catalogue entries are guard 1's business.
  * <p>
- * This file is copied into the modules that have not adopted translatable comments with one deliberate
- * difference: they still skip the {@code comment} element of {@code @ConfigEntry}. UltiRemoteBag has
- * adopted them, and does not skip it.
+ * Module guards are maintained separately; shared character properties do not imply byte-identical copies.
+ * One module-specific difference: modules that have not adopted translatable comments still skip the
+ * {@code comment} element of {@code @ConfigEntry}. UltiRemoteBag has adopted them, and does not skip it.
  */
 @DisplayName("Language guard 2: Chinese literals")
 class UltiRemoteBagCjkLiteralScopeTest {

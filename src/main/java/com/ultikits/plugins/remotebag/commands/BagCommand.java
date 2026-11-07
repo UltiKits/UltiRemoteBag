@@ -60,6 +60,9 @@ public class BagCommand extends BaseCommandExecutor {
      */
     @CmdMapping(format = "")
     public void openMainPage(@CmdSender Player player) {
+        if (RemoteBagContentGUI.refuseUnsavedNavigation(player)) {
+            return;
+        }
         new RemoteBagMainGUI(player, plugin, bagService, lockService, config).open();
     }
     
@@ -68,6 +71,9 @@ public class BagCommand extends BaseCommandExecutor {
      */
     @CmdMapping(format = "<page>")
     public void openPage(@CmdSender Player player, @CmdParam("page") int page) {
+        if (RemoteBagContentGUI.refuseUnsavedNavigation(player)) {
+            return;
+        }
         int maxPages = bagService.getPlayerMaxPages(player);
         
         if (page < 1 || page > maxPages) {
@@ -247,6 +253,9 @@ public class BagCommand extends BaseCommandExecutor {
      * 管理员打开背包页
      */
     private void openAdminBagPage(Player admin, UUID ownerUuid, int page, String ownerName) {
+        if (RemoteBagContentGUI.refuseUnsavedNavigation(admin)) {
+            return;
+        }
         if (openKeptReadOnly(admin, ownerUuid, page)) {
             return;
         }

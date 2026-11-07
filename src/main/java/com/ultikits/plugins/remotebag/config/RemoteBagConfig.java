@@ -31,42 +31,44 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     /** Slots in one inventory row. Fixed by Minecraft, named so the arithmetic is not a literal. */
     public static final int SLOTS_PER_ROW = 9;
 
+    @Range(min = 1, max = 6)
+    @ConfigEntry(path = "content_rows", comment = "{config_comment_content_rows}")
+    private int contentRows = 5;
+
+    /** Configured slots; invalid values use the default in memory only, never rewrite the file. */
+    public int getPageCapacity() {
+        return contentRows >= 1 && contentRows <= 6 ? contentRows * SLOTS_PER_ROW : PAGE_CAPACITY;
+    }
+
     /**
-     * How much one bag page holds, in slots. Fixed, and not configurable.
-     * <p>
-     * The single source for the three places that used to derive it separately: the content
-     * window's own size, the array the service allocates for a created, cleared or empty page, and
-     * the denominator of the main GUI's "Slots Used" lore. They were a window constant and two
-     * readings of {@code rows_per_page}, and they disagreed -- at the shipped {@code 6} a full page
-     * rendered {@code 45/54}, promising nine slots that could never be filled, and at {@code 2} it
-     * rendered {@code 45/18}. That is why
-     * <a href="https://github.com/UltiKits/UltiRemoteBag/issues/24">UltiRemoteBag#24</a> ended in
-     * the key being deleted rather than its documentation narrowed: the displayed number was itself
-     * promising a capacity that did not exist, so correcting only the declaration would have moved
-     * the lie into the documentation and left it on screen.
-     * <p>
-     * Making capacity genuinely configurable is wanted and is recorded as
-     * <a href="https://github.com/UltiKits/UltiRemoteBag/issues/38">UltiRemoteBag#38</a>; it needs a
-     * variable-height window and a rule for items already stored beyond a shrunken page, neither of
-     * which the deleted key had.
+     * Effective capacity, retaining every occupied stored row after a shrink. Empty allocated rows do
+     * not keep a page large forever. The persisted index ceiling is independent of configuration.
+     *
+     * @param configured configured slot capacity captured for this view
+     * @param items stored items, possibly null
+     * @return capacity in whole rows, never below the configured size
      */
+    public static int effectiveCapacity(int configured, org.bukkit.inventory.ItemStack[] items) {
+        int capacity = configured;
+        if (items != null) {
+            for (int slot = Math.min(items.length, MAX_ADDRESSABLE_SLOTS) - 1; slot >= configured; slot--) {
+                org.bukkit.inventory.ItemStack item = items[slot];
+                if (item != null && item.getType() != org.bukkit.Material.AIR && item.getAmount() > 0) {
+                    capacity = (slot / SLOTS_PER_ROW + 1) * SLOTS_PER_ROW;
+                    break;
+                }
+            }
+        }
+        return capacity;
+    }
+
+    /** Default only, retained for source and binary compatibility with existing integrations. */
     public static final int PAGE_CAPACITY = 5 * SLOTS_PER_ROW;
 
     /**
-     * The highest slot index the loader will read out of a stored page, exclusive.
-     * <p>
-     * One row above {@link #PAGE_CAPACITY}, which is the largest page the deleted
-     * {@code rows_per_page: 6} could once address. Nothing in this module has ever written above
-     * index 44 -- {@code RemoteBagContentGUI} saves exactly {@link #PAGE_CAPACITY} slots -- so the
-     * band 45-53 is reachable only from a hand-edited or foreign-written row. It is still read, so
-     * that no row which loads today stops loading; such an item is invisible in the window and is
-     * dropped by the first save of that page, which is why a row holding one should be repaired
-     * before the page is opened.
-     * <p>
-     * A bound is needed at all because a stored slot index is data: without it,
-     * {@code items.100000000} would turn its own key into an allocation request, and the resulting
-     * {@link OutOfMemoryError} is an {@link Error}, so the {@code catch (Exception)} around the
-     * deserializer would not contain it.
+     * Persisted-slot ceiling, exclusive. Kept independent of configured capacity so lowering a setting
+     * never makes an existing slot unreadable. Rows above the new capacity remain accessible through
+     * overflow screens until emptied. The bound prevents an untrusted stored index sizing an allocation.
      */
     public static final int MAX_ADDRESSABLE_SLOTS = PAGE_CAPACITY + SLOTS_PER_ROW;
 
@@ -76,6 +78,10 @@ public class RemoteBagConfig extends AbstractConfigEntity {
     @NotEmpty
     @ConfigEntry(path = "permission_prefix", comment = "Permission prefix for page limits (e.g., ultibag.pages.3)")
     private String permissionPrefix = "ultibag.pages.";
+
+    /** Opt-in manual close mode; legacy save_on_close remains an ignored removed key. */
+    @ConfigEntry(path = "require_manual_save", comment = "{config_comment_require_manual_save}")
+    private boolean requireManualSave = false;
 
     // ==================== 经济设置 ====================
 
