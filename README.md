@@ -9,7 +9,7 @@
 ### 核心功能
 
 - 🎒 **多页背包系统** - 每个玩家可拥有多个背包页，每页 45 个槽位
-- 💾 **自动保存** - 支持定时自动保存和关闭时保存
+- 💾 **Save on close / 关闭时保存** - Save contents when closing a page in edit mode. 编辑模式下关闭页面时保存内容。
 - 🔐 **背包锁定机制** - 防止并发访问冲突，支持编辑/只读模式
 - 📊 **物品统计** - 在 GUI 中显示物品数量和槽位占用
 
@@ -322,6 +322,12 @@ the bag tables by hand while servers are running.
 - **Items owed to a player who left** (their save was refused after they quit) are held in memory until they join
   this server again. A restart loses them; each is logged with the player, the page and the items when it becomes
   owed and again at module stop.
+- **A purchase races with page creation on another server** (UltiKits/UltiRemoteBag#55). If an administrator on
+  another server sharing the database creates the same player's next page after the purchase reads their pages
+  but before it creates the new page, the purchase can fail after charging the player, without an automatic refund
+  or an additional page. The page the other server created is not overwritten. Avoid creating pages for a player
+  on another server while that player is purchasing a page; if this happens, check the player's balance and stored
+  pages and reconcile the charge through your economy provider's administrative commands.
 - **Two small technical notes.** On MySQL, comparing a page's stored contents follows the column's collation, which
   ignores letter case. On the JSON backend, which belongs to one server, the claim check and the page write are
   not one transaction; with one server that changes nothing.
