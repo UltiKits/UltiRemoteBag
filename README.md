@@ -405,6 +405,11 @@ the bag tables by hand while servers are running.
   or an additional page. The page the other server created is not overwritten. Avoid creating pages for a player
   on another server while that player is purchasing a page; if this happens, check the player's balance and stored
   pages and reconcile the charge through your economy provider's administrative commands.
+- **With `require_manual_save: true`, an unsaved page closes another plugin's window** (UltiKits/UltiRemoteBag#83).
+  A refused close reopens the page on the next tick and first closes whatever window is open then. If another
+  plugin opens its own window (a trade window, menu or NPC dialog) while the page has unsaved changes, that window is
+  closed on the next tick; if that plugin also reopens its window when it is closed, the two windows reopen each
+  other every tick. Save the page (or turn `require_manual_save` off) before using other plugins' windows.
 - **Two small technical notes.** On MySQL, comparing a page's stored contents follows the column's collation, which
   ignores letter case. On the JSON backend, which belongs to one server, the claim check and the page write are
   not one transaction; with one server that changes nothing.
@@ -425,7 +430,7 @@ the bag tables by hand while servers are running.
 本服务器的会话且计数器仍是其最后确认的值时推进计数器，再在页面仍是窗口读取时的内容时写入页面，并记录这次保存已写入；因此在 SQLite 和 MySQL 上，
 保存只会在本服务器持有该页占用时生效，无论它多晚执行——另一台服务器接手之后，被耽搁的保存不会写入任何内容；报告了数据库错误的保存是否实际已写入，
 从这条记录中读取而不是猜测：重试和占用丢失后的放弃都只在该保存的事务结束后读取（占用行的锁保证这一顺序）；模块停止时，在先锁定占用行的事务中读取，因此会等待仍在数据库上运行的保存（MySQL 的 `socketTimeout` 可能放弃一个随后被数据库提交的保存）。在停止期限内无法判定的保存不会被归还，而是连同物品作为未判定记录在日志中。如果服务器网络可能留下半开连接，请为 MySQL 连接设置套接字或语句超时（例如 JDBC URL 中的
-`socketTimeout`），框架本身不设置；保存进行中断开的连接还会让该页的占用行在数据库上保持锁定，直到数据库丢弃该会话，期间任何服务器都无法接手该页——结束这种失效会话并释放其锁的是 MySQL 的 `wait_timeout`（默认 28800 秒，即八小时），请将其设为适中的值；`innodb_lock_wait_timeout` 只限制其他服务器每次等待该锁的时长。升级无需迁移。已知限制（均为罕见情况，均会记录日志）。运维建议：让共享数据库保持响应迅速、与每台服务器之间低延迟；为 MySQL 设置 `socketTimeout` 和适中的 `wait_timeout`；共享数据库的所有服务器一起升级；服务器运行时不要手动编辑背包数据表。一、本模块以外的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags` 的其他插件、手动编辑数据表）在窗口打开时改动该页：保存被拒绝、放入的物品归还，但该会话中取出的物品可能出现两份。二、取得编辑占用时数据库非常慢：占用调用等待超过约两秒后，只有随后的页面内容读取成功才会只读打开（内容读取超时则拒绝打开）；如果这次缓慢的占用调用在玩家迅速重新打开同一页之后才完成，重新打开的窗口可能失去占用，在罕见情况下玩家从中取出的物品可能出现两份。三、某台服务器与其他服务器仍可访问的数据库断开整整一个 `lock.timeout_seconds`（或整个服务器进程冻结这么久）：另一台服务器接手该页；断开的服务器在第一次续期失败时窗口变为只读，数据库恢复后归还放入的物品，自上次保存到变为只读之间（断开后最多约半个超时）取出的物品可能出现两份。四、在数据库故障期间停止或崩溃，而某个保存仍在等待写入（维护者已接受）：到停止时五秒冲刷结束仍未写入的保存、或崩溃时待写入的保存，放入的物品丢失、取出的物品可能出现两份，均连同物品记录在日志中；例外：停止时仍能判定其未写入且玩家在线，则归还放入的物品；实际上每名玩家最多一页；数据库完全不响应时，停止最多约 11 秒。五、欠离线玩家的物品保存在内存中直到其再次加入本服务器，重启会丢失，欠下时和模块停止时都会连同玩家、页码与物品记录在日志中。六、两条技术说明：MySQL 上页面内容的比较遵循列的排序规则（不区分大小写）；JSON 存储只属于一台服务器，其占用检查与页面写入不在同一个事务中，单台服务器上没有影响。
+`socketTimeout`），框架本身不设置；保存进行中断开的连接还会让该页的占用行在数据库上保持锁定，直到数据库丢弃该会话，期间任何服务器都无法接手该页——结束这种失效会话并释放其锁的是 MySQL 的 `wait_timeout`（默认 28800 秒，即八小时），请将其设为适中的值；`innodb_lock_wait_timeout` 只限制其他服务器每次等待该锁的时长。升级无需迁移。已知限制（均为罕见情况，均会记录日志）。运维建议：让共享数据库保持响应迅速、与每台服务器之间低延迟；为 MySQL 设置 `socketTimeout` 和适中的 `wait_timeout`；共享数据库的所有服务器一起升级；服务器运行时不要手动编辑背包数据表。一、本模块以外的写入者（滚动升级期间仍运行旧版本模块的服务器、写 `remote_bags` 的其他插件、手动编辑数据表）在窗口打开时改动该页：保存被拒绝、放入的物品归还，但该会话中取出的物品可能出现两份。二、取得编辑占用时数据库非常慢：占用调用等待超过约两秒后，只有随后的页面内容读取成功才会只读打开（内容读取超时则拒绝打开）；如果这次缓慢的占用调用在玩家迅速重新打开同一页之后才完成，重新打开的窗口可能失去占用，在罕见情况下玩家从中取出的物品可能出现两份。三、某台服务器与其他服务器仍可访问的数据库断开整整一个 `lock.timeout_seconds`（或整个服务器进程冻结这么久）：另一台服务器接手该页；断开的服务器在第一次续期失败时窗口变为只读，数据库恢复后归还放入的物品，自上次保存到变为只读之间（断开后最多约半个超时）取出的物品可能出现两份。四、在数据库故障期间停止或崩溃，而某个保存仍在等待写入（维护者已接受）：到停止时五秒冲刷结束仍未写入的保存、或崩溃时待写入的保存，放入的物品丢失、取出的物品可能出现两份，均连同物品记录在日志中；例外：停止时仍能判定其未写入且玩家在线，则归还放入的物品；实际上每名玩家最多一页；数据库完全不响应时，停止最多约 11 秒。五、欠离线玩家的物品保存在内存中直到其再次加入本服务器，重启会丢失，欠下时和模块停止时都会连同玩家、页码与物品记录在日志中。六、启用 `require_manual_save: true` 时，有未保存改动的页面会关闭其他插件的窗口（UltiKits/UltiRemoteBag#83）：拒绝关闭后，下一 tick 重开本页前会先关闭当时打开的窗口；若页面未保存时另一插件打开了自己的窗口（交易窗口、菜单、NPC 对话），该窗口会在下一 tick 被关闭；若该插件在窗口被关闭时也会重开，两个窗口会每 tick 互相重开。使用其他插件的窗口前请先保存页面（或关闭 `require_manual_save`）。七、两条技术说明：MySQL 上页面内容的比较遵循列的排序规则（不区分大小写）；JSON 存储只属于一台服务器，其占用检查与页面写入不在同一个事务中，单台服务器上没有影响。
 
 ## 🔧 开发者 API
 
