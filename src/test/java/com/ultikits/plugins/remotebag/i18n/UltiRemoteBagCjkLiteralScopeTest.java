@@ -28,7 +28,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Detection contract: this guard and the framework's {@code .github/scripts/check-cjk-scope.sh} detect the
  * same character properties: the Han script ({@code Character.UnicodeScript.HAN}), CJK Symbols and
  * Punctuation (U+3000-U+303F) and Halfwidth and Fullwidth Forms (U+FF00-U+FFEF); kana (U+3040-U+30FF) is
- * out. The Unicode version each one knows follows its toolchain -- the JDK here, PCRE2 on the CI runner --
+ * out; halfwidth katakana U+FF65-U+FF9F is in, through the forms range. The Unicode version each one knows follows
+ * its toolchain -- the JDK here, PCRE2 on the CI runner --
  * so a character added in a newer Unicode version can be matched by one and not yet by the other. Unlike
  * that script, this guard is about literals, not comments: comments never count, and every string,
  * character and text-block literal counts after its Unicode and escape sequences are decoded. The literals
