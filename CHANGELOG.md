@@ -38,6 +38,17 @@ the sixth row of every page (or set `content_rows` to 5 or less and empty each p
 - 启用 `require_manual_save: true`（UltiKits/UltiRemoteBag#37）时，未保存改动的检查覆盖该页的所有内容屏：当前未显示的屏上有改动，
   关闭同样会被拒绝；在页内切换内容屏不算离开页面，不会被拒绝（UltiKits/UltiRemoteBag#38）。
 
+### Changed
+
+- **For plugin authors:** `RemoteBagService#readPage(UUID, int)` now gives up after a bounded wait (at most about
+  two seconds, or a sixth of `lock.timeout_seconds` if that is shorter) and throws
+  `java.util.concurrent.CompletionException` when the storage read fails or times out. A failed read is never
+  returned as an empty page; catch the exception and retry later instead of treating the page as empty
+  (UltiKits/UltiRemoteBag#57, #82).
+- **面向插件作者：** `RemoteBagService#readPage(UUID, int)` 现在最多等待一段有限时间（约两秒，若 `lock.timeout_seconds` 的六分之一更短则取其值），
+  存储读取失败或超时时抛出 `java.util.concurrent.CompletionException`。读取失败绝不会以空页返回；请捕获该异常并稍后重试，
+  不要把页面当作空页处理（UltiKits/UltiRemoteBag#57、#82）。
+
 ## [2.0.0] - 2026-10-21
 
 **Upgrade UltiTools to 6.3.0 or later before replacing this module's JAR.** This version declares
