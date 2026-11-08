@@ -1,6 +1,8 @@
 # UltiRemoteBag 语言文件
 bag_enabled: "UltiRemoteBag 已启用！"
 bag_disabled: "UltiRemoteBag 已禁用！"
+framework_compatibility_refused: "UltiRemoteBag 在低于 Minecraft 1.21 的服务器上需要 UltiTools 6.4.0 或更高版本（服务器：{0}，UltiTools：{1}）。请更新 UltiTools。"
+framework_compatibility_unknown: "UltiRemoteBag 无法解析服务器或 UltiTools 版本（服务器：{0}，UltiTools：{1}）；跳过兼容性检查并继续启动。"
 
 # GUI 标题
 gui_main_title: "的远程背包"

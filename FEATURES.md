@@ -150,6 +150,20 @@ therefore needs both `ultibag.use` and the specific admin permission for each ac
 
 ## Lifecycle Hooks
 
+The startup compatibility check reads the running server and core plugin versions, not this
+module's build dependency. Before Minecraft 1.21, UltiTools 6.4.0 or later supplies the API
+compatibility bridge; 1.21+ continues to accept 6.3.x. `-SNAPSHOT` counts as its numeric version.
+An unparseable version logs a warning and continues, rather than guessing a refusal.
+The check returns `false` from `registerSelf()` before service initialization; the framework
+then closes the context without enabling the module or registering commands, listeners or tasks.
+Class scanning and bean construction can already have occurred, but do not execute this module's
+`InventoryView#getTopInventory` call in `RemoteBagContentGUI#isPageOpenBy`.
+
+| ID | Feature | Kind | How to reach | Permission | Target | Tier | Manual | Source |
+|---|---|---|---|---|---|---|---|---|
+| ultiremotebag.lifecycle.compatibility-refused | On Minecraft 1.20.6 with UltiTools 6.3.0 and `language: en`, refuse startup. Expected literal message: `UltiRemoteBag needs UltiTools 6.4.0 or later on Minecraft versions below 1.21 (server: 1.20.6-R0.1-SNAPSHOT, UltiTools: 6.3.0). Please update UltiTools.` No enabled module, commands, listeners or tasks | event | Full server start with this module installed | n/a | n/a | admin | brief | UltiRemoteBag#registerSelf, FrameworkCompatibility#evaluate |
+| ultiremotebag.lifecycle.compatibility-current-server | On Minecraft 1.21.11 with UltiTools 6.3.0 and `language: en`, enable normally. Expected literal message: `UltiRemoteBag has been enabled!`; no compatibility refusal or warning | event | Full server start with this module installed | n/a | n/a | admin | brief | UltiRemoteBag#registerSelf, FrameworkCompatibility#evaluate |
+
 `UltiRemoteBag#onUnregister()` is the extension-point hook the framework's `final`
 `UltiToolsPlugin#unregisterSelf()` invokes when this module is unloaded (`/upm uninstall UltiRemoteBag`,
 or server shutdown). It runs first; the framework then unregisters this module's commands and

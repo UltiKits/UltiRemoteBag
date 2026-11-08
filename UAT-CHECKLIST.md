@@ -137,6 +137,13 @@ that preserves the default 45-slot layout and toolbar coordinates used below.
 
 ## Lifecycle Hooks
 
+### Startup compatibility (UltiTools-Reborn#655)
+
+| ID | Preconditions | Steps | Expected | Layer | Covers |
+|---|---|---|---|---|---|
+| ultiremotebag.lifecycle.compatibility-refused | Isolated stopped Paper 1.20.6 server; UltiTools 6.3.0; this module installed; `language: en`; freshly extracted module language files; Bukkit version reports `1.20.6-R0.1-SNAPSHOT`. No other module registers `/bag`, `/remotebag`, `/rb` or `/yunbag` | 1. Start the server. 2. Read startup logs and the framework's enabled module list (`ul list`). 3. As a player try `/bag` and each alias. 4. Record module-owned command/listener/task registrations using the #655 server-matrix instrumentation | One error message, apart from the logger prefix: `UltiRemoteBag needs UltiTools 6.4.0 or later on Minecraft versions below 1.21 (server: 1.20.6-R0.1-SNAPSHOT, UltiTools: 6.3.0). Please update UltiTools.` No `UltiRemoteBag has been enabled!` line. UltiRemoteBag is absent from the enabled module list; the commands and aliases are not registered, no bag GUI opens, and module-owned listener/task registrations are zero. UltiTools itself remains enabled. Missing registration instrumentation is `blocked`, not a pass inferred only from the error line | server | UltiRemoteBag#registerSelf, FrameworkCompatibility#evaluate |
+| ultiremotebag.lifecycle.compatibility-current-server | Isolated stopped Paper 1.21.11 server; UltiTools 6.3.0; the same module build; `language: en`; freshly extracted module language files; player holds `ultibag.use` | 1. Start the server. 2. Read startup logs and run `ul list`. 3. As the player run `/bag` | Literal message, apart from the logger prefix: `UltiRemoteBag has been enabled!`. No `UltiRemoteBag needs UltiTools 6.4.0 or later` refusal and no `UltiRemoteBag could not parse` warning. UltiRemoteBag appears in the enabled module list and `/bag` opens the player's remote bag main GUI | server | UltiRemoteBag#registerSelf, FrameworkCompatibility#evaluate |
+
 These rows exercise `UltiKits/UltiRemoteBag#12`'s lifecycle-hook migration: `unregisterSelf()`
 and `reloadSelf()` are now `final` framework template methods. This module's bag save moved verbatim
 into the `onUnregister()` hook, and its log-only reload override was deleted, so `/ul reload` now runs
