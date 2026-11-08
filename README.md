@@ -297,7 +297,9 @@ With MySQL shared by several servers (UltiKits/UltiRemoteBag#54):
   of `lock.timeout_seconds`, capped at two seconds. An opening that times out is refused with "The bag could not be
   loaded. Please try again later." and releases the lock/claim acquired by that opening. A Refresh that times out
   leaves every displayed item unchanged, keeps the same window read-only and says "The bag could not be refreshed.
-  The current contents are unchanged and this view is read-only." Clicks and drags cannot move items into or out of
+  The current contents are unchanged and this view is read-only." A redraw after a refused save, lost edit rights or
+  a settled kept write that times out says instead "The bag view could not be redrawn and may not match what is
+  stored. This view is read-only; close and reopen the page to see its stored contents." Clicks and drags cannot move items into or out of
   that page, and Save, close, quit and module stop do not write that display back. A late read result is discarded;
   an unknown result is never treated as an empty page. These messages are translated in both shipped languages.
 - **When the database does not answer.** Every database call of the claim and of a page save is given up on after a
@@ -399,12 +401,14 @@ the bag tables by hand while servers are running.
 - **Crash-left save receipts are retained.** Receipt rows in `remote_bag_claims` can remain after a process crashes.
   Startup does not sweep them: a live server may still need a receipt to decide an uncertain save after another server
   took the page over. Do not delete these internal rows while any server sharing the database may still need them.
-- **A purchase races with page creation on another server** (UltiKits/UltiRemoteBag#55). If an administrator on
-  another server sharing the database creates the same player's next page after the purchase reads their pages
-  but before it creates the new page, the purchase can fail after charging the player, without an automatic refund
-  or an additional page. The page the other server created is not overwritten. Avoid creating pages for a player
-  on another server while that player is purchasing a page; if this happens, check the player's balance and stored
-  pages and reconcile the charge through your economy provider's administrative commands.
+- **A purchase races with page creation on another server** (UltiKits/UltiRemoteBag#55, #81). If an administrator
+  on another server sharing the database creates the same player's next page after the purchase reads their pages
+  but before it creates the new page, the purchase creates no page and refunds the price with one deposit; the
+  player is told, and the console logs a warning. The page the other server created is not overwritten. If the
+  economy plugin refuses or fails that refund, it is not retried: the player is told to contact an administrator,
+  and the console logs an error naming the player, page and amount — refund it through your economy provider's
+  administrative commands. A storage error while creating the page is not refunded, because whether the page was
+  written is unknown; check the player's stored pages and balance.
 - **With `require_manual_save: true`, an unsaved page closes another plugin's window** (UltiKits/UltiRemoteBag#83).
   A refused close reopens the page on the next tick and first closes whatever window is open then. If another
   plugin opens its own window (a trade window, menu or NPC dialog) while the page has unsaved changes, that window is
@@ -541,6 +545,8 @@ CREATE TABLE ulti_remote_bag (
 ### 未发布 / Unreleased
 
 - 需要 UltiTools-API 6.3.0 或更高版本（`api-version: 630`）
+- 购买背包页时若另一台服务器同时创建了该页，自动退还已扣的钱并告知玩家；退款失败只记录给服主（#81）
+- 非“刷新”按钮触发的界面重绘读取超时时，改用“界面未能重新绘制”的提示（#82）
 
 ### v1.0.0 (2026-02-15)
 

@@ -112,6 +112,24 @@ Adding or replacing a module JAR needs a server restart; `/ul reload` does not l
 
 ### Fixed
 
+- **A page purchase that loses a creation race is refunded.** When another server sharing the database creates the
+  same player's next page between the purchase's read and its insert, the purchase now gives the price back with one
+  deposit, tells the player (yellow) and logs a warning. If the economy plugin refuses or fails the refund it is not
+  retried: the player is told to contact an administrator and the console logs an error naming the player, page and
+  amount (UltiKits/UltiRemoteBag#81).
+- 购买背包页时若另一台共用数据库的服务器抢先创建了同一页，现在会以一次存款退还已扣的钱、提示玩家（黄色）并在控制台记录警告。
+  经济插件拒绝或退款出错时不会重试：提示玩家联系管理员，并在控制台记录写明玩家、页码和金额的错误（UltiKits/UltiRemoteBag#81）。
+- **A failed redraw no longer claims the contents are unchanged.** A redraw after a refused save, lost edit rights or
+  a settled kept write that times out now says the view could not be redrawn and may not match what is stored; the
+  Refresh button keeps its own message (UltiKits/UltiRemoteBag#82).
+- 拒绝保存、失去编辑权或保留的写入落定后的界面重绘读取超时时，不再声称“内容未改变”，而是提示界面未能重新绘制、可能与已保存的
+  不一致；“刷新”按钮仍使用原提示（UltiKits/UltiRemoteBag#82）。
+
+### For plugin authors
+
+- `RemoteBagService#purchasePage(Player)` returns a `PurchaseResult` (`CREATED`, `NOT_CREATED`, `REFUNDED`,
+  `REFUND_FAILED`); `purchaseBag(Player)` is unchanged and returns `true` only for `CREATED`.
+
 - **Bag pages on servers that share one database.** A bag page changed on another server sharing the database is
   no longer overwritten by an old copy held on this server, so an item taken out there no longer comes back here
   (duplicated), and an item put in there is no longer lost. Each server kept every page of a player's bag in memory

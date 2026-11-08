@@ -1211,6 +1211,115 @@ class RemoteBagServiceTest {
             }
         }
 
+        // ---- UltiKits/UltiRemoteBag#81: a purchase that loses the creation race is refunded ----
+
+        /**
+         * A paid purchase whose page another server created after this one read the bag: the first read finds
+         * no stored page (page 2 is next), the insert's own read then finds page 2 stored.
+         */
+        private Economy losingRaceEconomy(EconomyResponse.ResponseType depositOutcome) {
+            Economy economy = mock(Economy.class);
+            when(economy.has(any(OfflinePlayer.class), anyDouble())).thenReturn(true);
+            when(economy.withdrawPlayer(any(OfflinePlayer.class), anyDouble())).thenReturn(
+                    new EconomyResponse(10000, 90000, EconomyResponse.ResponseType.SUCCESS, ""));
+            lenient().when(economy.depositPlayer(any(OfflinePlayer.class), anyDouble())).thenReturn(
+                    new EconomyResponse(10000, 100000, depositOutcome, ""));
+            when(config.isEconomyEnabled()).thenReturn(true);
+            when(config.isPermissionBasedPages()).thenReturn(false);
+            when(config.getMaxPages()).thenReturn(10);
+            when(config.getBasePrice()).thenReturn(10000);
+            when(config.isPriceIncreaseEnabled()).thenReturn(false);
+            when(mockQuery.list()).thenReturn(Collections.<RemoteBagData>emptyList(),
+                    Collections.singletonList(RemoteBagData.create(playerUuid, 2, "")));
+            return economy;
+        }
+
+        @SuppressWarnings("PMD.AvoidAccessibilityAlteration")
+        private void speakKeys() throws Exception {
+            java.lang.reflect.Field pluginField = RemoteBagService.class.getDeclaredField("plugin");
+            pluginField.setAccessible(true);
+            UltiToolsPlugin plugin = (UltiToolsPlugin) pluginField.get(service);
+            lenient().when(plugin.i18n(anyString())).thenAnswer(invocation -> invocation.getArgument(0));
+        }
+
+        @Test
+        @DisplayName("A purchase that loses the creation race is refunded once, logged and reported as refunded (UltiKits/UltiRemoteBag#81)")
+        void lostCreationRaceIsRefunded() throws Exception {
+            Economy economy = losingRaceEconomy(EconomyResponse.ResponseType.SUCCESS);
+            Plugin vault = registerVaultEconomy(economy);
+            try {
+                speakKeys();
+
+                assertThat(service.purchasePage(player)).isEqualTo(RemoteBagService.PurchaseResult.REFUNDED);
+                assertThat(service.purchaseBag(player)).as("the boolean view stays false").isFalse();
+
+                verify(economy, times(2)).withdrawPlayer(eq(player), eq(10000.0));
+                verify(economy, times(2)).depositPlayer(eq(player), eq(10000.0));
+                verify(dataOperator, never()).insert(any());
+                verify(loggerOf(service), times(2)).warn("log_purchase_refunded");
+            } finally {
+                unregisterVaultEconomy(vault);
+            }
+        }
+
+        @Test
+        @DisplayName("A refund the economy refuses is logged for the operator, not retried (UltiKits/UltiRemoteBag#81)")
+        void refusedRefundIsLoggedOnce() throws Exception {
+            Economy economy = losingRaceEconomy(EconomyResponse.ResponseType.FAILURE);
+            Plugin vault = registerVaultEconomy(economy);
+            try {
+                speakKeys();
+
+                assertThat(service.purchasePage(player)).isEqualTo(RemoteBagService.PurchaseResult.REFUND_FAILED);
+
+                verify(economy, times(1)).depositPlayer(eq(player), eq(10000.0));
+                verify(loggerOf(service), times(1)).error("log_purchase_refund_failed");
+            } finally {
+                unregisterVaultEconomy(vault);
+            }
+        }
+
+        @Test
+        @DisplayName("A refund that throws is logged for the operator, not retried, and does not escape the click (UltiKits/UltiRemoteBag#81)")
+        void throwingRefundIsLoggedOnce() throws Exception {
+            Economy economy = losingRaceEconomy(EconomyResponse.ResponseType.SUCCESS);
+            when(economy.depositPlayer(any(OfflinePlayer.class), anyDouble()))
+                    .thenThrow(new IllegalStateException("economy offline"));
+            Plugin vault = registerVaultEconomy(economy);
+            try {
+                speakKeys();
+
+                assertThat(service.purchasePage(player)).isEqualTo(RemoteBagService.PurchaseResult.REFUND_FAILED);
+
+                verify(economy, times(1)).depositPlayer(eq(player), eq(10000.0));
+                verify(loggerOf(service), times(1)).error(any(Throwable.class), eq("log_purchase_refund_failed"));
+            } finally {
+                unregisterVaultEconomy(vault);
+            }
+        }
+
+        @Test
+        @DisplayName("A paid purchase that creates its page is not refunded")
+        void createdPageIsNotRefunded() throws Exception {
+            Economy economy = mock(Economy.class);
+            when(economy.has(any(OfflinePlayer.class), anyDouble())).thenReturn(true);
+            when(economy.withdrawPlayer(any(OfflinePlayer.class), anyDouble())).thenReturn(
+                    new EconomyResponse(10000, 90000, EconomyResponse.ResponseType.SUCCESS, ""));
+            Plugin vault = registerVaultEconomy(economy);
+            try {
+                when(config.isEconomyEnabled()).thenReturn(true);
+                when(config.isPermissionBasedPages()).thenReturn(false);
+                when(config.getMaxPages()).thenReturn(10);
+                when(config.getBasePrice()).thenReturn(10000);
+                when(config.isPriceIncreaseEnabled()).thenReturn(false);
+
+                assertThat(service.purchasePage(player)).isEqualTo(RemoteBagService.PurchaseResult.CREATED);
+                verify(economy, never()).depositPlayer(any(OfflinePlayer.class), anyDouble());
+            } finally {
+                unregisterVaultEconomy(vault);
+            }
+        }
+
         // ---- UltiKits/UltiRemoteBag#46: one page number for the limit check, the price and the created page ----
 
         /** Pages {1, 3}: an administrator deleted page 2. The page a purchase creates is page 4 (max + 1). */

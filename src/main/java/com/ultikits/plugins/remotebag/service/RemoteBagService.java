@@ -615,18 +615,52 @@ public class RemoteBagService {
     }
     
     /**
+     * What a page purchase did, so the window can tell the player what happened to their money.
+     */
+    public enum PurchaseResult {
+        /** The page was created (and paid for, when pages cost money). */
+        CREATED,
+        /** No page was created and no money moved: over the page limit, or the payment was refused. */
+        NOT_CREATED,
+        /**
+         * The payment was taken, then the page could not be created because another server sharing the database
+         * created that page number first; the payment was given back (UltiKits/UltiRemoteBag#81).
+         */
+        REFUNDED,
+        /** As {@link #REFUNDED}, but giving the payment back failed; the console says so for the operator. */
+        REFUND_FAILED
+    }
+
+    /**
      * 玩家购买新背包
      *
      * @param player 玩家
      * @return 购买是否成功
+     * @see #purchasePage(Player)
      */
     public boolean purchaseBag(Player player) {
+        return purchasePage(player) == PurchaseResult.CREATED;
+    }
+
+    /**
+     * Buys (or, while pages are free, creates) the player's next page.
+     * <p>
+     * A paid purchase whose page is not created after the payment was taken -- another server sharing the database
+     * created the same page number between this server's read and its insert -- gives the payment back with one
+     * deposit and logs it; a refund the economy refuses or that throws is logged as an error for the operator and
+     * not retried (UltiKits/UltiRemoteBag#81). A storage failure while creating the page propagates as before and is
+     * not refunded: whether the row was written is unknown.
+     *
+     * @param player the buyer
+     * @return what happened
+     */
+    public PurchaseResult purchasePage(Player player) {
         // Which pages exist, the price and the page created are decided on what is stored now: another
         // server may have added a page since this one read the bag (UltiKits/UltiRemoteBag#54).
         refreshBag(player.getUniqueId());
         if (!config.isEconomyEnabled() || !EconomyUtils.isAvailable()) {
             // 经济系统未启用，直接创建背包
-            return createNewBagPage(player);
+            return createNewBagPage(player) ? PurchaseResult.CREATED : PurchaseResult.NOT_CREATED;
         }
         
         List<Integer> existingPages = pagesOfferedToOwner(getPlayerBagPages(player.getUniqueId()));
@@ -635,18 +669,63 @@ public class RemoteBagService {
         // 检查是否超过上限
         int maxPages = getPlayerMaxPages(player);
         if (nextBagNum > maxPages) {
-            return false;
+            return PurchaseResult.NOT_CREATED;
         }
         
         int price = calculatePrice(nextBagNum);
         
         // 扣款
         if (!EconomyUtils.withdraw(player, price)) {
-            return false;
+            return PurchaseResult.NOT_CREATED;
         }
         
         // 创建新背包页
-        return createNewBagPage(player);
+        if (createNewBagPage(player)) {
+            return PurchaseResult.CREATED;
+        }
+        return refundLostPurchase(player, nextBagNum, price);
+    }
+
+    /** The economy's text for {@code price}, or the plain number when the economy cannot format it. */
+    private static String formatAmount(int price) {
+        try {
+            String text = EconomyUtils.format(price);
+            return text == null ? String.valueOf(price) : text;
+        } catch (RuntimeException e) {
+            return String.valueOf(price);
+        }
+    }
+
+    /** Give back a payment whose page was not created; one deposit, never retried (UltiKits/UltiRemoteBag#81). */
+    private PurchaseResult refundLostPurchase(Player player, int page, int price) {
+        boolean refunded;
+        RuntimeException failure = null;
+        try {
+            refunded = EconomyUtils.deposit(player, price);
+        } catch (RuntimeException e) {
+            refunded = false;
+            failure = e;
+        }
+        String amount = formatAmount(price);
+        if (refunded) {
+            plugin.getLogger().warn(plugin.i18n("log_purchase_refunded")
+                    .replace("{PLAYER}", player.getName())
+                    .replace("{UUID}", player.getUniqueId().toString())
+                    .replace("{PAGE}", String.valueOf(page))
+                    .replace("{AMOUNT}", amount));
+            return PurchaseResult.REFUNDED;
+        }
+        String line = plugin.i18n("log_purchase_refund_failed")
+                .replace("{PLAYER}", player.getName())
+                .replace("{UUID}", player.getUniqueId().toString())
+                .replace("{PAGE}", String.valueOf(page))
+                .replace("{AMOUNT}", amount);
+        if (failure != null) {
+            plugin.getLogger().error(failure, line);
+        } else {
+            plugin.getLogger().error(line);
+        }
+        return PurchaseResult.REFUND_FAILED;
     }
     
     /**
