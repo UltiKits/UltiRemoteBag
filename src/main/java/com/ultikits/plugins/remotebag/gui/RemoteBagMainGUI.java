@@ -225,10 +225,24 @@ public class RemoteBagMainGUI extends BasePaginationPage {
                 refreshAfterPriceChange();
                 return;
             }
-            if (bagService.purchaseBag(player)) {
+            RemoteBagService.PurchaseResult result = bagService.purchasePage(player);
+            if (result == RemoteBagService.PurchaseResult.CREATED) {
                 SoundUtil.playPurchaseSound(player, config);
                 player.sendMessage(ChatColor.GREEN + plugin.i18n("purchase_success").replace("{0}", String.valueOf(nextBagNum)));
                 // 刷新 GUI
+                new RemoteBagMainGUI(player, plugin, bagService, lockService, config).open();
+            } else if (result == RemoteBagService.PurchaseResult.REFUNDED
+                    || result == RemoteBagService.PurchaseResult.REFUND_FAILED) {
+                // Another server created this page first; the payment was given back, or the operator was told
+                // that giving it back failed (UltiKits/UltiRemoteBag#81). Redraw to show the page that now exists.
+                SoundUtil.playErrorSound(player, config);
+                if (result == RemoteBagService.PurchaseResult.REFUNDED) {
+                    player.sendMessage(ChatColor.YELLOW + plugin.i18n("purchase_refunded")
+                            .replace("{0}", EconomyUtils.format(finalPrice)));
+                } else {
+                    player.sendMessage(ChatColor.RED + plugin.i18n("purchase_refund_failed")
+                            .replace("{0}", EconomyUtils.format(finalPrice)));
+                }
                 new RemoteBagMainGUI(player, plugin, bagService, lockService, config).open();
             } else {
                 SoundUtil.playErrorSound(player, config);

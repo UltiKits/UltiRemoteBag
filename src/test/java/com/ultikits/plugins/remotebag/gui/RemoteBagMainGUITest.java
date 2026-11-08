@@ -414,6 +414,7 @@ class RemoteBagMainGUITest {
                 click(paid);
 
                 verify(bagService, never()).purchaseBag(player);
+                verify(bagService, never()).purchasePage(player);
                 verify(player).sendMessage(contains("bag_price_changed"));
             }
         }
@@ -667,7 +668,7 @@ class RemoteBagMainGUITest {
             RemoteBagConfig cfg = UltiRemoteBagTestHelper.createDefaultConfig();
             when(cfg.isEconomyEnabled()).thenReturn(true);
             when(mockPlugin.i18n("purchase_success")).thenReturn("bought bag #{0}");
-            when(bagService.purchaseBag(player)).thenReturn(true);
+            when(bagService.purchasePage(player)).thenReturn(RemoteBagService.PurchaseResult.CREATED);
             try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
                 econMock.when(EconomyUtils::isAvailable).thenReturn(true);
                 econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(1000000.0);
@@ -683,6 +684,36 @@ class RemoteBagMainGUITest {
                 click(icons.get(2));
 
                 verify(player).sendMessage(contains("bought bag #4"));
+            }
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest(name = "{0} -> {1}")
+        @org.junit.jupiter.params.provider.CsvSource({
+                "REFUNDED,      purchase_refunded",
+                "REFUND_FAILED, purchase_refund_failed",
+                "NOT_CREATED,   purchase_failed"
+        })
+        @DisplayName("A purchase that created no page names what happened to the money (UltiKits/UltiRemoteBag#81)")
+        void unsuccessfulPurchaseMessages(RemoteBagService.PurchaseResult result, String key) throws Exception {
+            RemoteBagConfig cfg = UltiRemoteBagTestHelper.createDefaultConfig();
+            when(cfg.isEconomyEnabled()).thenReturn(true);
+            when(bagService.calculatePrice(4)).thenReturn(500);
+            when(bagService.purchasePage(player)).thenReturn(result);
+            try (MockedStatic<EconomyUtils> econMock = mockStatic(EconomyUtils.class)) {
+                econMock.when(EconomyUtils::isAvailable).thenReturn(true);
+                econMock.when(() -> EconomyUtils.getBalance(any(Player.class))).thenReturn(1000000.0);
+                econMock.when(() -> EconomyUtils.format(anyDouble())).thenReturn("$500");
+
+                List<Icon> icons = provide(cfg, 10);
+                click(icons.get(2));
+
+                verify(player).sendMessage(contains(key));
+                for (String other : new String[] {"purchase_refunded", "purchase_refund_failed", "purchase_failed"}) {
+                    if (!other.equals(key)) {
+                        verify(player, never()).sendMessage(contains(other));
+                    }
+                }
+                verify(player, never()).sendMessage(contains("purchase_success"));
             }
         }
 

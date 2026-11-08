@@ -852,8 +852,13 @@ class RemoteBagContentGUIInteractionMatrixTest {
         return event;
     }
 
+    /**
+     * The no-argument redraw is what a refused save, lost edit rights and a settled kept write call; it is not the
+     * Refresh button, so its failure must not say "could not be refreshed ... contents are unchanged"
+     * (UltiKits/UltiRemoteBag#82 item 1).
+     */
     @Test
-    void refreshTimeoutKeepsContentsReadOnlyAndNeverWritesThemBack() throws Exception {
+    void redrawTimeoutKeepsContentsReadOnlyAndNeverWritesThemBack() throws Exception {
         RemoteBagContentGUI gui = openGuiHoldingDiamond(AccessMode.EDIT);
         lenient().when(bagService.readPage(ownerUuid, PAGE)).thenThrow(
                 new java.util.concurrent.CompletionException(new java.util.concurrent.TimeoutException("read")));
@@ -877,7 +882,8 @@ class RemoteBagContentGUIInteractionMatrixTest {
         org.mockito.Mockito.verify(bagService, org.mockito.Mockito.never()).savePage(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
-        assertThat(viewer.nextMessage()).contains("msg_bag_refresh_failed");
+        String message = viewer.nextMessage();
+        assertThat(message).contains("msg_bag_redraw_failed").doesNotContain("msg_bag_refresh_failed");
     }
 
     @Test

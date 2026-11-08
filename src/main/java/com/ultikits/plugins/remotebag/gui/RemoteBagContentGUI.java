@@ -241,10 +241,22 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
      * administrator can still act on the wrong picture.
      */
     private void loadBagContents() {
-        loadBagContents(false);
+        loadBagContents(Load.REDRAW);
     }
 
+    /**
+     * Why the page is being read, which decides the message a timed-out read gives: opening the page, the Refresh
+     * button, or a redraw after a refused save, lost edit rights or a settled kept write. A redraw that fails may show
+     * items that are no longer in the bag (put-ins a refused save gave back), so it must not claim the contents are
+     * unchanged (UltiKits/UltiRemoteBag#82 item 1).
+     */
+    private enum Load { OPEN, REFRESH, REDRAW }
+
     private boolean loadBagContents(boolean opening) {
+        return loadBagContents(opening ? Load.OPEN : Load.REFRESH);
+    }
+
+    private boolean loadBagContents(Load load) {
         BagEditClaimService claims = lockService.getClaimService();
         ItemStack[] keptContent = claims == null || isEditable() ? null : claims.keptItems(ownerUuid, pageNum);
         ItemStack[] contents;
@@ -265,8 +277,19 @@ public class RemoteBagContentGUI extends BaseInventoryPage {
                 // Unlike a failed save/renewal this read has no write to keep or items to return.
                 editRightsLost = true;
                 SoundUtil.playErrorSound(player, config);
-                player.sendMessage(ChatColor.RED + (opening ? plugin.i18n("msg_bag_load_failed")
-                        : plugin.i18n("msg_bag_refresh_failed")));
+                String message;
+                switch (load) {
+                    case OPEN:
+                        message = plugin.i18n("msg_bag_load_failed");
+                        break;
+                    case REFRESH:
+                        message = plugin.i18n("msg_bag_refresh_failed");
+                        break;
+                    default:
+                        message = plugin.i18n("msg_bag_redraw_failed");
+                        break;
+                }
+                player.sendMessage(ChatColor.RED + message);
                 return false;
             }
         }
