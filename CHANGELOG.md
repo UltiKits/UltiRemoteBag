@@ -5,7 +5,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 本文件记录本项目的所有重要更改，格式基于 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)。
 
-## [Unreleased]
+## [2.1.0] - 2026-11-09
 
 **Do not downgrade to 2.0.0 after any page has used a sixth content row.** 2.0.0 shows and saves only slots
 0–44 of a page, so items in slots 45–53 (the sixth row, `content_rows: 6`, or a page that retained six rows
@@ -37,6 +37,20 @@ the sixth row of every page (or set `content_rows` to 5 or less and empty each p
   模块，不会改写服主的配置文件。已移除的 `rows_per_page` 仍被忽略。重载只影响之后新打开的窗口（UltiKits/UltiRemoteBag#38）。
 - 启用 `require_manual_save: true`（UltiKits/UltiRemoteBag#37）时，未保存改动的检查覆盖该页的所有内容屏：当前未显示的屏上有改动，
   关闭同样会被拒绝；在页内切换内容屏不算离开页面，不会被拒绝（UltiKits/UltiRemoteBag#38）。
+- **Opt-in manual saving** with the new `require_manual_save` setting in `config/remotebag.yml` (default `false`,
+  unchanged behaviour). When it is `true`, closing or leaving a page with unsaved changes is refused: the window
+  reopens on the next tick with "Save this page before closing or leaving it", and the claim is kept. Save (or
+  `/bag save` for your own bag) saves it. Quit and module stop still save for safety; if the window cannot reopen,
+  its changes are saved instead. The removed `save_on_close` key stays ignored (UltiKits/UltiRemoteBag#37).
+- **Start-up check for older servers.** On a server below Minecraft 1.21 the module now refuses to start unless
+  UltiTools is 6.4.0 or later, and logs an error naming both versions ("UltiRemoteBag needs UltiTools 6.4.0 or later
+  on Minecraft versions below 1.21"). If either version cannot be read, it logs a warning and starts. On Minecraft
+  1.21 and later nothing changes (UltiKits/UltiTools-Reborn#655).
+- **可选的手动保存**：`config/remotebag.yml` 新增 `require_manual_save`（默认 `false`，行为不变）。设为 `true` 时，关闭或离开有未保存改动的页面
+  会被拒绝：窗口在下一刻重新打开并提示先保存，编辑占用保留；点击「保存」（或对自己的背包使用 `/bag save`）即可保存。退出和模块停止仍会为安全
+  而保存；窗口无法重新打开时改为保存其改动。已移除的 `save_on_close` 仍被忽略（UltiKits/UltiRemoteBag#37）。
+- **低版本服务器的启动检查**：在低于 Minecraft 1.21 的服务器上，除非 UltiTools 为 6.4.0 或更高版本，本模块现在会拒绝启动，并在控制台记录写明
+  两个版本号的错误；任一版本号无法解析时只记录警告并继续启动。Minecraft 1.21 及以上不受影响（UltiKits/UltiTools-Reborn#655）。
 
 ### Changed
 
@@ -48,6 +62,39 @@ the sixth row of every page (or set `content_rows` to 5 or less and empty each p
 - **面向插件作者：** `RemoteBagService#readPage(UUID, int)` 现在最多等待一段有限时间（约两秒，若 `lock.timeout_seconds` 的六分之一更短则取其值），
   存储读取失败或超时时抛出 `java.util.concurrent.CompletionException`。读取失败绝不会以空页返回；请捕获该异常并稍后重试，
   不要把页面当作空页处理（UltiKits/UltiRemoteBag#57、#82）。
+- **For plugin authors:** `RemoteBagService#purchasePage(Player)` returns a `PurchaseResult` (`CREATED`, `NOT_CREATED`, `REFUNDED`,
+  `REFUND_FAILED`); `purchaseBag(Player)` is unchanged and returns `true` only for `CREATED`.
+- **面向插件作者：** `RemoteBagService#purchasePage(Player)` 返回 `PurchaseResult`（`CREATED`、`NOT_CREATED`、`REFUNDED`、
+  `REFUND_FAILED`）；`purchaseBag(Player)` 不变，只在 `CREATED` 时返回 `true`。
+- The project now ships an MIT `LICENSE` file and declares the licence in its POM (UltiKits/UltiRemoteBag#79).
+- 项目现在附带 MIT `LICENSE` 文件，并在 POM 中声明该许可证（UltiKits/UltiRemoteBag#79）。
+- README clarifications: page saving and upgrade notes, the cross-server purchase race, editing the official
+  language files, and the manual-save limitation (UltiKits/UltiRemoteBag#68, #55, #53, #83).
+- README 补充说明：页面保存与升级注意事项、跨服务器购买竞争、修改官方语言文件，以及手动保存的限制
+  （UltiKits/UltiRemoteBag#68、#55、#53、#83）。
+
+### Fixed
+
+- **A page whose contents cannot be read is no longer opened.** Reading a content page on open or Refresh waits at
+  most a sixth of `lock.timeout_seconds` (at most two seconds). An open that times out is refused with "The bag could
+  not be loaded. Please try again later." and releases the claim it took; a Refresh that times out keeps the shown
+  items, turns the window read-only and writes nothing back. Module stop now waits (bounded) for outstanding claim
+  releases, and the display cache is safe across threads (UltiKits/UltiRemoteBag#57).
+- 内容页读取失败时不再打开。打开或刷新内容页时最多等待 `lock.timeout_seconds` 的六分之一（上限两秒）；打开超时会被拒绝，提示「背包加载失败，
+  请稍后重试。」，并释放本次取得的占用；刷新超时保留当前显示的物品、窗口变为只读且不回写。模块停止时会在有限时间内等待尚未完成的占用释放，
+  显示缓存在多线程下安全（UltiKits/UltiRemoteBag#57）。
+- **A page purchase that loses a creation race is refunded.** When another server sharing the database creates the
+  same player's next page between the purchase's read and its insert, the purchase now gives the price back with one
+  deposit, tells the player (yellow) and logs a warning. If the economy plugin refuses or fails the refund it is not
+  retried: the player is told to contact an administrator and the console logs an error naming the player, page and
+  amount (UltiKits/UltiRemoteBag#81).
+- 购买背包页时若另一台共用数据库的服务器抢先创建了同一页，现在会以一次存款退还已扣的钱、提示玩家（黄色）并在控制台记录警告。
+  经济插件拒绝或退款出错时不会重试：提示玩家联系管理员，并在控制台记录写明玩家、页码和金额的错误（UltiKits/UltiRemoteBag#81）。
+- **A failed redraw no longer claims the contents are unchanged.** A redraw after a refused save, lost edit rights or
+  a settled kept write that times out now says the view could not be redrawn and may not match what is stored; the
+  Refresh button keeps its own message (UltiKits/UltiRemoteBag#82).
+- 拒绝保存、失去编辑权或保留的写入落定后的界面重绘读取超时时，不再声称“内容未改变”，而是提示界面未能重新绘制、可能与已保存的
+  不一致；“刷新”按钮仍使用原提示（UltiKits/UltiRemoteBag#82）。
 
 ## [2.0.0] - 2026-10-21
 
@@ -111,24 +158,6 @@ Adding or replacing a module JAR needs a server restart; `/ul reload` does not l
   与未保存的窗口相同（见 README“已知限制”）（UltiKits/UltiRemoteBag#54）。
 
 ### Fixed
-
-- **A page purchase that loses a creation race is refunded.** When another server sharing the database creates the
-  same player's next page between the purchase's read and its insert, the purchase now gives the price back with one
-  deposit, tells the player (yellow) and logs a warning. If the economy plugin refuses or fails the refund it is not
-  retried: the player is told to contact an administrator and the console logs an error naming the player, page and
-  amount (UltiKits/UltiRemoteBag#81).
-- 购买背包页时若另一台共用数据库的服务器抢先创建了同一页，现在会以一次存款退还已扣的钱、提示玩家（黄色）并在控制台记录警告。
-  经济插件拒绝或退款出错时不会重试：提示玩家联系管理员，并在控制台记录写明玩家、页码和金额的错误（UltiKits/UltiRemoteBag#81）。
-- **A failed redraw no longer claims the contents are unchanged.** A redraw after a refused save, lost edit rights or
-  a settled kept write that times out now says the view could not be redrawn and may not match what is stored; the
-  Refresh button keeps its own message (UltiKits/UltiRemoteBag#82).
-- 拒绝保存、失去编辑权或保留的写入落定后的界面重绘读取超时时，不再声称“内容未改变”，而是提示界面未能重新绘制、可能与已保存的
-  不一致；“刷新”按钮仍使用原提示（UltiKits/UltiRemoteBag#82）。
-
-### For plugin authors
-
-- `RemoteBagService#purchasePage(Player)` returns a `PurchaseResult` (`CREATED`, `NOT_CREATED`, `REFUNDED`,
-  `REFUND_FAILED`); `purchaseBag(Player)` is unchanged and returns `true` only for `CREATED`.
 
 - **Bag pages on servers that share one database.** A bag page changed on another server sharing the database is
   no longer overwritten by an old copy held on this server, so an item taken out there no longer comes back here
